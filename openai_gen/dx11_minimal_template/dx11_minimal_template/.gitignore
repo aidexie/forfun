@@ -1,0 +1,12 @@
+/build/
+/out/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+*.pdb
+*.ipdb
+*.iobj
+*.obj
+*.log
+/.vs/

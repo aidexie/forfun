@@ -1,0 +1,16 @@
+# 例子：C/C++ + VSCode + macOS
+cat > .gitignore << 'EOF'
+# build & temp
+build/
+dist/
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+EOF
