@@ -1,24 +1,60 @@
 
-cmake_minimum_required(VERSION 3.20)
-project(ForFun_Refactored LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if (NOT WIN32)
+    message(FATAL_ERROR "This sample targets Windows (DX11).")
+endif()
+if (MSVC)
+    add_compile_options(/utf-8)
+endif()
+set(CODE_PATH E:/forfun/source/code)
+set(THIRD_PARTY_PATH E:/forfun/thirdparty)
+set(IMGUI_DIR ${THIRD_PARTY_PATH}/imgui)
+set(IMGUI_BACK ${IMGUI_DIR}/backends)
 
-add_executable(forfun_refactored
-    WinMain.cpp
-    # Engine layer
-    Camera.h Camera.cpp
-    Update.h Update.cpp
-    Render.h Render.cpp
-    # Core (legacy from your project)
-    Renderer.h Renderer.cpp
-    Mesh.h Mesh.cpp
-    ObjLoader.h ObjLoader.cpp
-    GltfLoader.h GltfLoader.cpp
-    TextureLoader.h TextureLoader.cpp
+add_library(imgui_docking STATIC
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_BACK}/imgui_impl_win32.cpp
+    ${IMGUI_BACK}/imgui_impl_dx11.cpp
+)
+target_include_directories(imgui_docking PUBLIC
+    ${IMGUI_DIR}
+    ${IMGUI_BACK}
+)
+target_compile_definitions(imgui_docking PUBLIC
+    IMGUI_DEFINE_MATH_OPERATORS
+)
+if (MSVC)
+    target_compile_options(imgui_docking PRIVATE /utf-8)
+endif()
+
+file(GLOB CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
+file(GLOB ENGINE_SRC ${CODE_PATH}/Engine/*.cpp ${CODE_PATH}/Engine/*.h)
+set(EDITOR_SRC
+    ${CODE_PATH}/Editor/Panels.h
+    ${CODE_PATH}/Editor/Panels_Dockspace.cpp
+    ${CODE_PATH}/Editor/HierarchyPanel.cpp
+    ${CODE_PATH}/Editor/InspectorPanel.cpp
+    ${CODE_PATH}/Editor/ViewportPanel.cpp
 )
 
-if (MSVC)
-  target_compile_definitions(forfun_refactored PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-  target_link_libraries(forfun_refactored PRIVATE d3d11 dxgi d3dcompiler windowscodecs)
-endif()
+add_executable(forfun WIN32
+    ${CORE_SRC} ${ENGINE_SRC}
+    ${EDITOR_SRC}
+    ${CODE_PATH}/main.cpp
+)
+target_include_directories(forfun PRIVATE
+    ${CODE_PATH}/Core 
+    ${CODE_PATH}/Engine 
+    ${CODE_PATH}/Editor
+    ${THIRD_PARTY_PATH}/cgltf-master
+)
+target_compile_definitions(forfun PRIVATE UNICODE _UNICODE)
+target_link_libraries(forfun
+    PRIVATE
+        imgui_docking
+        d3d11 dxgi d3dcompiler
+)

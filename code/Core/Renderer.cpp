@@ -1,5 +1,4 @@
-﻿
-#include "Renderer.h"
+﻿#include "Renderer.h"
 #include "ObjLoader.h"
 #include "TextureLoader.h"
 #include "GltfLoader.h"
@@ -8,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <d3d11.h>
+#include <d3dcompiler.h>
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
@@ -33,55 +34,19 @@ static float getDeltaTime() {
     return d.count();
 }
 
-bool Renderer::Initialize(HWND hwnd, UINT width, UINT height)
+bool Renderer::Initialize(ID3D11Device* device, ID3D11DeviceContext* context, UINT width, UINT height)
 {
-    m_width = width; m_height = height;
+    m_device  = device;
+    m_context = context;
+    m_width   = width;
+    m_height  = height;
 
-    DXGI_SWAP_CHAIN_DESC sd{};
-    sd.BufferDesc.Width  = m_width;
-    sd.BufferDesc.Height = m_height;
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.SampleDesc.Count = 1;
-    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.BufferCount = 2;
-    sd.OutputWindow = hwnd;
-    sd.Windowed = TRUE;
-    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    UINT flags = 0;
-#if defined(_DEBUG)
-    flags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
-    D3D_FEATURE_LEVEL levels[] = {
-        D3D_FEATURE_LEVEL_11_1,
-        D3D_FEATURE_LEVEL_11_0,
-        D3D_FEATURE_LEVEL_10_1,
-        D3D_FEATURE_LEVEL_10_0,
-    };
-    if (FAILED(D3D11CreateDeviceAndSwapChain(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
-        levels, _countof(levels), D3D11_SDK_VERSION,
-        &sd, m_swapchain.GetAddressOf(),
-        m_device.GetAddressOf(), &m_featureLevel,
-        m_context.GetAddressOf()))) {
-        MessageBoxA(nullptr, "D3D11CreateDeviceAndSwapChain failed", "Error", MB_ICONERROR);
-        return false;
-    }
-
-    createBackbufferAndDepth(m_width, m_height);
+    // --- 管线与状态 ---
     createPipeline();
     createRasterStates();
 
-    // Load textures if present
-    LoadTextureWIC(m_device.Get(), L"bunny-pbr-gltf/textures/DefaultMaterial_baseColor.png", m_albedoSRV, true);
-    LoadTextureWIC(m_device.Get(), L"bunny-pbr-gltf/textures/DefaultMaterial_normal.png", m_normalSRV, false);
-
-    // Load OBJ bunny
-    // tryLoadOBJ("assets/bunny.obj", true, true, 2.0f, XMMatrixIdentity());
-
-    // 1) 创建默认兜底纹理（避免采样到空 SRV 全黑）
+    // --- 默认兜底纹理 ---
     auto MakeSolidSRV = [&](uint8_t r,uint8_t g,uint8_t b,uint8_t a, DXGI_FORMAT fmt){
-        using Microsoft::WRL::ComPtr;
         D3D11_TEXTURE2D_DESC td{}; td.Width=1; td.Height=1; td.MipLevels=1; td.ArraySize=1;
         td.Format=fmt; td.SampleDesc.Count=1; td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
         uint32_t px = (uint32_t(r) | (uint32_t(g)<<8) | (uint32_t(b)<<16) | (uint32_t(a)<<24));
@@ -92,39 +57,36 @@ bool Renderer::Initialize(HWND hwnd, UINT width, UINT height)
         ComPtr<ID3D11ShaderResourceView> srv; m_device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
         return srv;
     };
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> whiteSRV      = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> flatNormalSRV = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
+    m_albedoSRV = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
+    m_normalSRV = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
 
-    // 2) 加载 glTF（工作目录已设为 E:/forfun/assets，直接写相对路径）
-    auto cur_path = std::filesystem::current_path();
+    // --- 加载 glTF bunny（与你旧实现一致） ---
     std::vector<GltfMeshCPU> gltfMeshes;
     if (!LoadGLTF_PNT("bunny-pbr-gltf/scene_small.gltf", gltfMeshes, /*flipZ_to_LH=*/true, /*flipWinding=*/true)) {
         MessageBoxA(nullptr, "Failed to load bunny.gltf", "Error", MB_ICONERROR);
         return false;
     }
-
-    // 3) 上传每个 primitive，并各自加载贴图
     for (auto& m : gltfMeshes) {
-        GpuMesh gm = upload(m.mesh);   // 你已有的上传函数，返回填好 vbo/ibo/indexCount
+        GpuMesh gm = upload(m.mesh);
         gm.world = DirectX::XMMatrixIdentity();
 
         // albedo（sRGB）
         if (!m.textures.baseColorPath.empty()) {
-            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
-            LoadTextureWIC(m_device.Get(),
+            ComPtr<ID3D11ShaderResourceView> srv;
+            LoadTextureWIC(m_device,
                 std::wstring(m.textures.baseColorPath.begin(), m.textures.baseColorPath.end()),
                 srv, /*srgb=*/true);
-            gm.albedoSRV = srv ? srv : whiteSRV;
-        } else gm.albedoSRV = whiteSRV;
+            gm.albedoSRV = srv ? srv : m_albedoSRV;
+        } else gm.albedoSRV = m_albedoSRV;
 
         // normal（线性）
         if (!m.textures.normalPath.empty()) {
-            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
-            LoadTextureWIC(m_device.Get(),
+            ComPtr<ID3D11ShaderResourceView> srv;
+            LoadTextureWIC(m_device,
                 std::wstring(m.textures.normalPath.begin(), m.textures.normalPath.end()),
                 srv, /*srgb=*/false);
-            gm.normalSRV = srv ? srv : flatNormalSRV;
-        } else gm.normalSRV = flatNormalSRV;
+            gm.normalSRV = srv ? srv : m_normalSRV;
+        } else gm.normalSRV = m_normalSRV;
 
         m_meshes.push_back(std::move(gm));
     }
@@ -168,36 +130,6 @@ bool Renderer::tryLoadOBJ(const std::string& path, bool flipZ, bool flipWinding,
     return true;
 }
 
-void Renderer::createBackbufferAndDepth(UINT w, UINT h)
-{
-    ComPtr<ID3D11Texture2D> back;
-    m_swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)back.GetAddressOf());
-    m_device->CreateRenderTargetView(back.Get(), nullptr, m_rtv.GetAddressOf());
-
-    D3D11_TEXTURE2D_DESC td{};
-    td.Width = w; td.Height = h;
-    td.MipLevels = 1; td.ArraySize = 1;
-    td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    td.SampleDesc.Count = 1;
-    td.Usage = D3D11_USAGE_DEFAULT;
-    td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    m_device->CreateTexture2D(&td, nullptr, m_depthTex.GetAddressOf());
-    m_device->CreateDepthStencilView(m_depthTex.Get(), nullptr, m_dsv.GetAddressOf());
-
-    D3D11_DEPTH_STENCIL_DESC ds{};
-    ds.DepthEnable = TRUE;
-    ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-    ds.DepthFunc = D3D11_COMPARISON_LESS;
-    m_device->CreateDepthStencilState(&ds, m_dss.GetAddressOf());
-}
-
-void Renderer::destroyBackbufferAndDepth()
-{
-    m_dsv.Reset();
-    m_depthTex.Reset();
-    m_rtv.Reset();
-}
-
 void Renderer::createPipeline()
 {
     static const char* kVS = R"(
@@ -237,9 +169,6 @@ void Renderer::createPipeline()
         Texture2D gNormal : register(t1);
         SamplerState gSamp: register(s0);
 
-        float3 SRGBToLinear(float3 c){ return pow(c, 2.2); }
-        float3 LinearToSRGB(float3 c){ return pow(saturate(c), 1.0/2.2); }
-
         cbuffer CB_Frame  : register(b0) {
             float4x4 gView;
             float4x4 gProj;
@@ -260,7 +189,6 @@ void Renderer::createPipeline()
         float4 main(PSIn i):SV_Target{
             float3 albedo = gAlbedo.Sample(gSamp, i.uv).rgb;
             float3 nTS    = gNormal.Sample(gSamp, i.uv).xyz * 2.0 - 1.0;
-            // nTS.y = -nTS.y; // enable if needed
             nTS.xy *= gNormalScale;
             nTS = normalize(nTS);
             float3 nWS = normalize(mul(nTS, i.TBN));
@@ -275,8 +203,7 @@ void Renderer::createPipeline()
             float3 spec = gSpecIntensity * pow(NdotH, gSpecPower) * NdotL * gLightColor;
 
             float3 colorLin = gAmbient * albedo + diff + spec;
-            //return float4( nTS, 1.0 );
-            return float4( colorLin, 1.0 );
+            return float4(colorLin, 1.0);
         }
     )";
     UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
@@ -372,32 +299,26 @@ void Renderer::updateInput(float dt)
     if (down('R')) { ResetCameraLookAt(XMFLOAT3(-6.0f,0.8f,0.0f), XMFLOAT3(0,0,0)); }
 }
 
-void Renderer::Resize(UINT width, UINT height)
+void Renderer::SetSize(UINT width, UINT height)
 {
-    if (!m_swapchain) return;
-    m_width = width; m_height = height;
-    m_context->OMSetRenderTargets(0, nullptr, nullptr);
-    destroyBackbufferAndDepth();
-    m_swapchain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
-    createBackbufferAndDepth(width, height);
-    createRasterStates();
+    m_width = width;
+    m_height = height;
 }
 
-void Renderer::Render()
+void Renderer::Render(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, float dt)
 {
-    float dt = getDeltaTime();
     updateInput(dt);
 
-    m_context->RSSetState(m_rsSolid.Get());
-
+    // 绑定视口与目标（在这里绑定，保证调用者不用关心顺序）
     D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_width; vp.Height=(FLOAT)m_height; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
     m_context->RSSetViewports(1, &vp);
-    FLOAT clear[4] = { 0.05f, 0.06f, 0.10f, 1.0f };
-    m_context->OMSetRenderTargets(1, m_rtv.GetAddressOf(), m_dsv.Get());
-    m_context->ClearRenderTargetView(m_rtv.Get(), clear);
-    m_context->ClearDepthStencilView(m_dsv.Get(), D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL, 1.0f, 0);
-    m_context->OMSetDepthStencilState(m_dss.Get(), 0);
+    m_context->RSSetState(m_rsSolid.Get());
+    m_context->OMSetRenderTargets(1, &rtv, dsv);
 
+    // 清深度（颜色清除放在外面做也行；这里只清深度，避免覆盖 UI 背景色选择）
+    if (dsv) m_context->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+    // 绑定管线
     m_context->IASetInputLayout(m_inputLayout.Get());
     m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_context->VSSetShader(m_vs.Get(), nullptr, 0);
@@ -407,21 +328,18 @@ void Renderer::Render()
     m_context->PSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
     m_context->PSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
     m_context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
-    ID3D11ShaderResourceView* srvs[2] = { m_albedoSRV.Get(), m_normalSRV.Get() };
-    m_context->PSSetShaderResources(0, 2, srvs);
 
     // Camera
     float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
-    float cp = std::cos(m_pitch), sp = std::sin(m_pitch);
+    float cp = std::cos(m_pitch), sp = std::cos(m_pitch) == 0.f ? 0.f : std::sin(m_pitch);
     XMVECTOR eye = XMLoadFloat3(&m_camPos);
     XMVECTOR forward = XMVector3Normalize(XMVectorSet(cp*cy, sp, cp*sy, 0.0f));
     XMVECTOR at  = eye + forward;
     XMVECTOR up  = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     XMMATRIX view = XMMatrixLookAtLH(eye, at, up);
-    float aspect = (float)m_width / (float)m_height;
+    float aspect = (m_height > 0) ? (float)m_width / (float)m_height : 1.0f;
     XMMATRIX proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
 
-    // Frame constants
     CB_Frame cf{};
     cf.view = XMMatrixTranspose(view);
     cf.proj = XMMatrixTranspose(proj);
@@ -431,24 +349,14 @@ void Renderer::Render()
         XMStoreFloat3(&cf.lightDirWS, L);
     }
     cf.lightColor = XMFLOAT3(1,1,1);
-    cf.camPosWS = m_camPos;
+    cf.camPosWS   = m_camPos;
     cf.ambient = 0.08f;
     cf.specPower = 64.0f;
     cf.specIntensity = 0.3f;
-    cf.normalScale = 1.0f;
+    cf.normalScale   = 1.0f;
     m_context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
 
-    // for (auto& gm : m_meshes) {
-    //     CB_Object co{ XMMatrixTranspose(gm.world) };
-    //     m_context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
-
-    //     UINT stride = sizeof(VertexPNT), offset = 0;
-    //     ID3D11Buffer* vbo = gm.vbo.Get();
-    //     m_context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-    //     m_context->IASetIndexBuffer(gm.ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
-    //     m_context->DrawIndexed(gm.indexCount, 0, 0);
-    // }
-
+    // 绘制所有 mesh
     for (auto& gm : m_meshes) {
         CB_Object co{ DirectX::XMMatrixTranspose(gm.world) };
         m_context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
@@ -459,15 +367,71 @@ void Renderer::Render()
         m_context->IASetIndexBuffer(gm.ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
 
         ID3D11ShaderResourceView* srvs[2] = {
-            gm.albedoSRV.Get(),  // t0
-            gm.normalSRV.Get()   // t1
+            gm.albedoSRV ? gm.albedoSRV.Get() : m_albedoSRV.Get(),
+            gm.normalSRV ? gm.normalSRV.Get() : m_normalSRV.Get()
         };
         m_context->PSSetShaderResources(0, 2, srvs);
 
         m_context->DrawIndexed(gm.indexCount, 0, 0);
     }
 
-    m_swapchain->Present(1, 0);
+    // 注意：不 Present；不创建/销毁 RTV/DSV/SwapChain
+}
+
+void Renderer::ensureOffscreen(UINT w, UINT h)
+{
+    if (w == 0 || h == 0) return;
+    if (m_off.color && w == m_off.w && h == m_off.h) return;
+
+    m_off.Reset();
+    m_off.w = w; m_off.h = h;
+
+    // Color
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // keep linear; switch to _SRGB if you want post-sRGB
+    td.SampleDesc.Count = 1;
+    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    m_device->CreateTexture2D(&td, nullptr, m_off.color.GetAddressOf());
+
+    D3D11_RENDER_TARGET_VIEW_DESC rvd{};
+    rvd.Format = td.Format; rvd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    m_device->CreateRenderTargetView(m_off.color.Get(), &rvd, m_off.rtv.GetAddressOf());
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+    sv.Format = td.Format; sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    sv.Texture2D.MipLevels = 1;
+    m_device->CreateShaderResourceView(m_off.color.Get(), &sv, m_off.srv.GetAddressOf());
+
+    // Depth
+    D3D11_TEXTURE2D_DESC dd = td;
+    dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    dd.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    m_device->CreateTexture2D(&dd, nullptr, m_off.depth.GetAddressOf());
+    m_device->CreateDepthStencilView(m_off.depth.Get(), nullptr, m_off.dsv.GetAddressOf());
+}
+
+void Renderer::RenderToOffscreen(UINT w, UINT h, float dt)
+{
+    ensureOffscreen(w, h);
+
+    ID3D11RenderTargetView* rtv = m_off.rtv.Get();
+    ID3D11DepthStencilView* dsv = m_off.dsv.Get();
+    m_context->OMSetRenderTargets(1, &rtv, dsv);
+
+    D3D11_VIEWPORT vp{};
+    vp.Width = float(m_off.w);
+    vp.Height = float(m_off.h);
+    vp.MinDepth = 0.f; vp.MaxDepth = 1.f;
+    m_context->RSSetViewports(1, &vp);
+
+    const float clear[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
+    m_context->ClearRenderTargetView(m_off.rtv.Get(), clear);
+    if (m_off.dsv) m_context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+    // Reuse your existing draw path; ensure projection uses offscreen size:
+    SetSize(m_off.w, m_off.h);
+    Render(m_off.rtv.Get(), m_off.dsv.Get(), dt);
 }
 
 void Renderer::Shutdown()
@@ -478,8 +442,12 @@ void Renderer::Shutdown()
     m_inputLayout.Reset();
     m_vs.Reset();
     m_ps.Reset();
-    destroyBackbufferAndDepth();
-    m_context.Reset();
-    m_device.Reset();
-    m_swapchain.Reset();
+    m_sampler.Reset();
+    m_rsSolid.Reset();
+    m_rsWire.Reset();
+    m_albedoSRV.Reset();
+    m_normalSRV.Reset();
+
+    m_context = nullptr;
+    m_device  = nullptr;
 }

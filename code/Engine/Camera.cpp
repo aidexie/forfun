@@ -1,5 +1,7 @@
 
 #include "Camera.h"
+#include <DirectXMath.h>
+#include <cmath>
 using namespace DirectX;
 static XMVECTOR Dir(float yaw,float pitch){
     float cy=cosf(yaw), sy=sinf(yaw); float cp=cosf(pitch), sp=sinf(pitch);
