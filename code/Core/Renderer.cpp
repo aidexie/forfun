@@ -60,36 +60,36 @@ bool Renderer::Initialize(ID3D11Device* device, ID3D11DeviceContext* context, UI
     m_albedoSRV = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
     m_normalSRV = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
 
-    // --- 加载 glTF bunny（与你旧实现一致） ---
-    std::vector<GltfMeshCPU> gltfMeshes;
-    if (!LoadGLTF_PNT("bunny-pbr-gltf/scene_small.gltf", gltfMeshes, /*flipZ_to_LH=*/true, /*flipWinding=*/true)) {
-        MessageBoxA(nullptr, "Failed to load bunny.gltf", "Error", MB_ICONERROR);
-        return false;
-    }
-    for (auto& m : gltfMeshes) {
-        GpuMesh gm = upload(m.mesh);
-        gm.world = DirectX::XMMatrixIdentity();
+    //// --- 加载 glTF bunny（与你旧实现一致） ---
+    //std::vector<GltfMeshCPU> gltfMeshes;
+    //if (!LoadGLTF_PNT("bunny-pbr-gltf/scene_small.gltf", gltfMeshes, /*flipZ_to_LH=*/true, /*flipWinding=*/true)) {
+    //    MessageBoxA(nullptr, "Failed to load bunny.gltf", "Error", MB_ICONERROR);
+    //    return false;
+    //}
+    //for (auto& m : gltfMeshes) {
+    //    GpuMesh gm = upload(m.mesh);
+    //    gm.world = DirectX::XMMatrixIdentity();
 
-        // albedo（sRGB）
-        if (!m.textures.baseColorPath.empty()) {
-            ComPtr<ID3D11ShaderResourceView> srv;
-            LoadTextureWIC(m_device,
-                std::wstring(m.textures.baseColorPath.begin(), m.textures.baseColorPath.end()),
-                srv, /*srgb=*/true);
-            gm.albedoSRV = srv ? srv : m_albedoSRV;
-        } else gm.albedoSRV = m_albedoSRV;
+    //    // albedo（sRGB）
+    //    if (!m.textures.baseColorPath.empty()) {
+    //        ComPtr<ID3D11ShaderResourceView> srv;
+    //        LoadTextureWIC(m_device,
+    //            std::wstring(m.textures.baseColorPath.begin(), m.textures.baseColorPath.end()),
+    //            srv, /*srgb=*/true);
+    //        gm.albedoSRV = srv ? srv : m_albedoSRV;
+    //    } else gm.albedoSRV = m_albedoSRV;
 
-        // normal（线性）
-        if (!m.textures.normalPath.empty()) {
-            ComPtr<ID3D11ShaderResourceView> srv;
-            LoadTextureWIC(m_device,
-                std::wstring(m.textures.normalPath.begin(), m.textures.normalPath.end()),
-                srv, /*srgb=*/false);
-            gm.normalSRV = srv ? srv : m_normalSRV;
-        } else gm.normalSRV = m_normalSRV;
+    //    // normal（线性）
+    //    if (!m.textures.normalPath.empty()) {
+    //        ComPtr<ID3D11ShaderResourceView> srv;
+    //        LoadTextureWIC(m_device,
+    //            std::wstring(m.textures.normalPath.begin(), m.textures.normalPath.end()),
+    //            srv, /*srgb=*/false);
+    //        gm.normalSRV = srv ? srv : m_normalSRV;
+    //    } else gm.normalSRV = m_normalSRV;
 
-        m_meshes.push_back(std::move(gm));
-    }
+    //    m_meshes.push_back(std::move(gm));
+    //}
 
     gPrev = std::chrono::steady_clock::now();
     return true;
@@ -350,7 +350,7 @@ void Renderer::Render(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, 
     }
     cf.lightColor = XMFLOAT3(1,1,1);
     cf.camPosWS   = m_camPos;
-    cf.ambient = 0.08f;
+    cf.ambient = 0.38f;
     cf.specPower = 64.0f;
     cf.specIntensity = 0.3f;
     cf.normalScale   = 1.0f;
@@ -450,4 +450,46 @@ void Renderer::Shutdown()
 
     m_context = nullptr;
     m_device  = nullptr;
+}
+
+
+std::size_t Renderer::AddMesh(const MeshCPU_PNT& cpu, DirectX::XMMATRIX world){
+    auto gm = upload(cpu);
+    gm.world = world;
+    gm.albedoSRV = m_albedoSRV;
+    gm.normalSRV = m_normalSRV;
+    m_meshes.push_back(std::move(gm));
+    return m_meshes.size()-1;
+}
+
+std::size_t Renderer::AddMesh(const GltfMeshCPU& gltfMesh, DirectX::XMMATRIX world){
+    auto gm = upload(gltfMesh.mesh);
+    gm.world = world;
+
+    // albedo（sRGB）
+    if (!gltfMesh.textures.baseColorPath.empty()) {
+        ComPtr<ID3D11ShaderResourceView> srv;
+        LoadTextureWIC(m_device,
+            std::wstring(gltfMesh.textures.baseColorPath.begin(), gltfMesh.textures.baseColorPath.end()),
+            srv, /*srgb=*/true);
+        gm.albedoSRV = srv ? srv : m_albedoSRV;
+    } else gm.albedoSRV = m_albedoSRV;
+
+    // normal（线性）
+    if (!gltfMesh.textures.normalPath.empty()) {
+        ComPtr<ID3D11ShaderResourceView> srv;
+        LoadTextureWIC(m_device,
+            std::wstring(gltfMesh.textures.normalPath.begin(), gltfMesh.textures.normalPath.end()),
+            srv, /*srgb=*/false);
+        gm.normalSRV = srv ? srv : m_normalSRV;
+    } else gm.normalSRV = m_normalSRV;
+
+    m_meshes.push_back(std::move(gm));
+    return m_meshes.size()-1;
+}
+
+void Renderer::SetMeshWorld(std::size_t index, DirectX::XMMATRIX world){
+    if (index < m_meshes.size()){
+        m_meshes[index].world = world;
+    }
 }

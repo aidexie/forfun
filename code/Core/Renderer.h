@@ -46,6 +46,10 @@ public:
     UINT GetOffscreenWidth()  const { return m_off.w; }
     UINT GetOffscreenHeight() const { return m_off.h; }
     void RenderToOffscreen(UINT w, UINT h, float dt);
+    // --- Extended API for editor/World integration ---
+    std::size_t AddMesh(const MeshCPU_PNT& cpu, DirectX::XMMATRIX world);
+    std::size_t AddMesh(const struct GltfMeshCPU& gltfMesh, DirectX::XMMATRIX world);
+    void SetMeshWorld(std::size_t index, DirectX::XMMATRIX world);
 private:
     void ensureOffscreen(UINT w, UINT h);
 private:

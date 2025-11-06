@@ -1,14 +1,13 @@
 #pragma once
-#include <vector>
+#include <cstddef>
 #include <string>
-
-struct Entity { int id; std::string name; };
+#include "World.h"
 
 struct Scene {
-    std::vector<Entity> entities;
-    int selected = -1;
-    Entity* GetSelected() {
-        if (selected>=0 && selected<(int)entities.size()) return &entities[selected];
+    World world;
+    int selected = -1; // index into world list
+    GameObject* GetSelected(){
+        if (selected>=0 && (std::size_t)selected < world.Count()) return world.Get((std::size_t)selected);
         return nullptr;
     }
 };

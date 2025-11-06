@@ -19,6 +19,8 @@
 #include "Panels.h"   // Panels::DrawDockspace / DrawHierarchy / DrawInspector / DrawViewport
 #include "Scene.h"    // 面板的场景数据结构
 #include "Camera.h"   // EditorCamera（Viewport 面板用）
+#include "Components/Transform.h"
+#include "Components/MeshRenderer.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -163,6 +165,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
+
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(
         DX11Context::Instance().GetDevice(),
@@ -180,6 +183,37 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         initW, initH))
     {
         return -3;
+    }
+
+    // --- Setup World/GameObjects ---
+    {
+        // ensure Assets cwd (already attempted earlier)
+        // Create ground plane
+        auto* g0 = gScene.world.Create("Ground");
+        auto* t0 = g0->AddComponent<Transform>();
+        t0->scale = { 10,0.1,10 };
+        auto* m0 = g0->AddComponent<MeshRenderer>();
+        m0->kind = MeshKind::Cube;
+        m0->EnsureUploaded(gRenderer, t0->WorldMatrix());
+
+        // Create cube
+        auto* g1 = gScene.world.Create("Cube");
+        auto* t1 = g1->AddComponent<Transform>();
+        t1->position = { 0,2.5f,0 };
+        auto* m1 = g1->AddComponent<MeshRenderer>();
+        m1->kind = MeshKind::Cube;
+        m1->EnsureUploaded(gRenderer, t1->WorldMatrix());
+
+        // Create bunny (OBJ) - replace Assets/bunny_placeholder.obj with a real bunny.obj 
+        auto* g2 = gScene.world.Create("Bunny");
+        auto* t2 = g2->AddComponent<Transform>();
+        t2->position = { 1.5f,0,0 };
+        t2->scale = { 0.8f,0.8f,0.8f };
+        auto* m2 = g2->AddComponent<MeshRenderer>();
+        m2->kind = MeshKind::Obj; // fallback cube; change to Obj and set path when you have real asset
+        m2->path = "bunny-pbr-gltf/scene_small.gltf";
+        m2->EnsureUploaded(gRenderer, t2->WorldMatrix());
+        gScene.selected = 1; // select cube by default
     }
 
     // 5) 主循环
@@ -218,8 +252,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : DX11Context::Instance().GetWidth();
         UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : DX11Context::Instance().GetHeight();
 
-        // First: render into renderer’s offscreen
+        // First: render into renderer's offscreen
+        // Update Mesh transforms from World
+        for (std::size_t i=0;i<gScene.world.Count();++i){
+            auto* go = gScene.world.Get(i);
+            if (!go) continue;
+            auto* tr = go->GetComponent<Transform>();
+            auto* mr = go->GetComponent<MeshRenderer>();
+            if (mr){
+                // Use Transform's world matrix, or identity if no Transform
+                DirectX::XMMATRIX worldMat = tr ? tr->WorldMatrix() : DirectX::XMMatrixIdentity();
+                // Ensure mesh is uploaded to GPU (handles newly added components)
+                mr->EnsureUploaded(gRenderer, worldMat);
+                // Update transform every frame
+                mr->UpdateTransform(gRenderer, worldMat);
+            }
+        }
         gRenderer.RenderToOffscreen(vpW, vpH, dt);
+
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
         ID3D11DepthStencilView* dsv = ctx.GetDSV();
@@ -236,7 +286,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // main.cpp  —— 每帧渲染里，渲染完 3D 场景之后，提交 ImGui 之前
         {
             bool dockOpen = true;
-            Panels::DrawDockspace(&dockOpen);         // DockSpace 容器
+            Panels::DrawDockspace(&dockOpen, gScene); // DockSpace 容器
             Panels::DrawHierarchy(gScene);            // 层级面板
             Panels::DrawInspector(gScene);            // 检视面板
             Panels::DrawViewport(gScene, gEditorCam,

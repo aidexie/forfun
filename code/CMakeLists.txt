@@ -47,10 +47,11 @@ add_executable(forfun WIN32
     ${CODE_PATH}/main.cpp
 )
 target_include_directories(forfun PRIVATE
-    ${CODE_PATH}/Core 
-    ${CODE_PATH}/Engine 
+    ${CODE_PATH}/Core
+    ${CODE_PATH}/Engine
     ${CODE_PATH}/Editor
     ${THIRD_PARTY_PATH}/cgltf-master
+    ${THIRD_PARTY_PATH}/nlohmann
 )
 target_compile_definitions(forfun PRIVATE UNICODE _UNICODE)
 target_link_libraries(forfun
@@ -58,3 +59,18 @@ target_link_libraries(forfun
         imgui_docking
         d3d11 dxgi d3dcompiler
 )
+
+
+# Added World/GameObject/Component system
+set(ENGINE_SOURCES
+    ${CODE_PATH}/Engine/GameObject.h
+    ${CODE_PATH}/Engine/Component.h
+    ${CODE_PATH}/Engine/World.h
+    ${CODE_PATH}/Engine/PropertyVisitor.h
+    ${CODE_PATH}/Engine/SceneSerializer.h
+    ${CODE_PATH}/Engine/SceneSerializer.cpp
+    ${CODE_PATH}/Engine/Components/Transform.h
+    ${CODE_PATH}/Engine/Components/MeshRenderer.h
+    ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
+)
+target_sources(forfun PRIVATE ${ENGINE_SOURCES})

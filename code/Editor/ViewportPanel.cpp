@@ -1,4 +1,4 @@
-#include "Panels.h"
+ï»¿#include "Panels.h"
 #include "imgui.h"
 #include "Camera.h"
 #include "Offscreen.h"
@@ -65,7 +65,7 @@ float4 main(PSIn i):SV_Target{ return float4(i.col,1); }
     }
 }
 
-// ViewportPanel.cpp  ¡ª¡ª file-scope statics
+// ViewportPanel.cpp  â€”â€” file-scope statics
 static ImVec2 s_lastAvail = ImVec2(0, 0);
 
 ImVec2 Panels::GetViewportLastSize() {
@@ -78,13 +78,13 @@ void Panels::DrawViewport(Scene& scene, EditorCamera& editorCam,
 {
     ImGui::Begin("Viewport");
 
-    // Measure current available size and remember it for the next frame¡¯s render pass
+    // Measure current available size and remember it for the next frameâ€™s render pass
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.x < 1.f) avail.x = 1.f;
     if (avail.y < 1.f) avail.y = 1.f;
     s_lastAvail = avail;
 
-    // Keep editor camera¡¯s aspect in sync with the panel (optional)
+    // Keep editor cameraâ€™s aspect in sync with the panel (optional)
     editorCam.aspect = (avail.y > 0.f) ? (avail.x / avail.y) : editorCam.aspect;
 
     // Draw the provided texture (no ownership). If null, show placeholder.
