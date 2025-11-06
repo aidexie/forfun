@@ -356,8 +356,10 @@ void Renderer::Render(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, 
     cf.normalScale   = 1.0f;
     m_context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
 
-    // 绘制所有 mesh
+    // 绘制所有可见 mesh
     for (auto& gm : m_meshes) {
+        if (!gm.visible) continue; // Skip invisible meshes
+
         CB_Object co{ DirectX::XMMatrixTranspose(gm.world) };
         m_context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
 
@@ -491,5 +493,12 @@ std::size_t Renderer::AddMesh(const GltfMeshCPU& gltfMesh, DirectX::XMMATRIX wor
 void Renderer::SetMeshWorld(std::size_t index, DirectX::XMMATRIX world){
     if (index < m_meshes.size()){
         m_meshes[index].world = world;
+    }
+}
+
+void Renderer::RemoveMesh(std::size_t index){
+    if (index < m_meshes.size()){
+        m_meshes[index].visible = false;
+        // GPU resources (VBO/IBO/textures) will be released when vector is cleared or overwritten
     }
 }

@@ -50,6 +50,7 @@ public:
     std::size_t AddMesh(const MeshCPU_PNT& cpu, DirectX::XMMATRIX world);
     std::size_t AddMesh(const struct GltfMeshCPU& gltfMesh, DirectX::XMMATRIX world);
     void SetMeshWorld(std::size_t index, DirectX::XMMATRIX world);
+    void RemoveMesh(std::size_t index);
 private:
     void ensureOffscreen(UINT w, UINT h);
 private:
@@ -70,6 +71,7 @@ private:
         DirectX::XMMATRIX world = DirectX::XMMatrixIdentity();
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> albedoSRV;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> normalSRV;
+        bool visible = true;  // For dynamic mesh removal
     };
     std::vector<GpuMesh> m_meshes;
 

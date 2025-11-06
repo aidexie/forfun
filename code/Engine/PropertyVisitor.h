@@ -21,6 +21,12 @@ public:
     // Enum type (with options)
     virtual void VisitEnum(const char* name, int& value, const std::vector<const char*>& options) = 0;
 
+    // File path with browse button (filter: "*.obj;*.gltf" or nullptr for all files)
+    virtual void VisitFilePath(const char* name, std::string& value, const char* filter = nullptr) {
+        // Fallback to string if not implemented
+        VisitString(name, value);
+    }
+
     // Read-only label (for display only, like component info)
     virtual void VisitLabel(const char* name, const char* value) {}
 };

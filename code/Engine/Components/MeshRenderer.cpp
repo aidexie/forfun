@@ -9,21 +9,6 @@
 #include <algorithm>
 using namespace DirectX;
 
-static MeshCPU_PNT MakePlane(float size = 10.0f) {
-    MeshCPU_PNT m; float s = size * 0.5f;
-    VertexPNT v[4] = {
-        {-s,0,-s, 0,1,0, 0,0, 1,0,0,1},
-        { s,0,-s, 0,1,0, 1,0, 1,0,0,1},
-        { s,0, s, 0,1,0, 1,1, 1,0,0,1},
-        {-s,0, s, 0,1,0, 0,1, 1,0,0,1},
-    };
-    m.vertices.assign(v, v + 4);
-    uint32_t idx[6] = { 0,1,2, 0,2,3 };
-    m.indices.assign(idx, idx + 6);
-    ComputeTangents(m.vertices, m.indices);
-    return m;
-}
-
 static MeshCPU_PNT MakeCube(float s = 1.0f) {
     MeshCPU_PNT m; float h = s * 0.5f;
     struct V { float x, y, z, nx, ny, nz, u, v; };
@@ -46,10 +31,6 @@ bool MeshRenderer::EnsureUploaded(Renderer& r, const XMMATRIX& world) {
     if (!indices.empty()) return true;
     indices.clear();
 
-    if (kind == MeshKind::Plane) {
-        indices.push_back(r.AddMesh(MakePlane(20.0f), world));
-        return true;
-    }
     if (kind == MeshKind::Cube) {
         indices.push_back(r.AddMesh(MakeCube(1.0f), world));
         return true;

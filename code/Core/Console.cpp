@@ -51,20 +51,20 @@ void InitUTF8() {
     freopen_s(&fp, "CONOUT$", "w", stderr);
     freopen_s(&fp, "CONIN$", "r", stdin);
 
-    // 3) 窄字节输出走 UTF-8（给 std::cout）
+    // 3) 设置控制台为 UTF-8 模式（给 std::cout）
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);
 
-    // 4) 关键！把宽字节通道切到 UTF-16 直写（给 std::wcout）
-    _setmode(_fileno(stdout), _O_U16TEXT);
-    _setmode(_fileno(stderr), _O_U16TEXT);
-    _setmode(_fileno(stdin), _O_U16TEXT);
+    // 4) 重新同步 C++ 流
+    std::ios::sync_with_stdio(true);
 
-    // 5) 可选：VT 序列支持
+    // 5) 可选：VT 序列支持（彩色输出等）
     DWORD mode = 0; HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (GetConsoleMode(hOut, &mode)) {
         SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     }
+
+    g_consoleReady = true;
 }
 
 void Shutdown() {

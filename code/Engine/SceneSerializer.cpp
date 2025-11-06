@@ -105,10 +105,11 @@ private:
 // ===========================
 // Serialize Component
 // ===========================
-static void SerializeComponent(Component* comp, json& j) {
+static void SerializeComponent(const Component* comp, json& j) {
     j["type"] = comp->GetTypeName();
     JsonWriteVisitor visitor(j);
-    comp->VisitProperties(visitor);
+    // const_cast is safe here: JsonWriteVisitor only reads values, doesn't modify component
+    const_cast<Component*>(comp)->VisitProperties(visitor);
 }
 
 // ===========================

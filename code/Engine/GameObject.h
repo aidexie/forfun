@@ -29,6 +29,14 @@ public:
         return nullptr;
     }
 
+    template<class T>
+    const T* GetComponent() const {
+        for (const auto& c : m_components){
+            if (auto p = dynamic_cast<const T*>(c.get())) return p;
+        }
+        return nullptr;
+    }
+
 private:
     std::string m_name;
     std::vector<std::unique_ptr<Component>> m_components;

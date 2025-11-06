@@ -7,7 +7,7 @@
 #include <vector>
 class Renderer;
 
-enum class MeshKind { Plane, Cube, Obj };
+enum class MeshKind { Cube, Obj };
 
 struct MeshRenderer : public Component {
     MeshKind kind = MeshKind::Cube;
@@ -21,13 +21,22 @@ struct MeshRenderer : public Component {
     const char* GetTypeName() const override { return "MeshRenderer"; }
 
     void VisitProperties(PropertyVisitor& visitor) override {
+        // Save old values to detect changes
+        MeshKind oldKind = kind;
+        std::string oldPath = path;
+
         // Expose mesh kind as enum
         int kindValue = static_cast<int>(kind);
-        static const std::vector<const char*> kindOptions = { "Plane", "Cube", "Obj" };
+        static const std::vector<const char*> kindOptions = { "Cube", "Obj" };
         visitor.VisitEnum("Mesh Kind", kindValue, kindOptions);
         kind = static_cast<MeshKind>(kindValue);
 
-        // Expose path (only relevant when kind == Obj)
-        visitor.VisitString("Path", path);
+        // Expose path with browse button (only relevant when kind == Obj)
+        visitor.VisitFilePath("Path", path, "Mesh Files\0*.obj;*.gltf;*.glb\0OBJ Files\0*.obj\0glTF Files\0*.gltf;*.glb\0All Files\0*.*\0");
+
+        // If kind or path changed, mark for reload
+        if (kind != oldKind || path != oldPath) {
+            indices.clear(); // Clear to trigger reload in EnsureUploaded
+        }
     }
 };

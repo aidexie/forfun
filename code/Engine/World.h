@@ -17,6 +17,7 @@ public:
     }
     std::size_t Count() const { return m_objects.size(); }
     GameObject* Get(std::size_t i){ return (i<m_objects.size())? m_objects[i].get() : nullptr; }
+    const GameObject* Get(std::size_t i) const { return (i<m_objects.size())? m_objects[i].get() : nullptr; }
     const std::vector<std::unique_ptr<GameObject>>& Objects() const { return m_objects; }
 private:
     std::vector<std::unique_ptr<GameObject>> m_objects;

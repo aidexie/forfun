@@ -3,6 +3,7 @@
 #include <windowsx.h>
 #include <tchar.h>
 #include <d3d11.h>
+#include <direct.h>  // For _chdir, _getcwd
 #include <string>
 #include <iostream>
 #include <filesystem>
@@ -116,27 +117,27 @@ static HWND CreateMainWindow(HINSTANCE hInst, int width, int height, WNDPROC pro
 
 
 void ForceWorkDir() {
-    const wchar_t* kAssets = L"E:\\forfun\\assets";
+    const char* kAssets = "E:\\forfun\\assets";
 
-    std::wcout << L"exists? " << std::filesystem::exists(kAssets) << L"\n";
+    std::cout << "exists? " << std::filesystem::exists(kAssets) << "\n";
 
-    int rc = _wchdir(kAssets);
+    int rc = _chdir(kAssets);
     if (rc != 0) {
-        std::wcout << L"_wchdir rc=" << rc << L" errno=" << errno << L"\n";
-        _wperror(L"_wchdir");
+        std::cout << "_chdir rc=" << rc << " errno=" << errno << "\n";
+        perror("_chdir");
     }
 
-    wchar_t buf[512];
-    _wgetcwd(buf, 512);
-    std::wcout << L"cwd after _wchdir: " << buf << L"\n";
+    char buf[512];
+    _getcwd(buf, 512);
+    std::cout << "cwd after _chdir: " << buf << "\n";
 
     // 尝试 WinAPI 的方式再改一次，看看是否成功
-    if (!SetCurrentDirectoryW(kAssets)) {
-        std::wcout << L"SetCurrentDirectoryW failed, GetLastError="
-            << GetLastError() << L"\n";
+    if (!SetCurrentDirectoryA(kAssets)) {
+        std::cout << "SetCurrentDirectoryA failed, GetLastError="
+            << GetLastError() << "\n";
     }
-    DWORD n = GetCurrentDirectoryW(512, buf);
-    std::wcout << L"cwd after SetCurrentDirectoryW: " << buf << L"\n";
+    GetCurrentDirectoryA(512, buf);
+    std::cout << "cwd after SetCurrentDirectoryA: " << buf << "\n";
 }
 
 // -----------------------------------------------------------------------------

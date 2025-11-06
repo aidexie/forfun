@@ -7,6 +7,8 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include <string>
+#include <windows.h>
+#include <commdlg.h>
 
 // ImGui implementation of PropertyVisitor for reflection-based UI
 class ImGuiPropertyVisitor : public PropertyVisitor {
@@ -50,6 +52,51 @@ public:
                 }
             }
             ImGui::EndCombo();
+        }
+    }
+
+    void VisitFilePath(const char* name, std::string& value, const char* filter) override {
+        // Display current value as read-only text with frame
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.2f, 0.2f, 0.2f, 0.5f));
+
+        // Negative width = reserve space from right edge (for Browse button)
+        ImGui::PushItemWidth(-80.0f);
+
+        char displayBuf[260];
+        snprintf(displayBuf, sizeof(displayBuf), "%s", value.empty() ? "(None)" : value.c_str());
+        ImGui::InputText(name, displayBuf, sizeof(displayBuf), ImGuiInputTextFlags_ReadOnly);
+
+        ImGui::PopItemWidth();
+        ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...", ImVec2(70, 0))) {
+            char filename[MAX_PATH] = "";
+            OPENFILENAMEA ofn = {};
+            ofn.lStructSize = sizeof(ofn);
+
+            // Build filter string
+            if (filter) {
+                ofn.lpstrFilter = filter;
+            } else {
+                ofn.lpstrFilter = "All Files\0*.*\0";
+            }
+
+            ofn.lpstrFile = filename;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+            ofn.lpstrInitialDir = "E:\\forfun\\assets";
+
+            if (GetOpenFileNameA(&ofn)) {
+                // Convert to relative path (relative to assets folder)
+                std::string fullPath = filename;
+                std::string assetsPath = "E:\\forfun\\assets\\";
+                if (fullPath.find(assetsPath) == 0) {
+                    value = fullPath.substr(assetsPath.length());
+                } else {
+                    value = fullPath;
+                }
+            }
         }
     }
 
