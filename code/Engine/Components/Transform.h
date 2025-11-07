@@ -1,6 +1,6 @@
 #pragma once
-#include "../Component.h"
-#include "../PropertyVisitor.h"
+#include "Component.h"
+#include "PropertyVisitor.h"
 #include <DirectXMath.h>
 
 struct Transform : public Component {

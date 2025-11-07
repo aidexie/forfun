@@ -1,0 +1,81 @@
+#pragma once
+#include <d3d11.h>
+#include <wrl/client.h>
+#include <DirectXMath.h>
+
+// Forward declarations
+struct Scene;
+
+// MainPass: 主渲染流程
+// 在 Engine 层，可以直接访问 Scene/GameObject/Components
+// 使用 DX11Context::Instance() 访问 D3D11 设备和上下文
+class MainPass
+{
+public:
+    struct OffscreenTarget {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D>         color;
+        Microsoft::WRL::ComPtr<ID3D11RenderTargetView>  rtv;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D>         depth;
+        Microsoft::WRL::ComPtr<ID3D11DepthStencilView>  dsv;
+        UINT w = 0, h = 0;
+
+        void Reset() {
+            color.Reset(); rtv.Reset(); srv.Reset();
+            depth.Reset(); dsv.Reset();
+            w = h = 0;
+        }
+    };
+
+    MainPass() = default;
+    ~MainPass() = default;
+
+    // 初始化渲染管线资源
+    bool Initialize();
+    void Shutdown();
+
+    // 相机交互
+    void OnRButton(bool down);
+    void OnMouseDelta(int dx, int dy);
+
+    // 渲染场景到离屏目标
+    void Render(Scene& scene, UINT w, UINT h, float dt);
+
+    // 访问离屏目标
+    ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_off.srv.Get(); }
+    UINT GetOffscreenWidth()  const { return m_off.w; }
+    UINT GetOffscreenHeight() const { return m_off.h; }
+
+private:
+    void ensureOffscreen(UINT w, UINT h);
+    void renderScene(Scene& scene, float dt);
+
+private:
+    OffscreenTarget m_off;
+
+    // === 渲染管线资源 ===
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader>  m_ps;
+    Microsoft::WRL::ComPtr<ID3D11InputLayout>  m_inputLayout;
+    Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbFrame;
+    Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbObj;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsSolid;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsWire;
+
+    // 默认纹理（兜底）
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultAlbedo;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultNormal;
+
+    // 相机状态
+    DirectX::XMFLOAT3 m_camPos{ -6.0f, 0.8f, 0.0f };
+    float m_yaw = 0.0f, m_pitch = 0.0f;
+    bool  m_rmbLook = false;
+
+private:
+    // 内部工具
+    void createPipeline();
+    void createRasterStates();
+    void ResetCameraLookAt(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& target);
+    void updateInput(float dt);
+};

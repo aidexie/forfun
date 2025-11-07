@@ -9,7 +9,7 @@
 #include <filesystem>
 
 #include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
-#include "Renderer.h"     // 仅负责场景渲染(不创建窗口/交换链/不Present)
+#include "Engine/Rendering/MainPass.h"  // 主渲染流程
 #include "Console.h"
 
 // ImGui
@@ -30,7 +30,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // -----------------------------------------------------------------------------
 static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
 static const wchar_t* kWndTitle = L"ForFunEditor";
-static Renderer gRenderer;
+static MainPass gMainPass;
 static bool gMinimized = false;
 static POINT gLastMouse = { 0, 0 };
 
@@ -55,16 +55,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         const UINT newH = HIWORD(lParam);
         if (DX11Context::Instance().GetSwapChain()) {
             DX11Context::Instance().OnResize(newW, newH);
-            gRenderer.SetSize(newW, newH);
         }
         return 0;
     }
     case WM_RBUTTONDOWN:
-        gRenderer.OnRButton(true);
+        gMainPass.OnRButton(true);
         SetCapture(hWnd);
         return 0;
     case WM_RBUTTONUP:
-        gRenderer.OnRButton(false);
+        gMainPass.OnRButton(false);
         ReleaseCapture();
         return 0;
     case WM_MOUSEMOVE:
@@ -72,7 +71,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             POINT p{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             int dx = p.x - gLastMouse.x;
             int dy = p.y - gLastMouse.y;
-            gRenderer.OnMouseDelta(dx, dy);
+            gMainPass.OnMouseDelta(dx, dy);
             gLastMouse = p;
         }
         else {
@@ -177,11 +176,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     gScene.selected = -1;                                // 默认无选中
     gEditorCam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
-    // 4) Renderer 初始化（仅拿 device/context/尺寸）
-    if (!gRenderer.Initialize(
-        DX11Context::Instance().GetDevice(),
-        DX11Context::Instance().GetContext(),
-        initW, initH))
+    // 4) MainPass 初始化
+    if (!gMainPass.Initialize())
     {
         return -3;
     }
@@ -194,26 +190,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         auto* t0 = g0->AddComponent<Transform>();
         t0->scale = { 10,0.1,10 };
         auto* m0 = g0->AddComponent<MeshRenderer>();
-        m0->kind = MeshKind::Cube;
-        m0->EnsureUploaded(gRenderer, t0->WorldMatrix());
+        m0->path = "mesh/cube.obj";
 
         // Create cube
         auto* g1 = gScene.world.Create("Cube");
         auto* t1 = g1->AddComponent<Transform>();
         t1->position = { 0,2.5f,0 };
         auto* m1 = g1->AddComponent<MeshRenderer>();
-        m1->kind = MeshKind::Cube;
-        m1->EnsureUploaded(gRenderer, t1->WorldMatrix());
+        m1->path = "mesh/sphere.obj";
 
-        // Create bunny (OBJ) - replace Assets/bunny_placeholder.obj with a real bunny.obj 
+        // Create bunny (glTF)
         auto* g2 = gScene.world.Create("Bunny");
         auto* t2 = g2->AddComponent<Transform>();
         t2->position = { 1.5f,0,0 };
         t2->scale = { 0.8f,0.8f,0.8f };
         auto* m2 = g2->AddComponent<MeshRenderer>();
-        m2->kind = MeshKind::Obj; // fallback cube; change to Obj and set path when you have real asset
         m2->path = "bunny-pbr-gltf/scene_small.gltf";
-        m2->EnsureUploaded(gRenderer, t2->WorldMatrix());
         gScene.selected = 1; // select cube by default
     }
 
@@ -253,23 +245,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : DX11Context::Instance().GetWidth();
         UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : DX11Context::Instance().GetHeight();
 
-        // First: render into renderer's offscreen
-        // Update Mesh transforms from World
-        for (std::size_t i=0;i<gScene.world.Count();++i){
-            auto* go = gScene.world.Get(i);
-            if (!go) continue;
-            auto* tr = go->GetComponent<Transform>();
-            auto* mr = go->GetComponent<MeshRenderer>();
-            if (mr){
-                // Use Transform's world matrix, or identity if no Transform
-                DirectX::XMMATRIX worldMat = tr ? tr->WorldMatrix() : DirectX::XMMatrixIdentity();
-                // Ensure mesh is uploaded to GPU (handles newly added components)
-                mr->EnsureUploaded(gRenderer, worldMat);
-                // Update transform every frame
-                mr->UpdateTransform(gRenderer, worldMat);
-            }
-        }
-        gRenderer.RenderToOffscreen(vpW, vpH, dt);
+        // Render scene to offscreen buffer
+        gMainPass.Render(gScene, vpW, vpH, dt);
 
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
@@ -291,9 +268,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             Panels::DrawHierarchy(gScene);            // 层级面板
             Panels::DrawInspector(gScene);            // 检视面板
             Panels::DrawViewport(gScene, gEditorCam,
-                gRenderer.GetOffscreenSRV(),
-                gRenderer.GetOffscreenWidth(),
-                gRenderer.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
+                gMainPass.GetOffscreenSRV(),
+                gMainPass.GetOffscreenWidth(),
+                gMainPass.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
         }
 
         // 5.5 提交 ImGui
@@ -305,7 +282,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
 
     // 6) 清理
-    gRenderer.Shutdown();
+    gMainPass.Shutdown();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
@@ -313,10 +290,3 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     return (int)msg.wParam;
 }
-/*
-下面准备加入的功能是游戏对象(GameObject)，组件系统(Component)，以及简单的场景管理(World)。
-GameObject是场景中的实体，每个GameObject可以包含多个组件(Component)，组件定义了GameObject的行为和属性。
-World类负责管理所有的GameObject，提供添加、删除和查找GameObject的功能。
-组件负责具体的功能，最开始试用两个组件，一个是Transform组件，负责位置、旋转和缩放信息；另一个是MeshRenderer组件，负责渲染网格。
-将上面的功能接入我的引擎代码，并在viewprot中接入三个GameObject，一个是地面平面，一个是简单的立方体网格，一个是Bunny网格。
-*/

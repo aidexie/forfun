@@ -1,12 +1,15 @@
-﻿#include "Renderer.h"
-#include "ObjLoader.h"
-#include "TextureLoader.h"
-#include "GltfLoader.h"
+#include "MainPass.h"
+#include "Core/DX11Context.h"
+#include "Core/GpuMeshResource.h"
+#include "Core/Mesh.h"
+#include "Scene.h"
+#include "GameObject.h"
+#include "Components/Transform.h"
+#include "Components/MeshRenderer.h"
 #include <array>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #pragma comment(lib, "d3d11.lib")
@@ -27,19 +30,11 @@ struct alignas(16) CB_Frame {
 struct alignas(16) CB_Object { DirectX::XMMATRIX world; };
 
 static auto gPrev = std::chrono::steady_clock::now();
-static float getDeltaTime() {
-    auto now = std::chrono::steady_clock::now();
-    std::chrono::duration<float> d = now - gPrev;
-    gPrev = now;
-    return d.count();
-}
 
-bool Renderer::Initialize(ID3D11Device* device, ID3D11DeviceContext* context, UINT width, UINT height)
+bool MainPass::Initialize()
 {
-    m_device  = device;
-    m_context = context;
-    m_width   = width;
-    m_height  = height;
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    if (!device) return false;
 
     // --- 管线与状态 ---
     createPipeline();
@@ -51,87 +46,25 @@ bool Renderer::Initialize(ID3D11Device* device, ID3D11DeviceContext* context, UI
         td.Format=fmt; td.SampleDesc.Count=1; td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
         uint32_t px = (uint32_t(r) | (uint32_t(g)<<8) | (uint32_t(b)<<16) | (uint32_t(a)<<24));
         D3D11_SUBRESOURCE_DATA srd{ &px, 4, 0 };
-        ComPtr<ID3D11Texture2D> tex; m_device->CreateTexture2D(&td, &srd, tex.GetAddressOf());
+        ComPtr<ID3D11Texture2D> tex; device->CreateTexture2D(&td, &srd, tex.GetAddressOf());
         D3D11_SHADER_RESOURCE_VIEW_DESC sd{}; sd.Format=fmt; sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
         sd.Texture2D.MipLevels=1;
-        ComPtr<ID3D11ShaderResourceView> srv; m_device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
+        ComPtr<ID3D11ShaderResourceView> srv; device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
         return srv;
     };
-    m_albedoSRV = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
-    m_normalSRV = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
-
-    //// --- 加载 glTF bunny（与你旧实现一致） ---
-    //std::vector<GltfMeshCPU> gltfMeshes;
-    //if (!LoadGLTF_PNT("bunny-pbr-gltf/scene_small.gltf", gltfMeshes, /*flipZ_to_LH=*/true, /*flipWinding=*/true)) {
-    //    MessageBoxA(nullptr, "Failed to load bunny.gltf", "Error", MB_ICONERROR);
-    //    return false;
-    //}
-    //for (auto& m : gltfMeshes) {
-    //    GpuMesh gm = upload(m.mesh);
-    //    gm.world = DirectX::XMMatrixIdentity();
-
-    //    // albedo（sRGB）
-    //    if (!m.textures.baseColorPath.empty()) {
-    //        ComPtr<ID3D11ShaderResourceView> srv;
-    //        LoadTextureWIC(m_device,
-    //            std::wstring(m.textures.baseColorPath.begin(), m.textures.baseColorPath.end()),
-    //            srv, /*srgb=*/true);
-    //        gm.albedoSRV = srv ? srv : m_albedoSRV;
-    //    } else gm.albedoSRV = m_albedoSRV;
-
-    //    // normal（线性）
-    //    if (!m.textures.normalPath.empty()) {
-    //        ComPtr<ID3D11ShaderResourceView> srv;
-    //        LoadTextureWIC(m_device,
-    //            std::wstring(m.textures.normalPath.begin(), m.textures.normalPath.end()),
-    //            srv, /*srgb=*/false);
-    //        gm.normalSRV = srv ? srv : m_normalSRV;
-    //    } else gm.normalSRV = m_normalSRV;
-
-    //    m_meshes.push_back(std::move(gm));
-    //}
+    m_defaultAlbedo = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
+    m_defaultNormal = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
 
     gPrev = std::chrono::steady_clock::now();
     return true;
 }
 
-Renderer::GpuMesh Renderer::upload(const MeshCPU_PNT& m)
+
+void MainPass::createPipeline()
 {
-    GpuMesh g;
-    D3D11_BUFFER_DESC bd{};
-    bd.ByteWidth = (UINT)(m.vertices.size() * sizeof(VertexPNT));
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA initVB{ m.vertices.data(), 0, 0 };
-    m_device->CreateBuffer(&bd, &initVB, g.vbo.GetAddressOf());
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    if (!device) return;
 
-    D3D11_BUFFER_DESC ib{};
-    ib.ByteWidth = (UINT)(m.indices.size() * sizeof(uint32_t));
-    ib.Usage = D3D11_USAGE_DEFAULT;
-    ib.BindFlags = D3D11_BIND_INDEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA initIB{ m.indices.data(), 0, 0 };
-    m_device->CreateBuffer(&ib, &initIB, g.ibo.GetAddressOf());
-
-    g.indexCount = (UINT)m.indices.size();
-    return g;
-}
-
-bool Renderer::tryLoadOBJ(const std::string& path, bool flipZ, bool flipWinding, float targetDiag, XMMATRIX world)
-{
-    MeshCPU_PNT m;
-    if (!LoadOBJ_PNT(path, m, flipZ, flipWinding)) {
-        MessageBoxA(nullptr, ("OBJ not found or failed: "+path).c_str(), "Info", MB_ICONINFORMATION);
-        return false;
-    }
-    RecenterAndScale(m, targetDiag);
-    auto gm = upload(m);
-    gm.world = world;
-    m_meshes.push_back(std::move(gm));
-    return true;
-}
-
-void Renderer::createPipeline()
-{
     static const char* kVS = R"(
         cbuffer CB_Frame  : register(b0) {
             float4x4 gView;
@@ -213,8 +146,8 @@ void Renderer::createPipeline()
     ComPtr<ID3DBlob> vsBlob, psBlob, err;
     D3DCompile(kVS, strlen(kVS), nullptr, nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     D3DCompile(kPS, strlen(kPS), nullptr, nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    m_device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
-    m_device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
+    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
+    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
 
     D3D11_INPUT_ELEMENT_DESC layout[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,     0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
@@ -222,16 +155,16 @@ void Renderer::createPipeline()
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,        0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         { "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT,  0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
-    m_device->CreateInputLayout(layout, 4, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
+    device->CreateInputLayout(layout, 4, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
 
     // constant buffers
     D3D11_BUFFER_DESC cb{};
     cb.ByteWidth = sizeof(CB_Frame);
     cb.Usage = D3D11_USAGE_DEFAULT;
     cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    m_device->CreateBuffer(&cb, nullptr, m_cbFrame.GetAddressOf());
+    device->CreateBuffer(&cb, nullptr, m_cbFrame.GetAddressOf());
     cb.ByteWidth = sizeof(CB_Object);
-    m_device->CreateBuffer(&cb, nullptr, m_cbObj.GetAddressOf());
+    device->CreateBuffer(&cb, nullptr, m_cbObj.GetAddressOf());
 
     // sampler
     D3D11_SAMPLER_DESC sd{};
@@ -239,23 +172,26 @@ void Renderer::createPipeline()
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
     sd.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
     sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
-    m_device->CreateSamplerState(&sd, m_sampler.GetAddressOf());
+    device->CreateSamplerState(&sd, m_sampler.GetAddressOf());
 }
 
-void Renderer::createRasterStates()
+void MainPass::createRasterStates()
 {
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    if (!device) return;
+
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_BACK;
     rd.FrontCounterClockwise = FALSE;
     rd.DepthClipEnable = TRUE;
-    m_device->CreateRasterizerState(&rd, m_rsSolid.GetAddressOf());
+    device->CreateRasterizerState(&rd, m_rsSolid.GetAddressOf());
 
     rd.FillMode = D3D11_FILL_WIREFRAME;
-    m_device->CreateRasterizerState(&rd, m_rsWire.GetAddressOf());
+    device->CreateRasterizerState(&rd, m_rsWire.GetAddressOf());
 }
 
-void Renderer::OnMouseDelta(int dx, int dy)
+void MainPass::OnMouseDelta(int dx, int dy)
 {
     if (!m_rmbLook) return;
     const float sens = 0.0022f;
@@ -264,9 +200,9 @@ void Renderer::OnMouseDelta(int dx, int dy)
     const float limit = 1.5533f;
     m_pitch = std::clamp(m_pitch, -limit, limit);
 }
-void Renderer::OnRButton(bool down) { m_rmbLook = down; }
+void MainPass::OnRButton(bool down) { m_rmbLook = down; }
 
-void Renderer::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
+void MainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
 {
     m_camPos = eye;
     XMVECTOR e = XMLoadFloat3(&m_camPos);
@@ -277,7 +213,7 @@ void Renderer::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
     m_pitch = std::asin(std::clamp(f.y, -1.0f, 1.0f));
 }
 
-void Renderer::updateInput(float dt)
+void MainPass::updateInput(float dt)
 {
     auto down = [](int vk){ return (GetAsyncKeyState(vk) & 0x8000) != 0; };
 
@@ -299,35 +235,28 @@ void Renderer::updateInput(float dt)
     if (down('R')) { ResetCameraLookAt(XMFLOAT3(-6.0f,0.8f,0.0f), XMFLOAT3(0,0,0)); }
 }
 
-void Renderer::SetSize(UINT width, UINT height)
+void MainPass::renderScene(Scene& scene, float dt)
 {
-    m_width = width;
-    m_height = height;
-}
+    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    if (!context) return;
 
-void Renderer::Render(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, float dt)
-{
     updateInput(dt);
 
-    // 绑定视口与目标（在这里绑定，保证调用者不用关心顺序）
-    D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_width; vp.Height=(FLOAT)m_height; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
-    m_context->RSSetViewports(1, &vp);
-    m_context->RSSetState(m_rsSolid.Get());
-    m_context->OMSetRenderTargets(1, &rtv, dsv);
-
-    // 清深度（颜色清除放在外面做也行；这里只清深度，避免覆盖 UI 背景色选择）
-    if (dsv) m_context->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL, 1.0f, 0);
+    // 绑定视口与目标
+    D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_off.w; vp.Height=(FLOAT)m_off.h; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
+    context->RSSetViewports(1, &vp);
+    context->RSSetState(m_rsSolid.Get());
 
     // 绑定管线
-    m_context->IASetInputLayout(m_inputLayout.Get());
-    m_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    m_context->VSSetShader(m_vs.Get(), nullptr, 0);
-    m_context->PSSetShader(m_ps.Get(), nullptr, 0);
-    m_context->VSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
-    m_context->VSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
-    m_context->PSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
-    m_context->PSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
-    m_context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
+    context->IASetInputLayout(m_inputLayout.Get());
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(m_vs.Get(), nullptr, 0);
+    context->PSSetShader(m_ps.Get(), nullptr, 0);
+    context->VSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
+    context->VSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
+    context->PSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
+    context->PSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
+    context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
 
     // Camera
     float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
@@ -337,7 +266,7 @@ void Renderer::Render(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, 
     XMVECTOR at  = eye + forward;
     XMVECTOR up  = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     XMMATRIX view = XMMatrixLookAtLH(eye, at, up);
-    float aspect = (m_height > 0) ? (float)m_width / (float)m_height : 1.0f;
+    float aspect = (m_off.h > 0) ? (float)m_off.w / (float)m_off.h : 1.0f;
     XMMATRIX proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
 
     CB_Frame cf{};
@@ -354,34 +283,58 @@ void Renderer::Render(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv, 
     cf.specPower = 64.0f;
     cf.specIntensity = 0.3f;
     cf.normalScale   = 1.0f;
-    m_context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
+    context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
 
-    // 绘制所有可见 mesh
-    for (auto& gm : m_meshes) {
-        if (!gm.visible) continue; // Skip invisible meshes
+    // 遍历场景中的所有对象并渲染
+    for (auto& objPtr : scene.world.Objects()) {
+        auto* obj = objPtr.get();
+        auto* meshRenderer = obj->GetComponent<MeshRenderer>();
+        auto* transform = obj->GetComponent<Transform>();
 
-        CB_Object co{ DirectX::XMMatrixTranspose(gm.world) };
-        m_context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
+        if (!meshRenderer || !transform) {
+            continue;
+        }
 
-        UINT stride = sizeof(VertexPNT), offset = 0;
-        ID3D11Buffer* vbo = gm.vbo.Get();
-        m_context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-        m_context->IASetIndexBuffer(gm.ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+        // 确保资源已上传
+        meshRenderer->EnsureUploaded();
+        if (meshRenderer->meshes.empty()) {
+            continue;
+        }
+        // 获取世界矩阵
+        XMMATRIX worldMatrix = transform->WorldMatrix();
 
-        ID3D11ShaderResourceView* srvs[2] = {
-            gm.albedoSRV ? gm.albedoSRV.Get() : m_albedoSRV.Get(),
-            gm.normalSRV ? gm.normalSRV.Get() : m_normalSRV.Get()
-        };
-        m_context->PSSetShaderResources(0, 2, srvs);
+        // 绘制所有子网格（glTF 可能有多个）
+        for (auto& gpuMesh : meshRenderer->meshes) {
+            if (!gpuMesh) continue;
 
-        m_context->DrawIndexed(gm.indexCount, 0, 0);
+            // 更新物体矩阵
+            CB_Object co{ XMMatrixTranspose(worldMatrix) };
+            context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
+
+            // 绑定顶点和索引缓冲
+            UINT stride = sizeof(VertexPNT), offset = 0;
+            ID3D11Buffer* vbo = gpuMesh->vbo.Get();
+            context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
+            context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+
+            // 绑定纹理（如果为空则使用默认纹理）
+            ID3D11ShaderResourceView* srvs[2] = {
+                gpuMesh->albedoSRV.Get() ? gpuMesh->albedoSRV.Get() : m_defaultAlbedo.Get(),
+                gpuMesh->normalSRV.Get() ? gpuMesh->normalSRV.Get() : m_defaultNormal.Get()
+            };
+            context->PSSetShaderResources(0, 2, srvs);
+
+            // 绘制
+            context->DrawIndexed(gpuMesh->indexCount, 0, 0);
+        }
     }
-
-    // 注意：不 Present；不创建/销毁 RTV/DSV/SwapChain
 }
 
-void Renderer::ensureOffscreen(UINT w, UINT h)
+void MainPass::ensureOffscreen(UINT w, UINT h)
 {
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    if (!device) return;
+
     if (w == 0 || h == 0) return;
     if (m_off.color && w == m_off.w && h == m_off.h) return;
 
@@ -394,51 +347,51 @@ void Renderer::ensureOffscreen(UINT w, UINT h)
     td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // keep linear; switch to _SRGB if you want post-sRGB
     td.SampleDesc.Count = 1;
     td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    m_device->CreateTexture2D(&td, nullptr, m_off.color.GetAddressOf());
+    device->CreateTexture2D(&td, nullptr, m_off.color.GetAddressOf());
 
     D3D11_RENDER_TARGET_VIEW_DESC rvd{};
     rvd.Format = td.Format; rvd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-    m_device->CreateRenderTargetView(m_off.color.Get(), &rvd, m_off.rtv.GetAddressOf());
+    device->CreateRenderTargetView(m_off.color.Get(), &rvd, m_off.rtv.GetAddressOf());
 
     D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
     sv.Format = td.Format; sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     sv.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(m_off.color.Get(), &sv, m_off.srv.GetAddressOf());
+    device->CreateShaderResourceView(m_off.color.Get(), &sv, m_off.srv.GetAddressOf());
 
     // Depth
     D3D11_TEXTURE2D_DESC dd = td;
     dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     dd.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    m_device->CreateTexture2D(&dd, nullptr, m_off.depth.GetAddressOf());
-    m_device->CreateDepthStencilView(m_off.depth.Get(), nullptr, m_off.dsv.GetAddressOf());
+    device->CreateTexture2D(&dd, nullptr, m_off.depth.GetAddressOf());
+    device->CreateDepthStencilView(m_off.depth.Get(), nullptr, m_off.dsv.GetAddressOf());
 }
 
-void Renderer::RenderToOffscreen(UINT w, UINT h, float dt)
+void MainPass::Render(Scene& scene, UINT w, UINT h, float dt)
 {
+    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    if (!context) return;
+
     ensureOffscreen(w, h);
 
     ID3D11RenderTargetView* rtv = m_off.rtv.Get();
     ID3D11DepthStencilView* dsv = m_off.dsv.Get();
-    m_context->OMSetRenderTargets(1, &rtv, dsv);
+    context->OMSetRenderTargets(1, &rtv, dsv);
 
     D3D11_VIEWPORT vp{};
     vp.Width = float(m_off.w);
     vp.Height = float(m_off.h);
     vp.MinDepth = 0.f; vp.MaxDepth = 1.f;
-    m_context->RSSetViewports(1, &vp);
+    context->RSSetViewports(1, &vp);
 
     const float clear[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
-    m_context->ClearRenderTargetView(m_off.rtv.Get(), clear);
-    if (m_off.dsv) m_context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+    context->ClearRenderTargetView(m_off.rtv.Get(), clear);
+    if (m_off.dsv) context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-    // Reuse your existing draw path; ensure projection uses offscreen size:
-    SetSize(m_off.w, m_off.h);
-    Render(m_off.rtv.Get(), m_off.dsv.Get(), dt);
+    renderScene(scene, dt);
 }
 
-void Renderer::Shutdown()
+void MainPass::Shutdown()
 {
-    m_meshes.clear();
     m_cbFrame.Reset();
     m_cbObj.Reset();
     m_inputLayout.Reset();
@@ -447,58 +400,6 @@ void Renderer::Shutdown()
     m_sampler.Reset();
     m_rsSolid.Reset();
     m_rsWire.Reset();
-    m_albedoSRV.Reset();
-    m_normalSRV.Reset();
-
-    m_context = nullptr;
-    m_device  = nullptr;
-}
-
-
-std::size_t Renderer::AddMesh(const MeshCPU_PNT& cpu, DirectX::XMMATRIX world){
-    auto gm = upload(cpu);
-    gm.world = world;
-    gm.albedoSRV = m_albedoSRV;
-    gm.normalSRV = m_normalSRV;
-    m_meshes.push_back(std::move(gm));
-    return m_meshes.size()-1;
-}
-
-std::size_t Renderer::AddMesh(const GltfMeshCPU& gltfMesh, DirectX::XMMATRIX world){
-    auto gm = upload(gltfMesh.mesh);
-    gm.world = world;
-
-    // albedo（sRGB）
-    if (!gltfMesh.textures.baseColorPath.empty()) {
-        ComPtr<ID3D11ShaderResourceView> srv;
-        LoadTextureWIC(m_device,
-            std::wstring(gltfMesh.textures.baseColorPath.begin(), gltfMesh.textures.baseColorPath.end()),
-            srv, /*srgb=*/true);
-        gm.albedoSRV = srv ? srv : m_albedoSRV;
-    } else gm.albedoSRV = m_albedoSRV;
-
-    // normal（线性）
-    if (!gltfMesh.textures.normalPath.empty()) {
-        ComPtr<ID3D11ShaderResourceView> srv;
-        LoadTextureWIC(m_device,
-            std::wstring(gltfMesh.textures.normalPath.begin(), gltfMesh.textures.normalPath.end()),
-            srv, /*srgb=*/false);
-        gm.normalSRV = srv ? srv : m_normalSRV;
-    } else gm.normalSRV = m_normalSRV;
-
-    m_meshes.push_back(std::move(gm));
-    return m_meshes.size()-1;
-}
-
-void Renderer::SetMeshWorld(std::size_t index, DirectX::XMMATRIX world){
-    if (index < m_meshes.size()){
-        m_meshes[index].world = world;
-    }
-}
-
-void Renderer::RemoveMesh(std::size_t index){
-    if (index < m_meshes.size()){
-        m_meshes[index].visible = false;
-        // GPU resources (VBO/IBO/textures) will be released when vector is cleared or overwritten
-    }
+    m_defaultAlbedo.Reset();
+    m_defaultNormal.Reset();
 }

@@ -43,33 +43,38 @@ Note: The executable expects assets to be in `E:\forfun\assets`. The `ForceWorkD
 
 This is a custom game engine editor with three distinct layers:
 
-1. **Core/** - Low-level rendering and resource management
+1. **Core/** - Low-level device management and resource loading
    - `DX11Context`: Singleton managing D3D11 device, context, swapchain, backbuffer
-   - `Renderer`: Scene rendering to offscreen targets; manages GPU meshes, shaders, materials
+   - `MeshResourceManager`: Singleton for loading and caching mesh resources (OBJ/glTF)
+   - `GpuMeshResource`: RAII wrapper for GPU mesh data (VBO, IBO, textures)
    - `Mesh`, `ObjLoader`, `GltfLoader`, `TextureLoader`: Asset loading utilities
-   - `Offscreen`: Offscreen render target management
+   - **Does NOT depend on Engine or Editor layers**
 
-2. **Engine/** - Entity-component-system and scene management
+2. **Engine/** - Entity-component-system, scene management, and rendering logic
    - `World`: Container managing all GameObjects
    - `GameObject`: Named entities that own Components
    - `Component`: Base class for all components (Transform, MeshRenderer, etc.)
    - `Scene`: Combines World with selection state for editor
    - `Camera`: Editor camera with orbit controls
+   - `Rendering/MainPass`: Main rendering pass (scene traversal, draw calls, shaders)
 
 3. **Editor/** - ImGui-based editor UI (docking enabled)
    - `Panels.h`: Interface for Hierarchy, Inspector, Viewport, Dockspace panels
    - Each panel implemented in separate .cpp files
-   - Viewport renders offscreen RT from Renderer as ImGui image
+   - Viewport renders offscreen RT from MainPass as ImGui image
 
 ### Component System
 
 Components attach to GameObjects and define behavior/data:
 - `Transform`: Position, rotation (euler), scale; provides WorldMatrix()
-- `MeshRenderer`: References mesh kind (Plane/Cube/Obj), path, and GPU mesh indices in Renderer
+- `MeshRenderer`: Stores mesh file path and owns `shared_ptr<GpuMeshResource>` for rendering
 
-The MeshRenderer bridges Engine and Core layers:
-- `EnsureUploaded()`: Creates GPU mesh in Renderer if needed
-- `UpdateTransform()`: Updates world matrix of GPU mesh each frame
+**MeshRenderer Resource Management:**
+- `path`: String path to mesh file (`.obj`, `.gltf`, `.glb`)
+- `meshes`: Vector of `shared_ptr<GpuMeshResource>` (glTF files may contain multiple sub-meshes)
+- `EnsureUploaded()`: Idempotent method that loads mesh via `MeshResourceManager::GetOrLoad(path)`
+- MeshResourceManager handles caching with `weak_ptr` for automatic resource deduplication
+- Changing path in Inspector automatically clears old meshes and triggers reload
 
 ### Reflection System
 
@@ -101,7 +106,7 @@ JSON structure:
       "name": "Cube",
       "components": [
         {"type": "Transform", "Position": [0,0.5,0], "Rotation": [0,0,0], "Scale": [1,1,1]},
-        {"type": "MeshRenderer", "Mesh Kind": 1, "Path": ""}
+        {"type": "MeshRenderer", "Path": "mesh/cube.obj"}
       ]
     }
   ]
@@ -110,23 +115,45 @@ JSON structure:
 
 ### Rendering Pipeline
 
-1. **main.cpp** manages the main loop:
-   - **Lazy initialization**: For each GameObject, calls `MeshRenderer::EnsureUploaded()` to handle newly added components
-   - Updates GameObject transforms via `MeshRenderer::UpdateTransform()`
-   - `Renderer::RenderToOffscreen()` renders scene to offscreen RT
-   - Viewport panel displays offscreen RT via ImGui::Image()
-   - ImGui rendered to backbuffer
-   - Backbuffer presented via DX11Context
+**Architecture:** Layered rendering with clean separation between Core and Engine.
 
-2. **Renderer** maintains `std::vector<GpuMesh>`:
-   - Each GpuMesh has VBO, IBO, world matrix, albedo/normal SRVs
-   - MeshRenderer stores indices into this vector
-   - Renderer does NOT know about GameObjects/Components
+1. **Core Layer (Device & Resources)**:
+   - `DX11Context`: Manages D3D11 device, context, swapchain
+   - `MeshResourceManager`: Singleton that loads and caches mesh files
+     - `GetOrLoad(path)`: Returns `vector<shared_ptr<GpuMeshResource>>`
+     - Uses `weak_ptr` cache for automatic deduplication
+     - Supports OBJ and glTF/GLB formats
+   - `GpuMeshResource`: RAII wrapper containing VBO, IBO, texture SRVs
 
-3. **Lazy Resource Loading**:
-   - Components added via Inspector are not immediately uploaded to GPU
-   - Main loop calls `EnsureUploaded()` each frame, which is idempotent
-   - This handles dynamic component addition without invasive callbacks
+2. **Engine Layer (Rendering Logic)**:
+   - `MainPass` (in `Engine/Rendering/MainPass.h/cpp`):
+     - Owns rendering pipeline resources (shaders, constant buffers, samplers)
+     - Manages offscreen render target for Viewport
+     - `Render(Scene&, w, h, dt)`: Traverses scene and issues draw calls
+     - Directly uses `DX11Context::Instance().GetDevice/GetContext()` for D3D11 API calls
+   - Each frame, MainPass:
+     1. Traverses all GameObjects in Scene
+     2. For each GameObject with MeshRenderer + Transform:
+        - Calls `EnsureUploaded()` (idempotent, handles lazy loading)
+        - Gets world matrix from Transform
+        - Renders each GpuMeshResource with world transform
+     3. Uses default textures for meshes without materials
+
+3. **Main Loop Flow** (`main.cpp`):
+   ```cpp
+   MainPass gMainPass;
+   gMainPass.Initialize();
+
+   // Each frame:
+   gMainPass.Render(gScene, vpWidth, vpHeight, dt);
+   DrawViewport(gMainPass.GetOffscreenSRV(), ...);
+   ```
+
+4. **Resource Ownership**:
+   - MeshRenderer owns `shared_ptr<GpuMeshResource>`
+   - Multiple MeshRenderers can share the same resource (via shared_ptr)
+   - Resources auto-release when last MeshRenderer is destroyed
+   - MeshResourceManager cache uses weak_ptr to allow cleanup
 
 ### Third-Party Dependencies
 
@@ -156,7 +183,7 @@ To add a new component:
 3. Add to CMakeLists.txt ENGINE_SOURCES
 4. Use `GameObject::AddComponent<YourComponent>()` to instantiate
 5. Use `GameObject::GetComponent<YourComponent>()` to retrieve
-6. If it needs rendering, follow MeshRenderer pattern of storing Renderer indices
+6. If it needs rendering, own `shared_ptr<GpuMeshResource>` and load via MeshResourceManager
 
 ## Editor Panel Integration
 

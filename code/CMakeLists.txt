@@ -47,6 +47,7 @@ add_executable(forfun WIN32
     ${CODE_PATH}/main.cpp
 )
 target_include_directories(forfun PRIVATE
+    ${CODE_PATH}
     ${CODE_PATH}/Core
     ${CODE_PATH}/Engine
     ${CODE_PATH}/Editor
@@ -72,5 +73,7 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/Transform.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
+    ${CODE_PATH}/Engine/Rendering/MainPass.h
+    ${CODE_PATH}/Engine/Rendering/MainPass.cpp
 )
 target_sources(forfun PRIVATE ${ENGINE_SOURCES})
