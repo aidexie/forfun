@@ -2,9 +2,10 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <DirectXMath.h>
-
+#include "ShadowPass.h"
 // Forward declarations
 struct Scene;
+class ShadowPass;
 
 // MainPass: 主渲染流程
 // 在 Engine 层，可以直接访问 Scene/GameObject/Components
@@ -39,16 +40,19 @@ public:
     void OnMouseDelta(int dx, int dy);
 
     // 渲染场景到离屏目标
-    void Render(Scene& scene, UINT w, UINT h, float dt);
+    // shadowData: shadow resources from ShadowPass (nullptr = no shadows)
+    void Render(Scene& scene, UINT w, UINT h, float dt,
+                const ShadowPass::Output* shadowData);
 
     // 访问离屏目标
     ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_off.srv.Get(); }
     UINT GetOffscreenWidth()  const { return m_off.w; }
     UINT GetOffscreenHeight() const { return m_off.h; }
 
+
 private:
     void ensureOffscreen(UINT w, UINT h);
-    void renderScene(Scene& scene, float dt);
+    void renderScene(Scene& scene, float dt, const ShadowPass::Output* shadowData);
 
 private:
     OffscreenTarget m_off;

@@ -54,7 +54,7 @@ target_include_directories(forfun PRIVATE
     ${THIRD_PARTY_PATH}/cgltf-master
     ${THIRD_PARTY_PATH}/nlohmann
 )
-target_compile_definitions(forfun PRIVATE UNICODE _UNICODE)
+target_compile_definitions(forfun PRIVATE UNICODE _UNICODE NOMINMAX)
 target_link_libraries(forfun
     PRIVATE
         imgui_docking
@@ -73,7 +73,10 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/Transform.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
+    ${CODE_PATH}/Engine/Components/DirectionalLight.h
     ${CODE_PATH}/Engine/Rendering/MainPass.h
     ${CODE_PATH}/Engine/Rendering/MainPass.cpp
+    ${CODE_PATH}/Engine/Rendering/ShadowPass.h
+    ${CODE_PATH}/Engine/Rendering/ShadowPass.cpp
 )
 target_sources(forfun PRIVATE ${ENGINE_SOURCES})

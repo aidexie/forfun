@@ -10,6 +10,7 @@
 
 #include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
 #include "Engine/Rendering/MainPass.h"  // 主渲染流程
+#include "Engine/Rendering/ShadowPass.h"  // 阴影渲染流程
 #include "Console.h"
 
 // ImGui
@@ -22,6 +23,8 @@
 #include "Camera.h"   // EditorCamera（Viewport 面板用）
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
+#include "Components/DirectionalLight.h"
+#include "SceneSerializer.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -31,6 +34,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
 static const wchar_t* kWndTitle = L"ForFunEditor";
 static MainPass gMainPass;
+static ShadowPass gShadowPass;
 static bool gMinimized = false;
 static POINT gLastMouse = { 0, 0 };
 
@@ -176,39 +180,45 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     gScene.selected = -1;                                // 默认无选中
     gEditorCam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
-    // 4) MainPass 初始化
+    // 4) MainPass 和 ShadowPass 初始化
     if (!gMainPass.Initialize())
     {
         return -3;
     }
-
-    // --- Setup World/GameObjects ---
+    if (!gShadowPass.Initialize())
     {
-        // ensure Assets cwd (already attempted earlier)
-        // Create ground plane
-        auto* g0 = gScene.world.Create("Ground");
-        auto* t0 = g0->AddComponent<Transform>();
-        t0->scale = { 10,0.1,10 };
-        auto* m0 = g0->AddComponent<MeshRenderer>();
-        m0->path = "mesh/cube.obj";
-
-        // Create cube
-        auto* g1 = gScene.world.Create("Cube");
-        auto* t1 = g1->AddComponent<Transform>();
-        t1->position = { 0,2.5f,0 };
-        auto* m1 = g1->AddComponent<MeshRenderer>();
-        m1->path = "mesh/sphere.obj";
-
-        // Create bunny (glTF)
-        auto* g2 = gScene.world.Create("Bunny");
-        auto* t2 = g2->AddComponent<Transform>();
-        t2->position = { 1.5f,0,0 };
-        t2->scale = { 0.8f,0.8f,0.8f };
-        auto* m2 = g2->AddComponent<MeshRenderer>();
-        m2->path = "bunny-pbr-gltf/scene_small.gltf";
-        gScene.selected = 1; // select cube by default
+        return -4;
     }
 
+    // // --- Setup World/GameObjects ---
+    // {
+    //     // ensure Assets cwd (already attempted earlier)
+    //     // Create ground plane
+    //     auto* g0 = gScene.world.Create("Ground");
+    //     auto* t0 = g0->AddComponent<Transform>();
+    //     t0->scale = { 10,0.1,10 };
+    //     auto* m0 = g0->AddComponent<MeshRenderer>();
+    //     m0->path = "mesh/cube.obj";
+
+    //     // Create cube
+    //     auto* g1 = gScene.world.Create("Cube");
+    //     auto* t1 = g1->AddComponent<Transform>();
+    //     t1->position = { 0,2.5f,0 };
+    //     auto* m1 = g1->AddComponent<MeshRenderer>();
+    //     m1->path = "mesh/sphere.obj";
+
+    //     // Create bunny (glTF)
+    //     auto* g2 = gScene.world.Create("Bunny");
+    //     auto* t2 = g2->AddComponent<Transform>();
+    //     t2->position = { 1.5f,0,0 };
+    //     t2->scale = { 0.8f,0.8f,0.8f };
+    //     auto* m2 = g2->AddComponent<MeshRenderer>();
+    //     m2->path = "bunny-pbr-gltf/scene_small.gltf";
+    //     gScene.selected = 1; // select cube by default
+    // }
+    {
+        SceneSerializer::LoadScene(gScene, "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
+    }
     // 5) 主循环
     MSG msg{};
     LARGE_INTEGER freq{}, prev{}, curr{};
@@ -239,14 +249,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // 深度清除交给 Renderer::Render 内部处理（避免与 UI 冲突）
 
-        // 5.3 渲染 3D 场景（bunny）
-        //gRenderer.Render(rtv, dsv, dt);
+        // 5.3 渲染 3D 场景
         ImVec2 vpSize = Panels::GetViewportLastSize();
         UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : DX11Context::Instance().GetWidth();
         UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : DX11Context::Instance().GetHeight();
 
-        // Render scene to offscreen buffer
-        gMainPass.Render(gScene, vpW, vpH, dt);
+        // Collect DirectionalLight from scene
+        DirectionalLight* dirLight = nullptr;
+        for (auto& objPtr : gScene.world.Objects()) {
+            dirLight = objPtr->GetComponent<DirectionalLight>();
+            if (dirLight) break;
+        }
+
+        // Shadow Pass (render shadow map if DirectionalLight exists)
+        if (dirLight) {
+            gShadowPass.Render(gScene, dirLight);
+        }
+
+        // Main Pass (use shadow output bundle)
+        gMainPass.Render(gScene, vpW, vpH, dt, &gShadowPass.GetOutput());
 
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
@@ -283,6 +304,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     // 6) 清理
     gMainPass.Shutdown();
+    gShadowPass.Shutdown();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

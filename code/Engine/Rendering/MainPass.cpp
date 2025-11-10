@@ -1,4 +1,5 @@
 #include "MainPass.h"
+#include "ShadowPass.h"
 #include "Core/DX11Context.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
@@ -6,6 +7,7 @@
 #include "GameObject.h"
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
+#include "Components/DirectionalLight.h"
 #include <array>
 #include <chrono>
 #include <algorithm>
@@ -22,10 +24,11 @@ using namespace DirectX;
 struct alignas(16) CB_Frame {
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX proj;
+    DirectX::XMMATRIX lightSpaceVP;  // For shadow mapping
     DirectX::XMFLOAT3 lightDirWS; float _pad0;
     DirectX::XMFLOAT3 lightColor; float _pad1;
     DirectX::XMFLOAT3 camPosWS;  float _pad2;
-    float ambient; float specPower; float specIntensity; float normalScale;
+    float ambient; float specPower; float specIntensity; float shadowBias;
 };
 struct alignas(16) CB_Object { DirectX::XMMATRIX world; };
 
@@ -69,10 +72,11 @@ void MainPass::createPipeline()
         cbuffer CB_Frame  : register(b0) {
             float4x4 gView;
             float4x4 gProj;
+            float4x4 gLightSpaceVP;
             float3   gLightDirWS; float _pad0;
             float3   gLightColor; float _pad1;
             float3   gCamPosWS;   float _pad2;
-            float    gAmbient; float gSpecPower; float gSpecIntensity; float gNormalScale;
+            float    gAmbient; float gSpecPower; float gSpecIntensity; float gShadowBias;
         }
         cbuffer CB_Object : register(b1) { float4x4 gWorld; }
 
@@ -82,6 +86,7 @@ void MainPass::createPipeline()
             float3 posWS:TEXCOORD0;
             float2 uv:TEXCOORD1;
             float3x3 TBN:TEXCOORD2;
+            float4 posLightSpace:TEXCOORD5;
         };
         VSOut main(VSIn i){
             VSOut o;
@@ -92,6 +97,7 @@ void MainPass::createPipeline()
             o.TBN = float3x3(tWS, bWS, nWS);
             o.posWS = posWS.xyz;
             o.uv = i.uv;
+            o.posLightSpace = mul(posWS, gLightSpaceVP);
             float4 posV = mul(posWS, gView);
             o.posH = mul(posV, gProj);
             return o;
@@ -100,15 +106,18 @@ void MainPass::createPipeline()
     static const char* kPS = R"(
         Texture2D gAlbedo : register(t0);
         Texture2D gNormal : register(t1);
+        Texture2D gShadowMap : register(t2);
         SamplerState gSamp: register(s0);
+        SamplerComparisonState gShadowSampler : register(s1);
 
         cbuffer CB_Frame  : register(b0) {
             float4x4 gView;
             float4x4 gProj;
+            float4x4 gLightSpaceVP;
             float3   gLightDirWS; float _pad0;
             float3   gLightColor; float _pad1;
             float3   gCamPosWS;   float _pad2;
-            float    gAmbient; float gSpecPower; float gSpecIntensity; float gNormalScale;
+            float    gAmbient; float gSpecPower; float gSpecIntensity; float gShadowBias;
         }
         cbuffer CB_Object : register(b1) { float4x4 gWorld; }
 
@@ -117,24 +126,60 @@ void MainPass::createPipeline()
             float3 posWS:TEXCOORD0;
             float2 uv:TEXCOORD1;
             float3x3 TBN:TEXCOORD2;
+            float4 posLightSpace:TEXCOORD5;
         };
+
+        float CalcShadowFactor(float4 posLS) {
+            // Perspective divide
+            float3 projCoords = posLS.xyz / posLS.w;
+
+            // Transform to [0,1] UV space
+            float2 shadowUV = projCoords.xy * 0.5 + 0.5;
+            shadowUV.y = 1.0 - shadowUV.y;
+
+            // Outside shadow map = no shadow
+            if (shadowUV.x < 0 || shadowUV.x > 1 ||
+                shadowUV.y < 0 || shadowUV.y > 1 ||
+                projCoords.z > 1.0)
+                return 1.0;
+
+            float currentDepth = projCoords.z;
+
+            // PCF 3x3 (9 samples for soft shadows)
+            float shadow = 0.0;
+            float2 texelSize = 1.0 / 2048.0;
+            [unroll]
+            for (int x = -1; x <= 1; x++) {
+                [unroll]
+                for (int y = -1; y <= 1; y++) {
+                    float2 uv = shadowUV + float2(x, y) * texelSize;
+                    shadow += gShadowMap.SampleCmpLevelZero(gShadowSampler, uv, currentDepth - gShadowBias);
+                }
+            }
+            return shadow / 9.0;
+        }
 
         float4 main(PSIn i):SV_Target{
             float3 albedo = gAlbedo.Sample(gSamp, i.uv).rgb;
             float3 nTS    = gNormal.Sample(gSamp, i.uv).xyz * 2.0 - 1.0;
-            nTS.xy *= gNormalScale;
             nTS = normalize(nTS);
             float3 nWS = normalize(mul(nTS, i.TBN));
 
+            // Blinn-Phong lighting
             float3 L = normalize(-gLightDirWS);
             float3 V = normalize(gCamPosWS - i.posWS);
             float3 H = normalize(L+V);
             float NdotL = saturate(dot(nWS,L));
             float NdotH = saturate(dot(nWS,H));
 
-            float3 diff = albedo * NdotL;
-            float3 spec = gSpecIntensity * pow(NdotH, gSpecPower) * NdotL * gLightColor;
+            // Shadow factor
+            float shadowFactor = CalcShadowFactor(i.posLightSpace);
 
+            // Diffuse and specular affected by shadow
+            float3 diff = albedo * NdotL * gLightColor * shadowFactor;
+            float3 spec = gSpecIntensity * pow(NdotH, gSpecPower) * NdotL * gLightColor * shadowFactor;
+
+            // Ambient not affected by shadow
             float3 colorLin = gAmbient * albedo + diff + spec;
             return float4(colorLin, 1.0);
         }
@@ -235,7 +280,7 @@ void MainPass::updateInput(float dt)
     if (down('R')) { ResetCameraLookAt(XMFLOAT3(-6.0f,0.8f,0.0f), XMFLOAT3(0,0,0)); }
 }
 
-void MainPass::renderScene(Scene& scene, float dt)
+void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* shadowData)
 {
     ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
     if (!context) return;
@@ -258,6 +303,11 @@ void MainPass::renderScene(Scene& scene, float dt)
     context->PSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
     context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
 
+    // Bind shadow sampler if shadow data is available
+    if (shadowData && shadowData->shadowSampler) {
+        context->PSSetSamplers(1, 1, &shadowData->shadowSampler);
+    }
+
     // Camera
     float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
     float cp = std::cos(m_pitch), sp = std::cos(m_pitch) == 0.f ? 0.f : std::sin(m_pitch);
@@ -269,21 +319,52 @@ void MainPass::renderScene(Scene& scene, float dt)
     float aspect = (m_off.h > 0) ? (float)m_off.w / (float)m_off.h : 1.0f;
     XMMATRIX proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
 
+    // Collect DirectionalLight from scene
+    DirectionalLight* dirLight = nullptr;
+    for (auto& objPtr : scene.world.Objects()) {
+        dirLight = objPtr->GetComponent<DirectionalLight>();
+        if (dirLight) break;  // Use first DirectionalLight found
+    }
+
     CB_Frame cf{};
     cf.view = XMMatrixTranspose(view);
     cf.proj = XMMatrixTranspose(proj);
-    cf.lightDirWS = XMFLOAT3(0.4f,-1.0f,0.2f);
-    {
+
+    // Set light space VP from shadow data
+    if (shadowData) {
+        cf.lightSpaceVP = XMMatrixTranspose(shadowData->lightSpaceVP);
+    } else {
+        cf.lightSpaceVP = XMMatrixTranspose(XMMatrixIdentity());
+    }
+
+    // Set light direction and color from DirectionalLight component (or defaults)
+    if (dirLight) {
+        cf.lightDirWS = dirLight->GetDirection();
+        cf.lightColor = XMFLOAT3(
+            dirLight->Color.x * dirLight->Intensity,
+            dirLight->Color.y * dirLight->Intensity,
+            dirLight->Color.z * dirLight->Intensity
+        );
+        cf.shadowBias = dirLight->ShadowBias;
+    } else {
+        // Default light if no DirectionalLight component exists
+        cf.lightDirWS = XMFLOAT3(0.4f, -1.0f, 0.2f);
         XMVECTOR L = XMVector3Normalize(XMLoadFloat3(&cf.lightDirWS));
         XMStoreFloat3(&cf.lightDirWS, L);
+        cf.lightColor = XMFLOAT3(1.0f, 1.0f, 1.0f);
+        cf.shadowBias = 0.005f;
     }
-    cf.lightColor = XMFLOAT3(1,1,1);
+
     cf.camPosWS   = m_camPos;
     cf.ambient = 0.38f;
     cf.specPower = 64.0f;
     cf.specIntensity = 0.3f;
-    cf.normalScale   = 1.0f;
     context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
+
+    // Bind shadow map
+    if (shadowData && shadowData->shadowMap) {
+        context->PSSetShaderResources(2, 1, &shadowData->shadowMap);
+    }
 
     // 遍历场景中的所有对象并渲染
     for (auto& objPtr : scene.world.Objects()) {
@@ -366,7 +447,8 @@ void MainPass::ensureOffscreen(UINT w, UINT h)
     device->CreateDepthStencilView(m_off.depth.Get(), nullptr, m_off.dsv.GetAddressOf());
 }
 
-void MainPass::Render(Scene& scene, UINT w, UINT h, float dt)
+void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
+                      const ShadowPass::Output* shadowData)
 {
     ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
     if (!context) return;
@@ -387,7 +469,7 @@ void MainPass::Render(Scene& scene, UINT w, UINT h, float dt)
     context->ClearRenderTargetView(m_off.rtv.Get(), clear);
     if (m_off.dsv) context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-    renderScene(scene, dt);
+    renderScene(scene, dt, shadowData);
 }
 
 void MainPass::Shutdown()

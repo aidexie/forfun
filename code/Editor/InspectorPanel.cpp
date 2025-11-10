@@ -6,6 +6,7 @@
 #include "PropertyVisitor.h"
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
+#include "Components/DirectionalLight.h"
 #include <string>
 #include <windows.h>
 #include <commdlg.h>
@@ -141,6 +142,16 @@ void Panels::DrawInspector(Scene& scene) {
         } else {
             if (ImGui::Button("Add MeshRenderer")) {
                 sel->AddComponent<MeshRenderer>();
+            }
+        }
+        // DirectionalLight component
+        if (auto* mr = sel->GetComponent<DirectionalLight>()) {
+            if (ImGui::CollapsingHeader("DirectionalLight", ImGuiTreeNodeFlags_DefaultOpen)) {
+                mr->VisitProperties(visitor);
+            }
+        } else {
+            if (ImGui::Button("Add DirectionalLight")) {
+                sel->AddComponent<DirectionalLight>();
             }
         }
     } else {
