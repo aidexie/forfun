@@ -1,6 +1,7 @@
 #pragma once
 #include "Component.h"
 #include "PropertyVisitor.h"
+#include "ComponentRegistry.h"
 #include <DirectXMath.h>
 
 struct Transform : public Component {
@@ -24,3 +25,6 @@ struct Transform : public Component {
         visitor.VisitFloat3("Scale", scale);
     }
 };
+
+// Auto-register component
+REGISTER_COMPONENT(Transform)

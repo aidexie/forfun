@@ -8,9 +8,11 @@
 #include "World.h"
 #include "GameObject.h"
 #include "Component.h"
+#include "ComponentRegistry.h"
 #include "PropertyVisitor.h"
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
+#include "Components/DirectionalLight.h"
 
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -113,21 +115,22 @@ static void SerializeComponent(const Component* comp, json& j) {
 }
 
 // ===========================
+// Centralized Component Factory
+// ===========================
+// Automatically uses ComponentRegistry (no manual code needed!)
+// Components auto-register via REGISTER_COMPONENT macro in their header files
+static Component* CreateComponentByType(GameObject* go, const std::string& typeName) {
+    return ComponentRegistry::Instance().Create(go, typeName);
+}
+
+// ===========================
 // Deserialize Component
 // ===========================
 static Component* DeserializeComponent(GameObject* go, const json& j) {
     if (!j.contains("type")) return nullptr;
 
     std::string type = j["type"].get<std::string>();
-    Component* comp = nullptr;
-
-    // Create component based on type
-    if (type == "Transform") {
-        comp = go->AddComponent<Transform>();
-    } else if (type == "MeshRenderer") {
-        comp = go->AddComponent<MeshRenderer>();
-    }
-    // Add more component types here as needed
+    Component* comp = CreateComponentByType(go, type);
 
     if (comp) {
         // Load properties using reflection
@@ -156,21 +159,12 @@ bool SceneSerializer::SaveScene(const Scene& scene, const std::string& filepath)
             goJson["name"] = go->GetName();
             goJson["components"] = json::array();
 
-            // Serialize Transform
-            if (auto* tr = go->GetComponent<Transform>()) {
+            // Serialize all components automatically using ForEachComponent
+            go->ForEachComponent([&](const Component* comp) {
                 json compJson;
-                SerializeComponent(tr, compJson);
+                SerializeComponent(comp, compJson);
                 goJson["components"].push_back(compJson);
-            }
-
-            // Serialize MeshRenderer
-            if (auto* mr = go->GetComponent<MeshRenderer>()) {
-                json compJson;
-                SerializeComponent(mr, compJson);
-                goJson["components"].push_back(compJson);
-            }
-
-            // Add more component types here as needed
+            });
 
             j["gameObjects"].push_back(goJson);
         }

@@ -1,6 +1,7 @@
 #pragma once
 #include "Component.h"
 #include "PropertyVisitor.h"
+#include "ComponentRegistry.h"
 #include <DirectXMath.h>
 #include <string>
 #include <memory>
@@ -31,3 +32,6 @@ struct MeshRenderer : public Component {
         }
     }
 };
+
+// Auto-register component
+REGISTER_COMPONENT(MeshRenderer)

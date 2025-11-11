@@ -254,6 +254,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : DX11Context::Instance().GetWidth();
         UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : DX11Context::Instance().GetHeight();
 
+        // Update camera matrices first (needed for tight frustum fitting)
+        gMainPass.UpdateCamera(vpW, vpH, dt);
+
         // Collect DirectionalLight from scene
         DirectionalLight* dirLight = nullptr;
         for (auto& objPtr : gScene.world.Objects()) {
@@ -262,8 +265,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // Shadow Pass (render shadow map if DirectionalLight exists)
+        // Uses tight frustum fitting based on camera frustum
         if (dirLight) {
-            gShadowPass.Render(gScene, dirLight);
+            gShadowPass.Render(gScene, dirLight,
+                              gMainPass.GetCameraViewMatrix(),
+                              gMainPass.GetCameraProjMatrix());
         }
 
         // Main Pass (use shadow output bundle)

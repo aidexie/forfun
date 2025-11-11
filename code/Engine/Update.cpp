@@ -14,8 +14,8 @@ void Update::Tick(float dt){
     const float sp=2.0f;
     if(m_keys['W']) m_cam->MoveForward(+sp*dt);
     if(m_keys['S']) m_cam->MoveForward(-sp*dt);
-    if(m_keys['A']) m_cam->MoveRight(-sp*dt);
-    if(m_keys['D']) m_cam->MoveRight(+sp*dt);
+    if(m_keys['A']) m_cam->MoveRight(+sp*dt);
+    if(m_keys['D']) m_cam->MoveRight(-sp*dt);
     if(m_keys['Q']) m_cam->MoveUp(-sp*dt);
     if(m_keys['E']) m_cam->MoveUp(+sp*dt);
 }

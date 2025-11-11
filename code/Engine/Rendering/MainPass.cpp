@@ -24,10 +24,18 @@ using namespace DirectX;
 struct alignas(16) CB_Frame {
     DirectX::XMMATRIX view;
     DirectX::XMMATRIX proj;
-    DirectX::XMMATRIX lightSpaceVP;  // For shadow mapping
-    DirectX::XMFLOAT3 lightDirWS; float _pad0;
-    DirectX::XMFLOAT3 lightColor; float _pad1;
-    DirectX::XMFLOAT3 camPosWS;  float _pad2;
+
+    // CSM parameters
+    int cascadeCount;
+    int debugShowCascades;  // 0=off, 1=on
+    DirectX::XMFLOAT2 _pad0;
+    DirectX::XMFLOAT4 cascadeSplits;  // HLSL treats array as float4, use XMFLOAT4
+    DirectX::XMMATRIX lightSpaceVPs[4];
+
+    // Lighting
+    DirectX::XMFLOAT3 lightDirWS; float _pad1;
+    DirectX::XMFLOAT3 lightColor; float _pad2;
+    DirectX::XMFLOAT3 camPosWS;  float _pad3;
     float ambient; float specPower; float specIntensity; float shadowBias;
 };
 struct alignas(16) CB_Object { DirectX::XMMATRIX world; };
@@ -72,10 +80,18 @@ void MainPass::createPipeline()
         cbuffer CB_Frame  : register(b0) {
             float4x4 gView;
             float4x4 gProj;
-            float4x4 gLightSpaceVP;
-            float3   gLightDirWS; float _pad0;
-            float3   gLightColor; float _pad1;
-            float3   gCamPosWS;   float _pad2;
+
+            // CSM parameters
+            int gCascadeCount;
+            int gDebugShowCascades;  // 0=off, 1=on
+            float2 _pad0;
+            float4 gCascadeSplits;  // Changed from array to float4 for alignment
+            float4x4 gLightSpaceVPs[4];
+
+            // Lighting
+            float3   gLightDirWS; float _pad1;
+            float3   gLightColor; float _pad2;
+            float3   gCamPosWS;   float _pad3;
             float    gAmbient; float gSpecPower; float gSpecIntensity; float gShadowBias;
         }
         cbuffer CB_Object : register(b1) { float4x4 gWorld; }
@@ -86,7 +102,7 @@ void MainPass::createPipeline()
             float3 posWS:TEXCOORD0;
             float2 uv:TEXCOORD1;
             float3x3 TBN:TEXCOORD2;
-            float4 posLightSpace:TEXCOORD5;
+            float4 posVS:TEXCOORD5;  // View space position for cascade selection
         };
         VSOut main(VSIn i){
             VSOut o;
@@ -97,8 +113,8 @@ void MainPass::createPipeline()
             o.TBN = float3x3(tWS, bWS, nWS);
             o.posWS = posWS.xyz;
             o.uv = i.uv;
-            o.posLightSpace = mul(posWS, gLightSpaceVP);
             float4 posV = mul(posWS, gView);
+            o.posVS = posV;  // Pass view space position to PS
             o.posH = mul(posV, gProj);
             return o;
         }
@@ -106,17 +122,25 @@ void MainPass::createPipeline()
     static const char* kPS = R"(
         Texture2D gAlbedo : register(t0);
         Texture2D gNormal : register(t1);
-        Texture2D gShadowMap : register(t2);
+        Texture2DArray gShadowMaps : register(t2);  // CSM: Texture2DArray
         SamplerState gSamp: register(s0);
         SamplerComparisonState gShadowSampler : register(s1);
 
         cbuffer CB_Frame  : register(b0) {
             float4x4 gView;
             float4x4 gProj;
-            float4x4 gLightSpaceVP;
-            float3   gLightDirWS; float _pad0;
-            float3   gLightColor; float _pad1;
-            float3   gCamPosWS;   float _pad2;
+
+            // CSM parameters
+            int gCascadeCount;
+            int gDebugShowCascades;  // 0=off, 1=on
+            float2 _pad0;
+            float4 gCascadeSplits;  // Changed from array to float4 for alignment
+            float4x4 gLightSpaceVPs[4];
+
+            // Lighting
+            float3   gLightDirWS; float _pad1;
+            float3   gLightColor; float _pad2;
+            float3   gCamPosWS;   float _pad3;
             float    gAmbient; float gSpecPower; float gSpecIntensity; float gShadowBias;
         }
         cbuffer CB_Object : register(b1) { float4x4 gWorld; }
@@ -126,11 +150,25 @@ void MainPass::createPipeline()
             float3 posWS:TEXCOORD0;
             float2 uv:TEXCOORD1;
             float3x3 TBN:TEXCOORD2;
-            float4 posLightSpace:TEXCOORD5;
+            float4 posVS:TEXCOORD5;  // View space position
         };
 
-        float CalcShadowFactor(float4 posLS) {
-            // Perspective divide
+        // Select cascade based on view space depth
+        int SelectCascade(float depthVS) {
+            float absDepth = abs(depthVS);  // Depth is negative in view space
+            for (int i = 0; i < gCascadeCount - 1; ++i) {
+                if (absDepth < gCascadeSplits[i])
+                    return i;
+            }
+            return gCascadeCount - 1;
+        }
+
+        float CalcShadowFactor(float3 posWS, float depthVS) {
+            // Select cascade
+            int cascadeIndex = SelectCascade(depthVS);
+
+            // Transform to light space using selected cascade's VP matrix
+            float4 posLS = mul(float4(posWS, 1.0), gLightSpaceVPs[cascadeIndex]);
             float3 projCoords = posLS.xyz / posLS.w;
 
             // Transform to [0,1] UV space
@@ -148,18 +186,34 @@ void MainPass::createPipeline()
             // PCF 3x3 (9 samples for soft shadows)
             float shadow = 0.0;
             float2 texelSize = 1.0 / 2048.0;
+            float cascadeIndexF = float(cascadeIndex);  // Explicit conversion to float
             [unroll]
             for (int x = -1; x <= 1; x++) {
                 [unroll]
                 for (int y = -1; y <= 1; y++) {
                     float2 uv = shadowUV + float2(x, y) * texelSize;
-                    shadow += gShadowMap.SampleCmpLevelZero(gShadowSampler, uv, currentDepth - gShadowBias);
+                    // Sample from Texture2DArray: (u, v, arraySlice)
+                    shadow += gShadowMaps.SampleCmpLevelZero(gShadowSampler,
+                                                             float3(uv.x, uv.y, cascadeIndexF),
+                                                             currentDepth - gShadowBias);
                 }
             }
             return shadow / 9.0;
         }
 
         float4 main(PSIn i):SV_Target{
+            // Debug: Visualize cascade levels
+            if (gDebugShowCascades == 1) {
+                int cascadeIndex = SelectCascade(i.posVS.z);
+                float3 cascadeColors[4] = {
+                    float3(1.0, 0.0, 0.0),  // Cascade 0: Red
+                    float3(0.0, 1.0, 0.0),  // Cascade 1: Green
+                    float3(0.0, 0.0, 1.0),  // Cascade 2: Blue
+                    float3(1.0, 1.0, 0.0)   // Cascade 3: Yellow
+                };
+                return float4(cascadeColors[cascadeIndex], 1.0);
+            }
+
             float3 albedo = gAlbedo.Sample(gSamp, i.uv).rgb;
             float3 nTS    = gNormal.Sample(gSamp, i.uv).xyz * 2.0 - 1.0;
             nTS = normalize(nTS);
@@ -172,8 +226,8 @@ void MainPass::createPipeline()
             float NdotL = saturate(dot(nWS,L));
             float NdotH = saturate(dot(nWS,H));
 
-            // Shadow factor
-            float shadowFactor = CalcShadowFactor(i.posLightSpace);
+            // Shadow factor (CSM)
+            float shadowFactor = CalcShadowFactor(i.posWS, i.posVS.z);
 
             // Diffuse and specular affected by shadow
             float3 diff = albedo * NdotL * gLightColor * shadowFactor;
@@ -247,6 +301,23 @@ void MainPass::OnMouseDelta(int dx, int dy)
 }
 void MainPass::OnRButton(bool down) { m_rmbLook = down; }
 
+void MainPass::UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt)
+{
+    updateInput(dt);
+
+    // Calculate camera matrices
+    float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
+    float cp = std::cos(m_pitch), sp = std::cos(m_pitch) == 0.f ? 0.f : std::sin(m_pitch);
+    XMVECTOR eye = XMLoadFloat3(&m_camPos);
+    XMVECTOR forward = XMVector3Normalize(XMVectorSet(cp*cy, sp, cp*sy, 0.0f));
+    XMVECTOR at = eye + forward;
+    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    m_cameraView = XMMatrixLookAtLH(eye, at, up);
+
+    float aspect = (viewportHeight > 0) ? (float)viewportWidth / (float)viewportHeight : 1.0f;
+    m_cameraProj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
+}
+
 void MainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
 {
     m_camPos = eye;
@@ -262,7 +333,7 @@ void MainPass::updateInput(float dt)
 {
     auto down = [](int vk){ return (GetAsyncKeyState(vk) & 0x8000) != 0; };
 
-    const float speed = 1.8f;
+    const float speed = 5.0f;
     float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
     float cp = std::cos(m_pitch), sp = std::sin(m_pitch);
     XMVECTOR forward = XMVector3Normalize(XMVectorSet(cp*cy, sp, cp*sy, 0.0f));
@@ -271,8 +342,8 @@ void MainPass::updateInput(float dt)
     XMVECTOR delta = XMVectorZero();
     if (down('W')) delta += forward * speed * dt;
     if (down('S')) delta -= forward * speed * dt;
-    if (down('A')) delta -= right   * speed * dt;
-    if (down('D')) delta += right   * speed * dt;
+    if (down('A')) delta += right   * speed * dt;
+    if (down('D')) delta -= right   * speed * dt;
 
     XMFLOAT3 d; XMStoreFloat3(&d, delta);
     m_camPos.x += d.x; m_camPos.y += d.y; m_camPos.z += d.z;
@@ -308,16 +379,10 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
         context->PSSetSamplers(1, 1, &shadowData->shadowSampler);
     }
 
-    // Camera
-    float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
-    float cp = std::cos(m_pitch), sp = std::cos(m_pitch) == 0.f ? 0.f : std::sin(m_pitch);
+    // Use cached camera matrices (computed in UpdateCamera)
+    XMMATRIX view = m_cameraView;
+    XMMATRIX proj = m_cameraProj;
     XMVECTOR eye = XMLoadFloat3(&m_camPos);
-    XMVECTOR forward = XMVector3Normalize(XMVectorSet(cp*cy, sp, cp*sy, 0.0f));
-    XMVECTOR at  = eye + forward;
-    XMVECTOR up  = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-    XMMATRIX view = XMMatrixLookAtLH(eye, at, up);
-    float aspect = (m_off.h > 0) ? (float)m_off.w / (float)m_off.h : 1.0f;
-    XMMATRIX proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
 
     // Collect DirectionalLight from scene
     DirectionalLight* dirLight = nullptr;
@@ -330,11 +395,26 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     cf.view = XMMatrixTranspose(view);
     cf.proj = XMMatrixTranspose(proj);
 
-    // Set light space VP from shadow data
+    // Set CSM parameters from shadow data
     if (shadowData) {
-        cf.lightSpaceVP = XMMatrixTranspose(shadowData->lightSpaceVP);
+        cf.cascadeCount = shadowData->cascadeCount;
+        cf.debugShowCascades = shadowData->debugShowCascades ? 1 : 0;
+        cf.cascadeSplits = XMFLOAT4(
+            (0 < shadowData->cascadeCount) ? shadowData->cascadeSplits[0] : 100.0f,
+            (1 < shadowData->cascadeCount) ? shadowData->cascadeSplits[1] : 100.0f,
+            (2 < shadowData->cascadeCount) ? shadowData->cascadeSplits[2] : 100.0f,
+            (3 < shadowData->cascadeCount) ? shadowData->cascadeSplits[3] : 100.0f
+        );
+        for (int i = 0; i < 4; ++i) {
+            cf.lightSpaceVPs[i] = XMMatrixTranspose(shadowData->lightSpaceVPs[i]);
+        }
     } else {
-        cf.lightSpaceVP = XMMatrixTranspose(XMMatrixIdentity());
+        cf.cascadeCount = 1;
+        cf.debugShowCascades = 0;
+        cf.cascadeSplits = XMFLOAT4(100.0f, 100.0f, 100.0f, 100.0f);
+        for (int i = 0; i < 4; ++i) {
+            cf.lightSpaceVPs[i] = XMMatrixTranspose(XMMatrixIdentity());
+        }
     }
 
     // Set light direction and color from DirectionalLight component (or defaults)
@@ -361,9 +441,9 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     cf.specIntensity = 0.3f;
     context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
 
-    // Bind shadow map
-    if (shadowData && shadowData->shadowMap) {
-        context->PSSetShaderResources(2, 1, &shadowData->shadowMap);
+    // Bind shadow map array
+    if (shadowData && shadowData->shadowMapArray) {
+        context->PSSetShaderResources(2, 1, &shadowData->shadowMapArray);
     }
 
     // 遍历场景中的所有对象并渲染
@@ -452,6 +532,14 @@ void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
 {
     ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
     if (!context) return;
+
+    // Unbind ALL resources from ALL stages BEFORE ensureOffscreen to avoid hazards
+    ID3D11ShaderResourceView* nullSRV[8] = { nullptr };
+    context->VSSetShaderResources(0, 8, nullSRV);
+    context->PSSetShaderResources(0, 8, nullSRV);
+
+    // Also unbind render targets before recreating resources
+    context->OMSetRenderTargets(0, nullptr, nullptr);
 
     ensureOffscreen(w, h);
 

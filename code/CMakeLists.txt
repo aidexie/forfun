@@ -66,6 +66,7 @@ target_link_libraries(forfun
 set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/GameObject.h
     ${CODE_PATH}/Engine/Component.h
+    ${CODE_PATH}/Engine/ComponentRegistry.h
     ${CODE_PATH}/Engine/World.h
     ${CODE_PATH}/Engine/PropertyVisitor.h
     ${CODE_PATH}/Engine/SceneSerializer.h

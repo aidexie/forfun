@@ -37,6 +37,14 @@ public:
         return nullptr;
     }
 
+    // Iterate over all components (for serialization/reflection)
+    template<typename Func>
+    void ForEachComponent(Func&& func) const {
+        for (const auto& comp : m_components) {
+            func(comp.get());
+        }
+    }
+
 private:
     std::string m_name;
     std::vector<std::unique_ptr<Component>> m_components;

@@ -2,6 +2,8 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <DirectXMath.h>
+#include <array>
+#include <vector>
 
 // Forward declarations
 struct Scene;
@@ -14,9 +16,14 @@ class ShadowPass
 public:
     // Output bundle containing all shadow resources needed by MainPass
     struct Output {
-        ID3D11ShaderResourceView* shadowMap;      // Shadow map texture (or default if no light)
-        ID3D11SamplerState*       shadowSampler;  // Comparison sampler for PCF
-        DirectX::XMMATRIX         lightSpaceVP;   // Light space view-projection matrix
+        static const int MAX_CASCADES = 4;
+
+        int cascadeCount;                                   // Actual number of cascades (1-4)
+        float cascadeSplits[MAX_CASCADES];                  // Split distances in camera space
+        ID3D11ShaderResourceView* shadowMapArray;           // Texture2DArray SRV (all cascades)
+        DirectX::XMMATRIX lightSpaceVPs[MAX_CASCADES];      // Light space VP matrix per cascade
+        ID3D11SamplerState* shadowSampler;                  // Comparison sampler for PCF
+        bool debugShowCascades;                             // Debug: visualize cascade colors
     };
 
     ShadowPass() = default;
@@ -27,23 +34,50 @@ public:
     void Shutdown();
 
     // Render shadow map from directional light's perspective
-    // Updates internal output bundle for MainPass to use
-    void Render(Scene& scene, DirectionalLight* light);
+    // Uses tight frustum fitting based on camera view frustum
+    // cameraView, cameraProj: Camera matrices for frustum extraction
+    void Render(Scene& scene, DirectionalLight* light,
+                const DirectX::XMMATRIX& cameraView,
+                const DirectX::XMMATRIX& cameraProj);
 
     // Get complete shadow output bundle for MainPass
     const Output& GetOutput() const { return m_output; }
 
 private:
-    void ensureShadowMap(UINT size);
-    DirectX::XMMATRIX calculateLightSpaceMatrix(DirectionalLight* light, float shadowDistance);
+    void ensureShadowMapArray(UINT size, int cascadeCount);
+
+    // Tight frustum fitting helpers
+    std::array<DirectX::XMFLOAT3, 8> extractFrustumCorners(
+        const DirectX::XMMATRIX& view,
+        const DirectX::XMMATRIX& proj) const;
+
+    // Extract sub-frustum for a specific cascade
+    std::array<DirectX::XMFLOAT3, 8> extractSubFrustum(
+        const DirectX::XMMATRIX& view,
+        const DirectX::XMMATRIX& proj,
+        float nearDist,
+        float farDist) const;
+
+    DirectX::XMMATRIX calculateTightLightMatrix(
+        const std::array<DirectX::XMFLOAT3, 8>& frustumCornersWS,
+        DirectionalLight* light,
+        float shadowExtension = 50.0f) const;
+
+    // Calculate cascade split distances using Practical Split Scheme
+    std::vector<float> calculateCascadeSplits(
+        int cascadeCount,
+        float nearPlane,
+        float farPlane,
+        float lambda) const;
 
 private:
-    // Shadow map resources
-    Microsoft::WRL::ComPtr<ID3D11Texture2D>         m_shadowMap;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView>  m_shadowDSV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_shadowSRV;
+    // Shadow map resources (Texture2DArray for CSM)
+    Microsoft::WRL::ComPtr<ID3D11Texture2D>          m_shadowMapArray;     // Texture2D with ArraySize=cascadeCount
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView>   m_shadowDSVs[4];      // Per-slice DSV
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_shadowArraySRV;     // Array SRV
     UINT m_currentSize = 0;
-    DirectX::XMMATRIX                               m_lightSpaceVP;
+    int m_currentCascadeCount = 0;
+
     // Default shadow map (1x1 white, depth=1.0, no shadow)
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultShadowMap;
 

@@ -39,6 +39,9 @@ public:
     void OnRButton(bool down);
     void OnMouseDelta(int dx, int dy);
 
+    // 更新摄像机矩阵（在 ShadowPass 之前调用）
+    void UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt);
+
     // 渲染场景到离屏目标
     // shadowData: shadow resources from ShadowPass (nullptr = no shadows)
     void Render(Scene& scene, UINT w, UINT h, float dt,
@@ -48,6 +51,10 @@ public:
     ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_off.srv.Get(); }
     UINT GetOffscreenWidth()  const { return m_off.w; }
     UINT GetOffscreenHeight() const { return m_off.h; }
+
+    // 获取摄像机矩阵（用于 ShadowPass 视锥拟合）
+    DirectX::XMMATRIX GetCameraViewMatrix() const { return m_cameraView; }
+    DirectX::XMMATRIX GetCameraProjMatrix() const { return m_cameraProj; }
 
 
 private:
@@ -75,6 +82,10 @@ private:
     DirectX::XMFLOAT3 m_camPos{ -6.0f, 0.8f, 0.0f };
     float m_yaw = 0.0f, m_pitch = 0.0f;
     bool  m_rmbLook = false;
+
+    // 摄像机矩阵缓存（用于 ShadowPass）
+    DirectX::XMMATRIX m_cameraView = DirectX::XMMatrixIdentity();
+    DirectX::XMMATRIX m_cameraProj = DirectX::XMMatrixIdentity();
 
 private:
     // 内部工具
