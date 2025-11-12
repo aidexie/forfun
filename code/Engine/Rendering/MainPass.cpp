@@ -28,7 +28,8 @@ struct alignas(16) CB_Frame {
     // CSM parameters
     int cascadeCount;
     int debugShowCascades;  // 0=off, 1=on
-    DirectX::XMFLOAT2 _pad0;
+    int enableSoftShadows;  // 0=hard, 1=soft (PCF)
+    float cascadeBlendRange;  // Blend range at cascade boundaries (0-1)
     DirectX::XMFLOAT4 cascadeSplits;  // HLSL treats array as float4, use XMFLOAT4
     DirectX::XMMATRIX lightSpaceVPs[4];
 
@@ -84,7 +85,8 @@ void MainPass::createPipeline()
             // CSM parameters
             int gCascadeCount;
             int gDebugShowCascades;  // 0=off, 1=on
-            float2 _pad0;
+            int gEnableSoftShadows;  // 0=hard, 1=soft (PCF)
+            float gCascadeBlendRange;  // Blend range at cascade boundaries (0-1)
             float4 gCascadeSplits;  // Changed from array to float4 for alignment
             float4x4 gLightSpaceVPs[4];
 
@@ -102,7 +104,11 @@ void MainPass::createPipeline()
             float3 posWS:TEXCOORD0;
             float2 uv:TEXCOORD1;
             float3x3 TBN:TEXCOORD2;
-            float4 posVS:TEXCOORD5;  // View space position for cascade selection
+            // Light space positions for all cascades (calculated in VS for performance)
+            float4 posLS0:TEXCOORD5;
+            float4 posLS1:TEXCOORD6;
+            float4 posLS2:TEXCOORD7;
+            float4 posLS3:TEXCOORD8;
         };
         VSOut main(VSIn i){
             VSOut o;
@@ -114,8 +120,15 @@ void MainPass::createPipeline()
             o.posWS = posWS.xyz;
             o.uv = i.uv;
             float4 posV = mul(posWS, gView);
-            o.posVS = posV;  // Pass view space position to PS
             o.posH = mul(posV, gProj);
+
+            // Pre-calculate light space positions for all cascades in VS
+            // This is much faster than calculating in PS (done once per vertex vs per fragment)
+            o.posLS0 = mul(posWS, gLightSpaceVPs[0]);
+            o.posLS1 = mul(posWS, gLightSpaceVPs[1]);
+            o.posLS2 = mul(posWS, gLightSpaceVPs[2]);
+            o.posLS3 = mul(posWS, gLightSpaceVPs[3]);
+
             return o;
         }
     )";
@@ -133,7 +146,8 @@ void MainPass::createPipeline()
             // CSM parameters
             int gCascadeCount;
             int gDebugShowCascades;  // 0=off, 1=on
-            float2 _pad0;
+            int gEnableSoftShadows;  // 0=hard, 1=soft (PCF)
+            float gCascadeBlendRange;  // Blend range at cascade boundaries (0-1)
             float4 gCascadeSplits;  // Changed from array to float4 for alignment
             float4x4 gLightSpaceVPs[4];
 
@@ -150,25 +164,32 @@ void MainPass::createPipeline()
             float3 posWS:TEXCOORD0;
             float2 uv:TEXCOORD1;
             float3x3 TBN:TEXCOORD2;
-            float4 posVS:TEXCOORD5;  // View space position
+            // Light space positions for all cascades (pre-calculated in VS)
+            float4 posLS0:TEXCOORD5;
+            float4 posLS1:TEXCOORD6;
+            float4 posLS2:TEXCOORD7;
+            float4 posLS3:TEXCOORD8;
         };
 
-        // Select cascade based on view space depth
-        int SelectCascade(float depthVS) {
-            float absDepth = abs(depthVS);  // Depth is negative in view space
+        // Select cascade based on spherical distance from camera (Unity approach)
+        int SelectCascade(float3 posWS, float3 camPosWS) {
+            float distance = length(posWS - camPosWS);  // Spherical distance
             for (int i = 0; i < gCascadeCount - 1; ++i) {
-                if (absDepth < gCascadeSplits[i])
+                if (distance < gCascadeSplits[i])
                     return i;
             }
             return gCascadeCount - 1;
         }
 
-        float CalcShadowFactor(float3 posWS, float depthVS) {
-            // Select cascade
-            int cascadeIndex = SelectCascade(depthVS);
+        float CalcShadowFactor(float3 posWS, float4 posLS0, float4 posLS1, float4 posLS2, float4 posLS3) {
+            // Select cascade using spherical distance
+            int cascadeIndex = SelectCascade(posWS, gCamPosWS);
 
-            // Transform to light space using selected cascade's VP matrix
-            float4 posLS = mul(float4(posWS, 1.0), gLightSpaceVPs[cascadeIndex]);
+            // Select pre-calculated light space position for the chosen cascade
+            float4 posLS = (cascadeIndex == 0) ? posLS0 :
+                           (cascadeIndex == 1) ? posLS1 :
+                           (cascadeIndex == 2) ? posLS2 : posLS3;
+
             float3 projCoords = posLS.xyz / posLS.w;
 
             // Transform to [0,1] UV space
@@ -182,29 +203,36 @@ void MainPass::createPipeline()
                 return 1.0;
 
             float currentDepth = projCoords.z;
-
-            // PCF 3x3 (9 samples for soft shadows)
-            float shadow = 0.0;
-            float2 texelSize = 1.0 / 2048.0;
             float cascadeIndexF = float(cascadeIndex);  // Explicit conversion to float
-            [unroll]
-            for (int x = -1; x <= 1; x++) {
+
+            // Soft shadows: PCF 3x3 (9 samples), Hard shadows: 1 sample
+            if (gEnableSoftShadows == 1) {
+                // PCF 3x3 for soft shadow edges
+                float shadow = 0.0;
+                float2 texelSize = 1.0 / 2048.0;
                 [unroll]
-                for (int y = -1; y <= 1; y++) {
-                    float2 uv = shadowUV + float2(x, y) * texelSize;
-                    // Sample from Texture2DArray: (u, v, arraySlice)
-                    shadow += gShadowMaps.SampleCmpLevelZero(gShadowSampler,
-                                                             float3(uv.x, uv.y, cascadeIndexF),
-                                                             currentDepth - gShadowBias);
+                for (int x = -1; x <= 1; x++) {
+                    [unroll]
+                    for (int y = -1; y <= 1; y++) {
+                        float2 uv = shadowUV + float2(x, y) * texelSize;
+                        shadow += gShadowMaps.SampleCmpLevelZero(gShadowSampler,
+                                                                 float3(uv.x, uv.y, cascadeIndexF),
+                                                                 currentDepth - gShadowBias);
+                    }
                 }
+                return shadow / 9.0;
+            } else {
+                // Single sample for hard shadows (faster)
+                return gShadowMaps.SampleCmpLevelZero(gShadowSampler,
+                                                      float3(shadowUV.x, shadowUV.y, cascadeIndexF),
+                                                      currentDepth - gShadowBias);
             }
-            return shadow / 9.0;
         }
 
         float4 main(PSIn i):SV_Target{
             // Debug: Visualize cascade levels
             if (gDebugShowCascades == 1) {
-                int cascadeIndex = SelectCascade(i.posVS.z);
+                int cascadeIndex = SelectCascade(i.posWS, gCamPosWS);
                 float3 cascadeColors[4] = {
                     float3(1.0, 0.0, 0.0),  // Cascade 0: Red
                     float3(0.0, 1.0, 0.0),  // Cascade 1: Green
@@ -226,8 +254,8 @@ void MainPass::createPipeline()
             float NdotL = saturate(dot(nWS,L));
             float NdotH = saturate(dot(nWS,H));
 
-            // Shadow factor (CSM)
-            float shadowFactor = CalcShadowFactor(i.posWS, i.posVS.z);
+            // Shadow factor (CSM) - using pre-calculated light space positions from VS
+            float shadowFactor = CalcShadowFactor(i.posWS, i.posLS0, i.posLS1, i.posLS2, i.posLS3);
 
             // Diffuse and specular affected by shadow
             float3 diff = albedo * NdotL * gLightColor * shadowFactor;
@@ -315,7 +343,7 @@ void MainPass::UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt)
     m_cameraView = XMMatrixLookAtLH(eye, at, up);
 
     float aspect = (viewportHeight > 0) ? (float)viewportWidth / (float)viewportHeight : 1.0f;
-    m_cameraProj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 100.0f);
+    m_cameraProj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 1000.0f);
 }
 
 void MainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
@@ -399,6 +427,8 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     if (shadowData) {
         cf.cascadeCount = shadowData->cascadeCount;
         cf.debugShowCascades = shadowData->debugShowCascades ? 1 : 0;
+        cf.enableSoftShadows = shadowData->enableSoftShadows ? 1 : 0;
+        cf.cascadeBlendRange = shadowData->cascadeBlendRange;
         cf.cascadeSplits = XMFLOAT4(
             (0 < shadowData->cascadeCount) ? shadowData->cascadeSplits[0] : 100.0f,
             (1 < shadowData->cascadeCount) ? shadowData->cascadeSplits[1] : 100.0f,
@@ -411,6 +441,8 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     } else {
         cf.cascadeCount = 1;
         cf.debugShowCascades = 0;
+        cf.enableSoftShadows = 1;  // Default to soft shadows
+        cf.cascadeBlendRange = 0.0f;
         cf.cascadeSplits = XMFLOAT4(100.0f, 100.0f, 100.0f, 100.0f);
         for (int i = 0; i < 4; ++i) {
             cf.lightSpaceVPs[i] = XMMatrixTranspose(XMMatrixIdentity());

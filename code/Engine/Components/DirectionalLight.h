@@ -15,10 +15,13 @@ struct DirectionalLight : public Component {
     int ShadowMapSizeIndex = 1;       // 0=1024, 1=2048, 2=4096 (default: 2048)
     float ShadowDistance = 100.0f;    // Maximum shadow distance from camera (in camera space)
     float ShadowBias = 0.005f;        // Depth bias to prevent shadow acne
+    bool EnableSoftShadows = true;    // Enable PCF for soft shadow edges (3x3 sampling)
 
     // CSM (Cascaded Shadow Maps) parameters
     int CascadeCount = 4;             // Number of cascades (1-4, default: 4)
     float CascadeSplitLambda = 0.95f; // Split scheme balance (0=uniform, 1=log, default: 0.95)
+    float ShadowNearPlaneOffset = 50.0f; // Near plane offset to capture tall objects (similar to Unity)
+    float CascadeBlendRange = 0.0f;   // Blend range at cascade boundaries (0=off, 0.1=10% blend, reduces seams)
     bool DebugShowCascades = false;   // Debug: visualize cascade levels with colors
 
     const char* GetTypeName() const override { return "DirectionalLight"; }
@@ -31,10 +34,13 @@ struct DirectionalLight : public Component {
         visitor.VisitEnum("Shadow Map Size", ShadowMapSizeIndex, {"1024", "2048", "4096"});
         visitor.VisitFloat("Shadow Distance", ShadowDistance);
         visitor.VisitFloat("Shadow Bias", ShadowBias);
+        visitor.VisitBool("Enable Soft Shadows", EnableSoftShadows);
 
         // CSM parameters
         visitor.VisitInt("Cascade Count", CascadeCount);
         visitor.VisitFloat("Split Lambda", CascadeSplitLambda);
+        visitor.VisitFloat("Near Plane Offset", ShadowNearPlaneOffset);
+        visitor.VisitFloat("Cascade Blend Range", CascadeBlendRange);
         visitor.VisitBool("Debug Show Cascades", DebugShowCascades);
     }
 

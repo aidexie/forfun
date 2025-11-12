@@ -143,7 +143,9 @@ bool ShadowPass::Initialize()
     m_output.cascadeCount = 1;
     m_output.shadowMapArray = m_defaultShadowMap.Get();  // Default: no shadow
     m_output.shadowSampler = m_shadowSampler.Get();
+    m_output.cascadeBlendRange = 0.0f;
     m_output.debugShowCascades = false;
+    m_output.enableSoftShadows = true;  // Default to soft shadows enabled
     for (int i = 0; i < Output::MAX_CASCADES; ++i) {
         m_output.cascadeSplits[i] = 100.0f;
         m_output.lightSpaceVPs[i] = DirectX::XMMatrixIdentity();
@@ -274,6 +276,34 @@ std::array<XMFLOAT3, 8> ShadowPass::extractSubFrustum(
     return extractFrustumCorners(view, subProj);
 }
 
+ShadowPass::BoundingSphere ShadowPass::calculateBoundingSphere(
+    const std::array<XMFLOAT3, 8>& points) const
+{
+    // Simple bounding sphere: use centroid as center, max distance as radius
+    // (Not optimal sphere, but good enough and fast)
+    BoundingSphere sphere;
+
+    // Calculate centroid
+    XMVECTOR center = XMVectorZero();
+    for (const auto& pt : points) {
+        center = XMVectorAdd(center, XMLoadFloat3(&pt));
+    }
+    center = XMVectorScale(center, 1.0f / 8.0f);
+    XMStoreFloat3(&sphere.center, center);
+
+    // Calculate radius (max distance from center to any point)
+    float maxDistSq = 0.0f;
+    for (const auto& pt : points) {
+        XMVECTOR p = XMLoadFloat3(&pt);
+        XMVECTOR diff = XMVectorSubtract(p, center);
+        float distSq = XMVectorGetX(XMVector3LengthSq(diff));
+        maxDistSq = std::max(maxDistSq, distSq);
+    }
+    sphere.radius = std::sqrt(maxDistSq);
+
+    return sphere;
+}
+
 // ===========================
 // Tight Frustum Fitting
 // ===========================
@@ -306,30 +336,21 @@ std::array<XMFLOAT3, 8> ShadowPass::extractFrustumCorners(
 XMMATRIX ShadowPass::calculateTightLightMatrix(
     const std::array<XMFLOAT3, 8>& frustumCornersWS,
     DirectionalLight* light,
-    float shadowExtension) const
+    float cascadeFarDist) const
 {
     if (!light) return XMMatrixIdentity();
 
     XMFLOAT3 lightDir = light->GetDirection();
     XMVECTOR L = XMVector3Normalize(XMLoadFloat3(&lightDir));
 
-    // // Extend far plane corners
-    std::array<XMFLOAT3, 8> extendedCorners = frustumCornersWS;
-    //XMVECTOR offset = XMVectorScale(L, -shadowExtension);
-    //for (int i = 4; i < 8; ++i) {
-    //    XMVECTOR corner = XMLoadFloat3(&extendedCorners[i]);
-    //    corner = XMVectorAdd(corner, offset);
-    //    XMStoreFloat3(&extendedCorners[i], corner);
-    //}
+    // Step 1: Calculate bounding sphere for frustum corners
+    // This sphere has FIXED radius for each cascade (since frustum is fixed)
+    BoundingSphere sphere = calculateBoundingSphere(frustumCornersWS);
+    // sphere.center = {0.0f, .0f, .0f};
+    // sphere.radius = 16.0f; // Half diagonal of cube enclosing frustum
+    XMVECTOR sphereCenter = XMLoadFloat3(&sphere.center);
 
-    // Compute center
-    XMVECTOR center = XMVectorZero();
-    for (const auto& corner : extendedCorners) {
-        center = XMVectorAdd(center, XMLoadFloat3(&corner));
-    }
-    center = XMVectorScale(center, 1.0f / 8.0f);
-
-    // Build light view matrix
+    // Step 2: Build light space basis (fixed, only depends on light direction)
     XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     XMFLOAT3 lightDirF;
     XMStoreFloat3(&lightDirF, L);
@@ -337,32 +358,62 @@ XMMATRIX ShadowPass::calculateTightLightMatrix(
         up = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
     }
 
-    XMVECTOR lightPos = XMVectorSubtract(center, XMVectorScale(L, std::max(shadowExtension, 1.0f) * 2.0f));
-    XMMATRIX lightView = XMMatrixLookAtLH(lightPos, center, up);
+    // Construct orthonormal basis for light space
+    XMVECTOR lightRight = XMVector3Normalize(XMVector3Cross(up, L));
+    XMVECTOR lightUp = XMVector3Cross(L, lightRight);
 
-    // Compute AABB in light space
-    float minX = FLT_MAX, maxX = -FLT_MAX;
-    float minY = FLT_MAX, maxY = -FLT_MAX;
+    // Step 3: Use sphere diameter as FIXED orthographic size
+    float fixedOrthoSize = sphere.radius * 2.0f;
+
+    // Step 4: TEXEL SNAPPING - Project sphere center onto light's perpendicular plane and align
+    // Key insight: Align the sphere center in the plane perpendicular to light direction
+    UINT shadowMapSize = (UINT)light->GetShadowMapResolution();
+    float worldUnitsPerTexel = fixedOrthoSize / shadowMapSize;
+
+    // Project sphere center onto light-right and light-up axes
+    float centerRightComponent = XMVectorGetX(XMVector3Dot(sphereCenter, lightRight));
+    float centerUpComponent = XMVectorGetX(XMVector3Dot(sphereCenter, lightUp));
+
+    // Snap to texel grid in this perpendicular plane
+    centerRightComponent = std::floor(centerRightComponent / worldUnitsPerTexel) * worldUnitsPerTexel;
+    centerUpComponent = std::floor(centerUpComponent / worldUnitsPerTexel) * worldUnitsPerTexel;
+
+    // Reconstruct aligned sphere center (preserve Z component along light direction)
+    float centerForwardComponent = XMVectorGetX(XMVector3Dot(sphereCenter, L));
+    XMVECTOR alignedSphereCenter = XMVectorAdd(
+        XMVectorAdd(
+            XMVectorScale(lightRight, centerRightComponent),
+            XMVectorScale(lightUp, centerUpComponent)
+        ),
+        XMVectorScale(L, centerForwardComponent)
+    );
+
+    // Step 5: Build light view matrix with aligned center
+    XMVECTOR lightPos = XMVectorSubtract(alignedSphereCenter, XMVectorScale(L, 100.0f));
+    XMMATRIX lightView = XMMatrixLookAtLH(lightPos, alignedSphereCenter, lightUp);
+
+    // Step 6: Build orthographic bounds (centered at origin in light space, since we use LookAt)
+    float halfSize = fixedOrthoSize * 0.5f;
+    float minX = -halfSize;
+    float maxX = halfSize;
+    float minY = -halfSize;
+    float maxY = halfSize;
+
+    // Step 7: Calculate Z bounds in light space (depth range doesn't need snapping)
     float minZ = FLT_MAX, maxZ = -FLT_MAX;
-
-    for (const auto& corner : extendedCorners) {
+    for (const auto& corner : frustumCornersWS) {
         XMVECTOR lightSpacePos = XMVector3TransformCoord(XMLoadFloat3(&corner), lightView);
-        float x = XMVectorGetX(lightSpacePos);
-        float y = XMVectorGetY(lightSpacePos);
         float z = XMVectorGetZ(lightSpacePos);
-        minX = std::min(minX, x);
-        maxX = std::max(maxX, x);
-        minY = std::min(minY, y);
-        maxY = std::max(maxY, y);
         minZ = std::min(minZ, z);
         maxZ = std::max(maxZ, z);
     }
 
-    const float margin = 10.0f;
-    minX -= margin; maxX += margin;
-    minY -= margin; maxY += margin;
-    minZ -= margin; maxZ += margin;
+    // Apply Shadow Near Plane Offset to capture tall objects
+    float nearPlaneOffset = light->ShadowNearPlaneOffset;
+    minZ -= nearPlaneOffset;
+    maxZ += 10.0f;  // Small margin for far plane
 
+    // Step 8: Build final orthographic projection with snapped XY bounds
     XMMATRIX lightProj = XMMatrixOrthographicOffCenterLH(
         minX, maxX, minY, maxY, minZ, maxZ
     );
@@ -455,9 +506,9 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
                                                     splits[cascadeIndex],
                                                     splits[cascadeIndex + 1]);
 
-        // Calculate tight-fitting light space matrix for this cascade
-        XMMATRIX lightSpaceVP = calculateTightLightMatrix(subFrustumCorners, light,
-                                                           light->ShadowDistance);
+        // Calculate light space matrix with fixed square bounds for this cascade
+        float cascadeFar = splits[cascadeIndex + 1];
+        XMMATRIX lightSpaceVP = calculateTightLightMatrix(subFrustumCorners, light, cascadeFar);
 
         // Update light space constant buffer
         CB_LightSpace cbLight;
@@ -518,5 +569,7 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
     m_output.cascadeCount = cascadeCount;
     m_output.shadowMapArray = m_shadowArraySRV.Get();
     m_output.shadowSampler = m_shadowSampler.Get();
+    m_output.cascadeBlendRange = std::clamp(light->CascadeBlendRange, 0.0f, 0.5f);
     m_output.debugShowCascades = light->DebugShowCascades;
+    m_output.enableSoftShadows = light->EnableSoftShadows;
 }

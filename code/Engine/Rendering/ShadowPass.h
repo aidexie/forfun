@@ -23,7 +23,9 @@ public:
         ID3D11ShaderResourceView* shadowMapArray;           // Texture2DArray SRV (all cascades)
         DirectX::XMMATRIX lightSpaceVPs[MAX_CASCADES];      // Light space VP matrix per cascade
         ID3D11SamplerState* shadowSampler;                  // Comparison sampler for PCF
+        float cascadeBlendRange;                            // Blend range at cascade boundaries (0-1)
         bool debugShowCascades;                             // Debug: visualize cascade colors
+        bool enableSoftShadows;                             // Enable PCF for soft shadows (3x3 sampling)
     };
 
     ShadowPass() = default;
@@ -61,7 +63,7 @@ private:
     DirectX::XMMATRIX calculateTightLightMatrix(
         const std::array<DirectX::XMFLOAT3, 8>& frustumCornersWS,
         DirectionalLight* light,
-        float shadowExtension = 50.0f) const;
+        float cascadeFarDist) const;
 
     // Calculate cascade split distances using Practical Split Scheme
     std::vector<float> calculateCascadeSplits(
@@ -69,6 +71,16 @@ private:
         float nearPlane,
         float farPlane,
         float lambda) const;
+
+    // Bounding sphere for stabilizing shadow projection
+    struct BoundingSphere {
+        DirectX::XMFLOAT3 center;
+        float radius;
+    };
+
+    // Calculate minimum bounding sphere for a set of points
+    BoundingSphere calculateBoundingSphere(
+        const std::array<DirectX::XMFLOAT3, 8>& points) const;
 
 private:
     // Shadow map resources (Texture2DArray for CSM)
