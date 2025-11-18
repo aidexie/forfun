@@ -79,5 +79,9 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/MainPass.cpp
     ${CODE_PATH}/Engine/Rendering/ShadowPass.h
     ${CODE_PATH}/Engine/Rendering/ShadowPass.cpp
+    ${CODE_PATH}/Engine/Rendering/Skybox.h
+    ${CODE_PATH}/Engine/Rendering/Skybox.cpp
+    ${CODE_PATH}/Engine/Rendering/PostProcessPass.h
+    ${CODE_PATH}/Engine/Rendering/PostProcessPass.cpp
 )
 target_sources(forfun PRIVATE ${ENGINE_SOURCES})

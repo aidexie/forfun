@@ -3,6 +3,8 @@
 #include <wrl/client.h>
 #include <DirectXMath.h>
 #include "ShadowPass.h"
+#include "Skybox.h"
+#include "PostProcessPass.h"
 // Forward declarations
 struct Scene;
 class ShadowPass;
@@ -47,10 +49,10 @@ public:
     void Render(Scene& scene, UINT w, UINT h, float dt,
                 const ShadowPass::Output* shadowData);
 
-    // 访问离屏目标
-    ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_off.srv.Get(); }
-    UINT GetOffscreenWidth()  const { return m_off.w; }
-    UINT GetOffscreenHeight() const { return m_off.h; }
+    // 访问离屏目标（返回最终的 LDR sRGB 纹理用于显示）
+    ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_offLDR.srv.Get(); }
+    UINT GetOffscreenWidth()  const { return m_offLDR.w; }
+    UINT GetOffscreenHeight() const { return m_offLDR.h; }
 
     // 获取摄像机矩阵（用于 ShadowPass 视锥拟合）
     DirectX::XMMATRIX GetCameraViewMatrix() const { return m_cameraView; }
@@ -62,7 +64,8 @@ private:
     void renderScene(Scene& scene, float dt, const ShadowPass::Output* shadowData);
 
 private:
-    OffscreenTarget m_off;
+    OffscreenTarget m_off;     // HDR linear space (R16G16B16A16_FLOAT)
+    OffscreenTarget m_offLDR;  // LDR sRGB space (R8G8B8A8_UNORM_SRGB) for display
 
     // === 渲染管线资源 ===
     Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;
@@ -73,6 +76,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsSolid;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsWire;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateDefault;
 
     // 默认纹理（兜底）
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultAlbedo;
@@ -86,6 +90,12 @@ private:
     // 摄像机矩阵缓存（用于 ShadowPass）
     DirectX::XMMATRIX m_cameraView = DirectX::XMMatrixIdentity();
     DirectX::XMMATRIX m_cameraProj = DirectX::XMMatrixIdentity();
+
+    // Skybox
+    Skybox m_skybox;
+
+    // Post-process (tone mapping + gamma correction)
+    PostProcessPass m_postProcess;
 
 private:
     // 内部工具

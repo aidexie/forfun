@@ -69,12 +69,20 @@ This is a custom game engine editor with three distinct layers:
 Components attach to GameObjects and define behavior/data:
 - `Transform`: Position, rotation (euler), scale; provides WorldMatrix()
 - `MeshRenderer`: Stores mesh file path and owns `shared_ptr<GpuMeshResource>` for rendering
-- `DirectionalLight`: Directional light source with shadow casting support
-  - Color, Intensity: Light properties
-  - ShadowMapSizeIndex (0/1/2): Shadow map resolution (1024/2048/4096)
-  - ShadowDistance: Maximum shadow visible distance
-  - ShadowBias: Depth bias to prevent shadow acne
-  - Direction controlled by Transform rotation via `GetDirection()`
+- `DirectionalLight`: Directional light source with CSM shadow casting support
+  - Color, Intensity: Basic light properties
+  - Direction: Controlled by Transform rotation via `GetDirection()`
+  - **Shadow Map Parameters**:
+    - `ShadowMapSizeIndex` (0/1/2): Resolution 1024/2048/4096
+    - `ShadowDistance`: Maximum shadow visible distance from camera
+    - `ShadowBias`: Depth bias to prevent shadow acne
+    - `ShadowNearPlaneOffset`: Extends near plane to capture tall objects
+    - `EnableSoftShadows`: Toggle PCF 3×3 soft shadow filtering
+  - **CSM Parameters**:
+    - `CascadeCount` (1-4): Number of cascades for quality distribution
+    - `CascadeSplitLambda` (0-1): Split scheme (0=uniform, 1=logarithmic)
+    - `CascadeBlendRange` (0-0.5): Blend distance at cascade boundaries
+    - `DebugShowCascades`: Visualize cascade levels with color coding
 
 **Component Auto-Registration:**
 - Components automatically register themselves using `REGISTER_COMPONENT(ComponentType)` macro
@@ -224,6 +232,89 @@ JSON structure:
    - Resources auto-release when last MeshRenderer is destroyed
    - MeshResourceManager cache uses weak_ptr to allow cleanup
 
+### Color Space Management
+
+**Critical Design Principle:** The rendering pipeline maintains **strict color space separation** for physically correct rendering.
+
+**Pipeline Color Space Flow:**
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ 1. Texture Input (Albedo/Emissive)                                   │
+│    Format: DXGI_FORMAT_R8G8B8A8_UNORM_SRGB                           │
+│    Action: GPU automatically converts sRGB → Linear on sample        │
+│    Result: Linear space color values in shader                       │
+└────────────────────────┬─────────────────────────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ 2. All Intermediate Passes (MainPass, ShadowPass, Skybox, etc.)     │
+│    Format: DXGI_FORMAT_R16G16B16A16_FLOAT (HDR)                      │
+│    Space: Linear (all lighting calculations in linear space)         │
+│    Output: HDR linear color values [0, ∞]                            │
+└────────────────────────┬─────────────────────────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ 3. PostProcessPass (Final Stage)                                     │
+│    Input: HDR linear RT (R16G16B16A16_FLOAT)                         │
+│    Process:                                                           │
+│      a) Tone Mapping (HDR → LDR, still linear)                       │
+│      b) Output to DXGI_FORMAT_R8G8B8A8_UNORM_SRGB RT                 │
+│    Action: GPU automatically applies Gamma correction (Linear → sRGB)│
+│    Result: LDR sRGB color ready for display                          │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Rules:**
+
+1. **Albedo/Emissive Textures**: Always use `UNORM_SRGB` format
+   - Automatically converted to linear space when sampled in shaders
+   - Example: Albedo from PNG/JPG (stored in sRGB) → sampled as linear
+
+2. **Normal/Metallic/Roughness/AO Textures**: Always use `UNORM` format
+   - These contain linear data (not colors), no sRGB conversion needed
+
+3. **Intermediate Render Targets**: Use `R16G16B16A16_FLOAT`
+   - Supports HDR values > 1.0 (required for physically correct lighting)
+   - All lighting math (PBR, shadows, IBL) performed in linear space
+
+4. **Final Output**: Use `R8G8B8A8_UNORM_SRGB`
+   - PostProcessPass performs tone mapping (HDR → LDR in linear space)
+   - GPU automatically applies gamma correction when writing to sRGB RT
+   - No manual `pow(color, 1/2.2)` needed in shader
+
+**Implementation Example:**
+
+```cpp
+// Core/TextureLoader.cpp
+LoadTextureWIC(device, "albedo.png", srv, /*srgb=*/true);   // sRGB format
+LoadTextureWIC(device, "normal.png", srv, /*srgb=*/false);  // Linear format
+
+// Engine/Rendering/MainPass.cpp - ensureOffscreen()
+td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR linear RT
+ldrDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;  // LDR sRGB RT
+
+// Engine/Rendering/PostProcessPass.cpp
+// Shader outputs linear values, GPU converts to sRGB when writing to RT
+float3 ldrColor = ACESFilm(hdrColor);  // Tone mapping (linear → linear)
+return float4(ldrColor, 1.0);  // GPU applies gamma (linear → sRGB)
+```
+
+**Why This Matters:**
+
+- **Physically Correct**: All lighting calculations in linear space (required for energy conservation)
+- **HDR Support**: Intermediate HDR RTs allow bloom, exposure, and other post-effects
+- **No Double Gamma**: Clear separation prevents accidental double/missing gamma correction
+- **Performance**: GPU hardware sRGB conversion is free (no shader cost)
+
+**Common Mistakes to Avoid:**
+
+- ❌ Using `UNORM` for albedo textures (causes dark, incorrect colors)
+- ❌ Using `UNORM_SRGB` for normal maps (causes incorrect normals)
+- ❌ Doing tone mapping in intermediate passes (prevents HDR post-effects)
+- ❌ Manual gamma correction when using `UNORM_SRGB` output (causes double gamma)
+
 ### Third-Party Dependencies
 
 - **imgui_docking**: Static library built from `${THIRD_PARTY_PATH}/imgui` (docking branch)
@@ -256,7 +347,7 @@ To add a new component:
 
 ## Shadow System
 
-**Architecture**: Two-pass rendering with tight frustum fitting for optimal quality.
+**Architecture**: CSM (Cascaded Shadow Maps) with bounding sphere stabilization and texel snapping for anti-shimmer.
 
 ### **ShadowPass: Shadow Map Generation**
 
@@ -265,82 +356,205 @@ Located in `Engine/Rendering/ShadowPass.h/cpp`.
 **Key Features**:
 - Depth-only rendering from DirectionalLight's perspective
 - Orthographic projection for parallel light rays
-- **Tight Frustum Fitting**: Shadow map tightly fits camera frustum for maximum precision
+- **CSM Support**: 1-4 cascades with configurable split scheme
+- **Bounding Sphere Stabilization**: Fixed projection bounds per cascade
+- **Texel Snapping**: Eliminates shadow shimmer during camera movement
 - Configurable shadow map resolution (1024/2048/4096)
 - Default 1×1 white shadow map (depth=1.0) when no light exists
 
-**Tight Frustum Fitting Algorithm**:
-1. **Extract camera frustum corners**: Convert NDC space → World space (8 points)
-2. **Extend far plane**: Move far plane corners along light's reverse direction by `ShadowDistance`
-   - Captures shadow casters outside but near the frustum
-   - Prevents shadow popping when objects enter/exit view
-3. **Compute center**: Average of 8 extended corners
-4. **Build light view matrix**: LookAt from light position → frustum center
-5. **Transform to light space**: Convert 8 corners to light space coordinates
-6. **Calculate AABB**: Find min/max X/Y/Z in light space
-7. **Create tight projection**: Orthographic projection exactly covering AABB
+**Current Algorithm (Bounding Sphere + Texel Snapping)**:
 
-**Why Tight Fitting?**
-- Traditional: Fixed 50×50 coverage → Low precision (e.g., 40 pixels/unit)
-- Tight Fitting: Covers only visible frustum → High precision (e.g., 200+ pixels/unit)
-- **Quality improvement: 5-10× better shadow resolution**
+Located in `ShadowPass::calculateTightLightMatrix()`:
 
-**Extension Strategy**:
+1. **Calculate bounding sphere for frustum sub-section**:
+   ```cpp
+   BoundingSphere sphere = calculateBoundingSphere(frustumCornersWS);
+   // sphere.radius is FIXED for each cascade (frustum size fixed by split distances)
+   ```
+   - Uses centroid as center, max distance as radius
+   - Sphere radius is deterministic per cascade (independent of camera orientation)
+
+2. **Build fixed light space basis** (only depends on light direction):
+   ```cpp
+   XMVECTOR lightRight = normalize(cross(worldUp, lightDir));
+   XMVECTOR lightUp = cross(lightDir, lightRight);
+   ```
+
+3. **Texel snapping in world space**:
+   - Project sphere center onto light-perpendicular plane:
+     ```cpp
+     float centerRight = dot(sphereCenter, lightRight);
+     float centerUp = dot(sphereCenter, lightUp);
+     ```
+   - Align to texel grid (prevents sub-pixel jitter):
+     ```cpp
+     float texelSize = (sphere.radius * 2.0f) / shadowMapResolution;
+     centerRight = floor(centerRight / texelSize) * texelSize;
+     centerUp = floor(centerUp / texelSize) * texelSize;
+     ```
+   - Reconstruct aligned center (preserve depth component):
+     ```cpp
+     alignedCenter = lightRight * centerRight + lightUp * centerUp + lightDir * centerForward;
+     ```
+
+4. **Build light view matrix with aligned center**:
+   ```cpp
+   XMVECTOR lightPos = alignedCenter - lightDir * 100.0f;
+   XMMATRIX lightView = LookAtLH(lightPos, alignedCenter, lightUp);
+   ```
+
+5. **Fixed orthographic projection** (using sphere diameter):
+   ```cpp
+   float orthoSize = sphere.radius * 2.0f;  // Fixed per cascade
+   XMMATRIX lightProj = OrthographicOffCenterLH(-halfSize, halfSize, -halfSize, halfSize, minZ, maxZ);
+   ```
+
+**Why Bounding Sphere?**
+- Traditional AABB: Changes size/shape with camera rotation → shimmer
+- Bounding Sphere: Fixed radius → stable projection bounds
+- Trade-off: ~27% wasted texels, but eliminates scale-induced shimmer
+
+**Why Texel Snapping?**
+- Problem: Camera movement causes sub-pixel shadow map shifts → edge flickering
+- Solution: Quantize sphere center to texel grid in world space
+- Effect: Shadow map "jumps" by 1 texel increments (imperceptible) instead of continuous sliding
+- Key insight: Align sphere center in the plane **perpendicular to light direction**
+
+**Texel Snapping Algorithm Details**:
+
+The goal is to align the LookAt target (sphere center) to a texel grid in world space. Critical understanding:
+
+1. **Why sphere center must align in world space, not light space**:
+   - LookAt places target at (0,0,Z) in light space by definition
+   - Cannot align something already at origin
+   - Must align the world space position BEFORE constructing view matrix
+
+2. **The perpendicular plane concept**:
+   ```
+   Light direction ↓
+   ┌───────────────┐
+   │ ░ ░ ░ ░ ░ ░ ░ │ ← Texel grid exists on this plane
+   │ ░ ░ ● ░ ░ ░ ░ │   (perpendicular to light)
+   │ ░ ░ ░ ░ ░ ░ ░ │
+   └───────────────┘
+   ```
+   - Shadow map pixels correspond to positions on this plane
+   - Movement parallel to light doesn't affect projection
+   - Only movement on perpendicular plane causes shimmer
+
+3. **Implementation steps**:
+   ```cpp
+   // Decompose sphere center into light-space basis components
+   float centerRight = dot(sphereCenter, lightRight);   // X in light space
+   float centerUp = dot(sphereCenter, lightUp);         // Y in light space
+   float centerForward = dot(sphereCenter, lightDir);   // Z in light space
+
+   // Quantize ONLY the XY components (perpendicular plane)
+   centerRight = floor(centerRight / texelSize) * texelSize;
+   centerUp = floor(centerUp / texelSize) * texelSize;
+   // centerForward unchanged - doesn't affect projection
+
+   // Reconstruct aligned world position
+   alignedCenter = lightRight * centerRight
+                 + lightUp * centerUp
+                 + lightDir * centerForward;
+   ```
+
+4. **Why this works**:
+   - Frame 1: Sphere at (10.42, 5.87, 20.0) → aligns to (10.40, 5.85, 20.0)
+   - Frame 2: Sphere at (10.48, 5.91, 20.0) → aligns to (10.40, 5.85, 20.0) (same!)
+   - Frame 3: Sphere at (10.56, 5.95, 20.0) → aligns to (10.53, 5.94, 20.0) (jumps 1 texel)
+   - Result: View matrix stable for small movements, discrete jumps when threshold crossed
+
+**Common Pitfalls**:
+- ❌ Trying to align projection matrix directly when using LookAt (sphere always at origin)
+- ❌ Aligning in clip space [-1,1] (view matrix already built, too late)
+- ❌ Aligning along light direction (doesn't affect projection result)
+- ✅ Align world space sphere center on perpendicular plane BEFORE LookAt
+
+**CSM Cascade Calculation**:
 ```cpp
-// Extend far plane corners along -lightDir by shadowExtension (default 50 units)
-extendedCorners[4-7] += (-lightDirection) * shadowExtension;
+// Practical Split Scheme (GPU Gems 3, Ch.10)
+splits[i] = lambda * logSplit + (1-lambda) * uniformSplit;
 ```
-- Captures objects "upstream" of the frustum in light direction
-- Example: Building behind camera casting shadow forward
+- `lambda = 0`: Uniform distribution (wastes resolution at distance)
+- `lambda = 1`: Logarithmic distribution (matches perspective aliasing)
+- `lambda = 0.5-0.9`: Balanced (typical in production)
 
 **Pass Output Bundle**:
 ```cpp
 struct Output {
-    ID3D11ShaderResourceView* shadowMap;      // Shadow depth texture
-    ID3D11SamplerState*       shadowSampler;  // Comparison sampler (PCF)
-    DirectX::XMMATRIX         lightSpaceVP;   // Light space view-projection
+    int cascadeCount;                              // Active cascades (1-4)
+    float cascadeSplits[4];                        // Split distances
+    ID3D11ShaderResourceView* shadowMapArray;      // Texture2DArray SRV
+    XMMATRIX lightSpaceVPs[4];                     // Per-cascade VP matrices
+    ID3D11SamplerState* shadowSampler;             // Comparison sampler (PCF)
+    float cascadeBlendRange;                       // Blend at seams
+    bool debugShowCascades;                        // Visualize cascade levels
+    bool enableSoftShadows;                        // PCF toggle
 };
 ```
 
 ### **MainPass: Shadow Application**
 
-**Pixel Shader Shadow Sampling**:
-- Transforms world position to light space
-- Samples shadow map using comparison sampler
-- PCF (Percentage Closer Filtering) 3×3 kernel for soft shadows
-- Shadow bias from DirectionalLight component prevents shadow acne
+**Pixel Shader CSM Sampling**:
+- Select cascade based on pixel depth in camera space
+- Transform to appropriate light space
+- Sample from Texture2DArray slice
+- Optional cascade blending at boundaries
+- PCF (Percentage Closer Filtering) for soft shadows
 
 **Shader Integration**:
 ```hlsl
+// Select cascade based on depth
+int cascadeIndex = SelectCascade(pixelDepth, gCascadeSplits);
+
 // Transform to light space
-float4 posLS = mul(float4(posWS, 1.0), gLightSpaceVP);
+float4 posLS = mul(float4(posWS, 1.0), gLightSpaceVPs[cascadeIndex]);
 
-// PCF shadow sampling
-float shadow = CalcShadowFactor(posLS, gShadowMap, gShadowSampler, gShadowBias);
+// Sample shadow map array
+float shadow = gShadowMapArray.SampleCmpLevelZero(gShadowSampler,
+                    float3(uv, cascadeIndex), depth);
 
-// Apply to lighting
-float3 diffuse = lightColor * max(dot(N, L), 0.0) * shadow;
+// Apply PCF if enabled
+if (gEnableSoftShadows) {
+    shadow = PCF3x3(posLS, cascadeIndex);
+}
 ```
 
-### **Known Issues & Future Improvements**
+### **Current Status & Known Limitations**
+
+**Implemented**:
+- ✅ CSM with 1-4 configurable cascades
+- ✅ Bounding sphere stabilization (fixed projection bounds)
+- ✅ Texel snapping (world space alignment)
+- ✅ Practical split scheme with lambda parameter
+- ✅ Texture2DArray for efficient cascade storage
+- ✅ PCF soft shadows with 3×3 kernel
 
 **Current Limitations**:
-1. **Near plane clipping**: Large objects may be clipped if they extend beyond frustum+extension
-   - Symptoms: Parts of objects don't cast shadows (VS output Z < near plane)
-   - Temporary fix: Increase Z margin in `calculateTightLightMatrix`
-   - Proper fix: Include scene AABB in shadow bounds calculation
+1. **Bounding sphere inefficiency**: Wastes ~27% texels compared to tight AABB
+   - Acceptable trade-off for stability
+   - Could implement "stable AABB" (quantized bounds) as alternative
 
-2. **Shadow shimmering**: Camera movement causes shadow map bounds to change
-   - Future: Implement texel snapping (snap light space projection to texel grid)
+2. **Near plane clipping**: Tall objects may clip if they extend beyond frustum
+   - Current mitigation: `ShadowNearPlaneOffset` parameter extends near plane
+   - Proper fix: Include scene AABB in Z bounds calculation
 
-3. **Single cascade**: All distances use same resolution
-   - Future: Implement 2-4 level CSM (Cascaded Shadow Maps) for better quality distribution
+3. **No cascade blending**: Hard transitions between cascade levels
+   - Parameters defined but not implemented in shader
+   - Future: Blend between adjacent cascades at boundaries
 
-**Upgrade Path**:
-- Phase 1 (Current): Single frustum fitting
-- Phase 2: Texel snapping for stability
-- Phase 3: 2-level CSM (near/far splits)
-- Phase 4: 4-level CSM with cascade blending
+4. **Fixed light space basis**: Light rotation causes basis flip when near vertical
+   - Current mitigation: Switch up vector when light is near vertical (>0.99)
+   - Could improve with stable basis selection
+
+**Future Improvements**:
+- Implement cascade blending for smooth transitions
+- Optimize bounding sphere (Ritter's algorithm for tighter fit)
+- Add cascade visualization debug mode
+- Implement stable AABB as alternative to sphere
+- Add shadow fade-out at max distance
 
 ## Component Integration Pattern
 

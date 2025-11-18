@@ -67,6 +67,12 @@ bool MainPass::Initialize()
     m_defaultAlbedo = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
     m_defaultNormal = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
 
+    // --- Initialize Skybox ---
+    m_skybox.Initialize("skybox/sunny_rose_garden_1k.hdr", 512);
+
+    // --- Initialize Post-Process ---
+    m_postProcess.Initialize();
+
     gPrev = std::chrono::steady_clock::now();
     return true;
 }
@@ -307,6 +313,7 @@ void MainPass::createRasterStates()
     ID3D11Device* device = DX11Context::Instance().GetDevice();
     if (!device) return;
 
+    // Rasterizer states
     D3D11_RASTERIZER_DESC rd{};
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_BACK;
@@ -316,6 +323,14 @@ void MainPass::createRasterStates()
 
     rd.FillMode = D3D11_FILL_WIREFRAME;
     device->CreateRasterizerState(&rd, m_rsWire.GetAddressOf());
+
+    // Default depth stencil state (depth test enabled, depth write enabled)
+    D3D11_DEPTH_STENCIL_DESC dsd{};
+    dsd.DepthEnable = TRUE;
+    dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    dsd.DepthFunc = D3D11_COMPARISON_LESS;
+    dsd.StencilEnable = FALSE;
+    device->CreateDepthStencilState(&dsd, m_depthStateDefault.GetAddressOf());
 }
 
 void MainPass::OnMouseDelta(int dx, int dy)
@@ -390,6 +405,7 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_off.w; vp.Height=(FLOAT)m_off.h; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
     context->RSSetViewports(1, &vp);
     context->RSSetState(m_rsSolid.Get());
+    context->OMSetDepthStencilState(m_depthStateDefault.Get(), 0);
 
     // 绑定管线
     context->IASetInputLayout(m_inputLayout.Get());
@@ -521,6 +537,9 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
             context->DrawIndexed(gpuMesh->indexCount, 0, 0);
         }
     }
+
+    // 渲染 Skybox（最后渲染，使用深度测试但不写入）
+    m_skybox.Render(view, proj);
 }
 
 void MainPass::ensureOffscreen(UINT w, UINT h)
@@ -534,10 +553,10 @@ void MainPass::ensureOffscreen(UINT w, UINT h)
     m_off.Reset();
     m_off.w = w; m_off.h = h;
 
-    // Color
+    // Color (HDR format for linear space intermediate rendering)
     D3D11_TEXTURE2D_DESC td{};
     td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
-    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // keep linear; switch to _SRGB if you want post-sRGB
+    td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR linear space
     td.SampleDesc.Count = 1;
     td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     device->CreateTexture2D(&td, nullptr, m_off.color.GetAddressOf());
@@ -557,6 +576,26 @@ void MainPass::ensureOffscreen(UINT w, UINT h)
     dd.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     device->CreateTexture2D(&dd, nullptr, m_off.depth.GetAddressOf());
     device->CreateDepthStencilView(m_off.depth.Get(), nullptr, m_off.dsv.GetAddressOf());
+
+    // === Create LDR sRGB RT for final display ===
+    m_offLDR.Reset();
+    m_offLDR.w = w; m_offLDR.h = h;
+
+    D3D11_TEXTURE2D_DESC ldrDesc{};
+    ldrDesc.Width = w; ldrDesc.Height = h; ldrDesc.MipLevels = 1; ldrDesc.ArraySize = 1;
+    ldrDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;  // LDR sRGB (for gamma correction)
+    ldrDesc.SampleDesc.Count = 1;
+    ldrDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    device->CreateTexture2D(&ldrDesc, nullptr, m_offLDR.color.GetAddressOf());
+
+    D3D11_RENDER_TARGET_VIEW_DESC ldrRTVDesc{};
+    ldrRTVDesc.Format = ldrDesc.Format; ldrRTVDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    device->CreateRenderTargetView(m_offLDR.color.Get(), &ldrRTVDesc, m_offLDR.rtv.GetAddressOf());
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC ldrSRVDesc{};
+    ldrSRVDesc.Format = ldrDesc.Format; ldrSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    ldrSRVDesc.Texture2D.MipLevels = 1;
+    device->CreateShaderResourceView(m_offLDR.color.Get(), &ldrSRVDesc, m_offLDR.srv.GetAddressOf());
 }
 
 void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
@@ -589,11 +628,17 @@ void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
     context->ClearRenderTargetView(m_off.rtv.Get(), clear);
     if (m_off.dsv) context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
+    // Render scene to HDR RT (linear space)
     renderScene(scene, dt, shadowData);
+
+    // Apply post-processing: Tone mapping + Gamma correction (HDR → LDR sRGB)
+    m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h);
 }
 
 void MainPass::Shutdown()
 {
+    m_skybox.Shutdown();
+    m_postProcess.Shutdown();
     m_cbFrame.Reset();
     m_cbObj.Reset();
     m_inputLayout.Reset();
@@ -602,6 +647,7 @@ void MainPass::Shutdown()
     m_sampler.Reset();
     m_rsSolid.Reset();
     m_rsWire.Reset();
+    m_depthStateDefault.Reset();
     m_defaultAlbedo.Reset();
     m_defaultNormal.Reset();
 }
