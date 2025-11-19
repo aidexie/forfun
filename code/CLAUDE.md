@@ -8,12 +8,14 @@ This is a mid-sized game engine and editor project, targeting functionality simi
 
 **Current Status**: Early development with basic foundation in place
 - Entity-Component-System architecture established
-- Editor UI with Hierarchy, Inspector, and Viewport panels
+- Editor UI with Hierarchy, Inspector, Viewport, and Debug panels
 - Basic 3D rendering with OBJ/glTF model loading
-- Transform, MeshRenderer, DirectionalLight components working
+- Transform, MeshRenderer, DirectionalLight, Material components working
 - Reflection system for component properties
 - Scene serialization (Save/Load) in JSON format with auto-registration
-- Shadow mapping with tight frustum fitting for quality optimization
+- CSM shadow mapping with bounding sphere stabilization and texel snapping
+- PBR rendering with Cook-Torrance BRDF (direct lighting)
+- IBL irradiance map generation with debug visualization (diffuse indirect lighting - TODO: integrate into shaders)
 
 **Development Philosophy**:
 - Keep the architecture clean and maintainable
@@ -69,6 +71,12 @@ This is a custom game engine editor with three distinct layers:
 Components attach to GameObjects and define behavior/data:
 - `Transform`: Position, rotation (euler), scale; provides WorldMatrix()
 - `MeshRenderer`: Stores mesh file path and owns `shared_ptr<GpuMeshResource>` for rendering
+- `Material`: PBR material properties (per-GameObject)
+  - `Albedo` (XMFLOAT3): Base color [0,1] for each RGB channel
+  - `Metallic` (float): Metallic property [0,1], controlled by slider in Inspector
+  - `Roughness` (float): Surface roughness [0,1], controlled by slider in Inspector
+  - Used in MainPass rendering: passed to CB_Object constant buffer for PBR shader
+  - Default values: Albedo=(1,1,1), Metallic=0.0, Roughness=0.5
 - `DirectionalLight`: Directional light source with CSM shadow casting support
   - Color, Intensity: Basic light properties
   - Direction: Controlled by Transform rotation via `GetDirection()`
@@ -172,9 +180,14 @@ JSON structure:
 2. **Engine Layer (Rendering Logic)**:
    - `MainPass` (in `Engine/Rendering/MainPass.h/cpp`):
      - Owns rendering pipeline resources (shaders, constant buffers, samplers)
+     - **PBR Shaders**: Loaded from external files (`Shader/MainPass.vs.hlsl`, `MainPass.ps.hlsl`)
+       - Cook-Torrance BRDF: GGX normal distribution, Schlick-GGX geometry, Fresnel-Schlick
+       - Energy conservation: `kD = (1 - kS) * (1 - metallic)`
+       - Constant buffers: `CB_Frame` (camera, light), `CB_Object` (world matrix, material properties)
      - Manages offscreen render target for Viewport
      - `UpdateCamera(w, h, dt)`: Updates camera matrices (called before ShadowPass)
      - `Render(Scene&, w, h, dt, shadowData)`: Traverses scene and issues draw calls
+     - Reads `Material` component per GameObject, passes albedo/metallic/roughness to shader
      - Exposes camera view/proj matrices for shadow frustum fitting
      - Directly uses `DX11Context::Instance().GetDevice/GetContext()` for D3D11 API calls
 
@@ -195,8 +208,10 @@ JSON structure:
      2. For each GameObject with MeshRenderer + Transform:
         - Calls `EnsureUploaded()` (idempotent, handles lazy loading)
         - Gets world matrix from Transform
+        - Reads Material component (albedo, metallic, roughness) or uses defaults
+        - Updates CB_Object with world matrix and material properties
         - Renders each GpuMeshResource with world transform
-     3. Uses default textures for meshes without materials
+     3. Uses default textures for meshes without albedo/normal/metallic/roughness textures
 
 3. **Main Loop Flow** (`main.cpp`):
    ```cpp
@@ -314,6 +329,66 @@ return float4(ldrColor, 1.0);  // GPU applies gamma (linear → sRGB)
 - ❌ Using `UNORM_SRGB` for normal maps (causes incorrect normals)
 - ❌ Doing tone mapping in intermediate passes (prevents HDR post-effects)
 - ❌ Manual gamma correction when using `UNORM_SRGB` output (causes double gamma)
+
+### IBL (Image-Based Lighting) System
+
+**Architecture**: Offline generation of diffuse irradiance cubemaps from HDR environment maps.
+
+**Components:**
+
+1. **IBLGenerator** (`Engine/Rendering/IBLGenerator.h/cpp`):
+   - `GenerateIrradianceMap(envMap, size)`: Convolves environment cubemap over hemisphere
+   - `SaveIrradianceMapToDDS(path)`: Saves generated cubemap to DDS file with manual header writing
+   - `GetIrradianceFaceSRV(faceIndex)`: Returns individual face SRV for debug visualization (0-5)
+
+2. **Irradiance Convolution Shader** (`Shader/IrradianceConvolution.ps.hlsl`):
+   - Hemisphere sampling: 144 samples in phi × 64 samples in theta = 9,216 samples per pixel
+   - Lambert cosine-weighted integration: `color * cos(theta) * sin(theta)`
+   - Output: 32×32 HDR cubemap (R16G16B16A16_FLOAT) per face
+
+3. **Debug Visualization** (`Editor/Panels_IrradianceDebug.cpp`):
+   - ImGui window displaying all 6 cubemap faces in cross layout
+   - Real-time preview without file I/O
+   - Adjustable display size (64-512 pixels)
+
+**Key Implementation Details:**
+
+**Cubemap Direction Mapping** (D3D11 Convention):
+```hlsl
+// GetCubemapDirection: UV [0,1] → 3D direction
+// Critical: Texture V is top-to-bottom, World Y is bottom-to-top
+float2 tc = uv * 2.0 - 1.0;  // [-1, 1]
+// Must negate tc.y for most faces to match D3D11 right-handed coords:
+case 0: dir = float3( 1.0, -tc.y, -tc.x); break;  // +X
+case 4: dir = float3( tc.x, -tc.y,  1.0); break;  // +Z
+// Exception: +Y/-Y faces don't negate the primary axis
+case 2: dir = float3( tc.x,  1.0,  tc.y); break;  // +Y
+```
+
+**TBN Matrix Usage**:
+```hlsl
+float3x3 TBN = float3x3(T, B, N);  // Column vectors
+float3 worldDir = mul(TBN, tangentDir);  // Matrix × column vector
+// NEVER use mul(tangentDir, TBN) - incorrect axis mapping
+```
+
+**Hemisphere Integration**:
+- Spherical coordinates: `phi ∈ [0, 2π]`, `theta ∈ [0, π/2]`
+- Tangent space: `(sin(θ)cos(φ), sin(θ)sin(φ), cos(θ))`
+- Solid angle weight: `cos(θ) * sin(θ) * dθ * dφ`
+- Final normalization: `π * sum / sampleCount`
+
+**Debug Workflow**:
+1. File → Generate IBL (uses skybox environment map)
+2. View "Irradiance Map Debug" window showing 6 faces
+3. For direct sampling test: Uncomment debug code in shader main() to verify environment map binding
+4. For quick iteration: Use low sample count (9×8=72) by uncommenting debug mode in ConvolveIrradiance()
+
+**Current Limitations**:
+- Generation is synchronous (blocks frame, ~1 second for 32×32)
+- No mipmap generation (irradiance is pre-blurred, mips not needed)
+- File saving uses manual DDS implementation (no DirectXTex dependency)
+- Not yet integrated into MainPass PBR lighting (TODO)
 
 ### Third-Party Dependencies
 
@@ -593,11 +668,18 @@ REGISTER_COMPONENT(PointLight)  // ← Only addition needed!
 
 ## Editor Panel Integration
 
-To add a new panel:
+**Current Panels**:
+- `DrawDockspace`: Main docking container with File menu (Save/Load Scene, Generate IBL)
+- `DrawHierarchy`: GameObject tree view with selection
+- `DrawInspector`: Component property editor with reflection-based UI
+- `DrawViewport`: 3D scene view using offscreen render target
+- `DrawIrradianceDebug`: Debug visualization of generated IBL irradiance cubemap (6 faces in cross layout)
+
+**To add a new panel**:
 
 1. Add function declaration to `Editor/Panels.h`
-2. Implement in `Editor/PanelName.cpp`
+2. Implement in `Editor/Panels_PanelName.cpp`
 3. Add cpp file to EDITOR_SRC in CMakeLists.txt
 4. Call from main loop after `ImGui::NewFrame()`
 
-Panels receive `Scene&` to access World and selection state.
+Panels receive `Scene&` to access World and selection state. Some panels (e.g., DrawIrradianceDebug) receive specific subsystem pointers (e.g., `IBLGenerator*`).

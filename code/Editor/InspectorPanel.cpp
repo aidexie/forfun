@@ -7,6 +7,7 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
+#include "Components/Material.h"
 #include <string>
 #include <windows.h>
 #include <commdlg.h>
@@ -16,6 +17,10 @@ class ImGuiPropertyVisitor : public PropertyVisitor {
 public:
     void VisitFloat(const char* name, float& value) override {
         ImGui::DragFloat(name, &value, 0.1f);
+    }
+
+    void VisitFloatSlider(const char* name, float& value, float min, float max) override {
+        ImGui::SliderFloat(name, &value, min, max);
     }
 
     void VisitInt(const char* name, int& value) override {
@@ -145,13 +150,24 @@ void Panels::DrawInspector(Scene& scene) {
             }
         }
         // DirectionalLight component
-        if (auto* mr = sel->GetComponent<DirectionalLight>()) {
+        if (auto* dl = sel->GetComponent<DirectionalLight>()) {
             if (ImGui::CollapsingHeader("DirectionalLight", ImGuiTreeNodeFlags_DefaultOpen)) {
-                mr->VisitProperties(visitor);
+                dl->VisitProperties(visitor);
             }
         } else {
             if (ImGui::Button("Add DirectionalLight")) {
                 sel->AddComponent<DirectionalLight>();
+            }
+        }
+
+        // Material component
+        if (auto* mat = sel->GetComponent<Material>()) {
+            if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+                mat->VisitProperties(visitor);
+            }
+        } else {
+            if (ImGui::Button("Add Material")) {
+                sel->AddComponent<Material>();
             }
         }
     } else {

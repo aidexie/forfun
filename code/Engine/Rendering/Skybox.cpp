@@ -3,11 +3,25 @@
 #include "Core/HdrLoader.h"
 #include <d3dcompiler.h>
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
+
+// Helper function to load shader source from file
+static std::string LoadShaderSource(const std::string& filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        OutputDebugStringA(("Failed to open shader file: " + filepath + "\n").c_str());
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
 
 struct SkyboxVertex {
     XMFLOAT3 position;
@@ -184,54 +198,45 @@ void Skybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     cubeSRVDesc.TextureCube.MipLevels = 1;
     device->CreateShaderResourceView(m_envTexture.Get(), &cubeSRVDesc, m_envCubemap.GetAddressOf());
 
-    // Create conversion shaders
-    const char* vsCode = R"(
-        cbuffer CB : register(b0) {
-            float4x4 viewProj;
+    // Load conversion shaders from files
+    std::string convVsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.vs.hlsl");
+    std::string convPsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.ps.hlsl");
+
+    if (convVsSource.empty() || convPsSource.empty()) {
+        OutputDebugStringA("ERROR: Failed to load EquirectToCubemap shader files!\n");
+        return;
+    }
+
+    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    compileFlags |= D3DCOMPILE_DEBUG;
+#endif
+
+    ComPtr<ID3DBlob> vsBlob, psBlob, err;
+
+    // Compile conversion vertex shader
+    HRESULT hr = D3DCompile(convVsSource.c_str(), convVsSource.size(), "EquirectToCubemap.vs.hlsl",
+                           nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            OutputDebugStringA("=== EQUIRECT CONVERSION VS COMPILATION ERROR ===\n");
+            OutputDebugStringA((const char*)err->GetBufferPointer());
+            OutputDebugStringA("\n==============================================\n");
         }
-        struct VSIn {
-            float3 pos : POSITION;
-        };
-        struct VSOut {
-            float4 posH : SV_Position;
-            float3 localPos : TEXCOORD0;
-        };
-        VSOut main(VSIn input) {
-            VSOut output;
-            output.localPos = input.pos;
-            output.posH = mul(float4(input.pos, 1.0), viewProj);
-            return output;
+        return;
+    }
+
+    // Compile conversion pixel shader
+    hr = D3DCompile(convPsSource.c_str(), convPsSource.size(), "EquirectToCubemap.ps.hlsl",
+                   nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            OutputDebugStringA("=== EQUIRECT CONVERSION PS COMPILATION ERROR ===\n");
+            OutputDebugStringA((const char*)err->GetBufferPointer());
+            OutputDebugStringA("\n==============================================\n");
         }
-    )";
-
-    const char* psCode = R"(
-        Texture2D equirectMap : register(t0);
-        SamplerState samp : register(s0);
-
-        static const float PI = 3.14159265359;
-
-        float2 SampleSphericalMap(float3 v) {
-            float2 uv = float2(atan2(v.z, v.x), asin(-v.y));  // Flip Y
-            uv *= float2(0.1591, 0.3183);  // 1/(2*PI), 1/PI
-            uv += 0.5;
-            return uv;
-        }
-
-        struct PSIn {
-            float4 posH : SV_Position;
-            float3 localPos : TEXCOORD0;
-        };
-
-        float4 main(PSIn input) : SV_Target {
-            float2 uv = SampleSphericalMap(normalize(input.localPos));
-            float3 color = equirectMap.Sample(samp, uv).rgb;
-            return float4(color, 1.0);
-        }
-    )";
-
-    ComPtr<ID3DBlob> vsBlob, psBlob;
-    D3DCompile(vsCode, strlen(vsCode), nullptr, nullptr, nullptr, "main", "vs_5_0", 0, 0, &vsBlob, nullptr);
-    D3DCompile(psCode, strlen(psCode), nullptr, nullptr, nullptr, "main", "ps_5_0", 0, 0, &psBlob, nullptr);
+        return;
+    }
 
     ComPtr<ID3D11VertexShader> convVS;
     ComPtr<ID3D11PixelShader> convPS;
@@ -399,46 +404,45 @@ void Skybox::createShaders() {
     ID3D11Device* device = DX11Context::Instance().GetDevice();
     if (!device) return;
 
-    const char* vsCode = R"(
-        cbuffer CB : register(b0) {
-            float4x4 viewProj;
+    // Load shader source from files (paths relative to E:\forfun\assets working directory)
+    std::string vsSource = LoadShaderSource("../source/code/Shader/Skybox.vs.hlsl");
+    std::string psSource = LoadShaderSource("../source/code/Shader/Skybox.ps.hlsl");
+
+    if (vsSource.empty() || psSource.empty()) {
+        OutputDebugStringA("ERROR: Failed to load Skybox shader files!\n");
+        return;
+    }
+
+    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    compileFlags |= D3DCOMPILE_DEBUG;
+#endif
+
+    ComPtr<ID3DBlob> vsBlob, psBlob, err;
+
+    // Compile Vertex Shader
+    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "Skybox.vs.hlsl", nullptr, nullptr,
+                           "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            OutputDebugStringA("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===\n");
+            OutputDebugStringA((const char*)err->GetBufferPointer());
+            OutputDebugStringA("\n==============================================\n");
         }
-        struct VSIn {
-            float3 pos : POSITION;
-        };
-        struct VSOut {
-            float4 posH : SV_Position;
-            float3 localPos : TEXCOORD0;
-        };
-        VSOut main(VSIn input) {
-            VSOut output;
-            output.localPos = input.pos;
-            output.posH = mul(float4(input.pos, 1.0), viewProj).xyww;  // Set z=w for far plane
-            return output;
+        return;
+    }
+
+    // Compile Pixel Shader
+    hr = D3DCompile(psSource.c_str(), psSource.size(), "Skybox.ps.hlsl", nullptr, nullptr,
+                   "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            OutputDebugStringA("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===\n");
+            OutputDebugStringA((const char*)err->GetBufferPointer());
+            OutputDebugStringA("\n=============================================\n");
         }
-    )";
-
-    const char* psCode = R"(
-        TextureCube envMap : register(t0);
-        SamplerState samp : register(s0);
-
-        struct PSIn {
-            float4 posH : SV_Position;
-            float3 localPos : TEXCOORD0;
-        };
-
-        float4 main(PSIn input) : SV_Target {
-            float3 envColor = envMap.Sample(samp, input.localPos).rgb;
-
-            // Output HDR linear space (no tone mapping, no gamma correction)
-            // Post-process pass will handle tone mapping and gamma correction
-            return float4(envColor, 1.0);
-        }
-    )";
-
-    ComPtr<ID3DBlob> vsBlob, psBlob;
-    D3DCompile(vsCode, strlen(vsCode), nullptr, nullptr, nullptr, "main", "vs_5_0", 0, 0, &vsBlob, nullptr);
-    D3DCompile(psCode, strlen(psCode), nullptr, nullptr, nullptr, "main", "ps_5_0", 0, 0, &psBlob, nullptr);
+        return;
+    }
 
     device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());

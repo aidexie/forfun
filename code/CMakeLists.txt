@@ -39,6 +39,7 @@ set(EDITOR_SRC
     ${CODE_PATH}/Editor/HierarchyPanel.cpp
     ${CODE_PATH}/Editor/InspectorPanel.cpp
     ${CODE_PATH}/Editor/ViewportPanel.cpp
+    ${CODE_PATH}/Editor/Panels_IrradianceDebug.cpp
 )
 
 add_executable(forfun WIN32
@@ -75,6 +76,7 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/MeshRenderer.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
     ${CODE_PATH}/Engine/Components/DirectionalLight.h
+    ${CODE_PATH}/Engine/Components/Material.h
     ${CODE_PATH}/Engine/Rendering/MainPass.h
     ${CODE_PATH}/Engine/Rendering/MainPass.cpp
     ${CODE_PATH}/Engine/Rendering/ShadowPass.h
@@ -83,5 +85,16 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/Skybox.cpp
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.h
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.cpp
+    ${CODE_PATH}/Engine/Rendering/IBLGenerator.h
+    ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
 )
-target_sources(forfun PRIVATE ${ENGINE_SOURCES})
+
+# Shader files (for IDE visibility)
+set(SHADER_SOURCES
+    ${CODE_PATH}/Shader/MainPass.vs.hlsl
+    ${CODE_PATH}/Shader/MainPass.ps.hlsl
+    ${CODE_PATH}/Shader/IrradianceConvolution.vs.hlsl
+    ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
+)
+
+target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})

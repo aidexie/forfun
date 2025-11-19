@@ -102,6 +102,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbLightSpace;  // Light space VP matrix
     Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbObject;      // Object world matrix
 
+    // Render states for shadow rendering
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthState;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState>   m_rasterState;
+
     // Output bundle for MainPass
     Output m_output;
 };

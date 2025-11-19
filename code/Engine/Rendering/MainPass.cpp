@@ -8,10 +8,13 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
+#include "Components/Material.h"
 #include <array>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #pragma comment(lib, "d3d11.lib")
@@ -20,6 +23,18 @@
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
+
+// Helper function to load shader source from file
+static std::string LoadShaderSource(const std::string& filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        OutputDebugStringA(("Failed to open shader file: " + filepath + "\n").c_str());
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
 
 struct alignas(16) CB_Frame {
     DirectX::XMMATRIX view;
@@ -33,13 +48,17 @@ struct alignas(16) CB_Frame {
     DirectX::XMFLOAT4 cascadeSplits;  // HLSL treats array as float4, use XMFLOAT4
     DirectX::XMMATRIX lightSpaceVPs[4];
 
-    // Lighting
+    // Lighting (PBR - removed Blinn-Phong parameters)
     DirectX::XMFLOAT3 lightDirWS; float _pad1;
     DirectX::XMFLOAT3 lightColor; float _pad2;
     DirectX::XMFLOAT3 camPosWS;  float _pad3;
-    float ambient; float specPower; float specIntensity; float shadowBias;
+    float shadowBias; DirectX::XMFLOAT3 _pad4;
 };
-struct alignas(16) CB_Object { DirectX::XMMATRIX world; };
+struct alignas(16) CB_Object {
+    DirectX::XMMATRIX world;
+    DirectX::XMFLOAT3 albedo; float metallic;
+    float roughness; DirectX::XMFLOAT3 _pad;
+};
 
 static auto gPrev = std::chrono::steady_clock::now();
 
@@ -83,202 +102,43 @@ void MainPass::createPipeline()
     ID3D11Device* device = DX11Context::Instance().GetDevice();
     if (!device) return;
 
-    static const char* kVS = R"(
-        cbuffer CB_Frame  : register(b0) {
-            float4x4 gView;
-            float4x4 gProj;
+    // Load shader source from files
+    // Path is relative to E:\forfun\assets (working directory)
+    std::string vsSource = LoadShaderSource("../source/code/Shader/MainPass.vs.hlsl");
+    std::string psSource = LoadShaderSource("../source/code/Shader/MainPass.ps.hlsl");
 
-            // CSM parameters
-            int gCascadeCount;
-            int gDebugShowCascades;  // 0=off, 1=on
-            int gEnableSoftShadows;  // 0=hard, 1=soft (PCF)
-            float gCascadeBlendRange;  // Blend range at cascade boundaries (0-1)
-            float4 gCascadeSplits;  // Changed from array to float4 for alignment
-            float4x4 gLightSpaceVPs[4];
-
-            // Lighting
-            float3   gLightDirWS; float _pad1;
-            float3   gLightColor; float _pad2;
-            float3   gCamPosWS;   float _pad3;
-            float    gAmbient; float gSpecPower; float gSpecIntensity; float gShadowBias;
-        }
-        cbuffer CB_Object : register(b1) { float4x4 gWorld; }
-
-        struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float4 t:TANGENT; };
-        struct VSOut{
-            float4 posH:SV_Position;
-            float3 posWS:TEXCOORD0;
-            float2 uv:TEXCOORD1;
-            float3x3 TBN:TEXCOORD2;
-            // Light space positions for all cascades (calculated in VS for performance)
-            float4 posLS0:TEXCOORD5;
-            float4 posLS1:TEXCOORD6;
-            float4 posLS2:TEXCOORD7;
-            float4 posLS3:TEXCOORD8;
-        };
-        VSOut main(VSIn i){
-            VSOut o;
-            float4 posWS = mul(float4(i.p,1), gWorld);
-            float3 nWS = normalize(mul(float4(i.n,0), gWorld).xyz);
-            float3 tWS = normalize(mul(float4(i.t.xyz,0), gWorld).xyz);
-            float3 bWS = normalize(cross(nWS, tWS) * i.t.w);
-            o.TBN = float3x3(tWS, bWS, nWS);
-            o.posWS = posWS.xyz;
-            o.uv = i.uv;
-            float4 posV = mul(posWS, gView);
-            o.posH = mul(posV, gProj);
-
-            // Pre-calculate light space positions for all cascades in VS
-            // This is much faster than calculating in PS (done once per vertex vs per fragment)
-            o.posLS0 = mul(posWS, gLightSpaceVPs[0]);
-            o.posLS1 = mul(posWS, gLightSpaceVPs[1]);
-            o.posLS2 = mul(posWS, gLightSpaceVPs[2]);
-            o.posLS3 = mul(posWS, gLightSpaceVPs[3]);
-
-            return o;
-        }
-    )";
-    static const char* kPS = R"(
-        Texture2D gAlbedo : register(t0);
-        Texture2D gNormal : register(t1);
-        Texture2DArray gShadowMaps : register(t2);  // CSM: Texture2DArray
-        SamplerState gSamp: register(s0);
-        SamplerComparisonState gShadowSampler : register(s1);
-
-        cbuffer CB_Frame  : register(b0) {
-            float4x4 gView;
-            float4x4 gProj;
-
-            // CSM parameters
-            int gCascadeCount;
-            int gDebugShowCascades;  // 0=off, 1=on
-            int gEnableSoftShadows;  // 0=hard, 1=soft (PCF)
-            float gCascadeBlendRange;  // Blend range at cascade boundaries (0-1)
-            float4 gCascadeSplits;  // Changed from array to float4 for alignment
-            float4x4 gLightSpaceVPs[4];
-
-            // Lighting
-            float3   gLightDirWS; float _pad1;
-            float3   gLightColor; float _pad2;
-            float3   gCamPosWS;   float _pad3;
-            float    gAmbient; float gSpecPower; float gSpecIntensity; float gShadowBias;
-        }
-        cbuffer CB_Object : register(b1) { float4x4 gWorld; }
-
-        struct PSIn{
-            float4 posH:SV_Position;
-            float3 posWS:TEXCOORD0;
-            float2 uv:TEXCOORD1;
-            float3x3 TBN:TEXCOORD2;
-            // Light space positions for all cascades (pre-calculated in VS)
-            float4 posLS0:TEXCOORD5;
-            float4 posLS1:TEXCOORD6;
-            float4 posLS2:TEXCOORD7;
-            float4 posLS3:TEXCOORD8;
-        };
-
-        // Select cascade based on spherical distance from camera (Unity approach)
-        int SelectCascade(float3 posWS, float3 camPosWS) {
-            float distance = length(posWS - camPosWS);  // Spherical distance
-            for (int i = 0; i < gCascadeCount - 1; ++i) {
-                if (distance < gCascadeSplits[i])
-                    return i;
-            }
-            return gCascadeCount - 1;
-        }
-
-        float CalcShadowFactor(float3 posWS, float4 posLS0, float4 posLS1, float4 posLS2, float4 posLS3) {
-            // Select cascade using spherical distance
-            int cascadeIndex = SelectCascade(posWS, gCamPosWS);
-
-            // Select pre-calculated light space position for the chosen cascade
-            float4 posLS = (cascadeIndex == 0) ? posLS0 :
-                           (cascadeIndex == 1) ? posLS1 :
-                           (cascadeIndex == 2) ? posLS2 : posLS3;
-
-            float3 projCoords = posLS.xyz / posLS.w;
-
-            // Transform to [0,1] UV space
-            float2 shadowUV = projCoords.xy * 0.5 + 0.5;
-            shadowUV.y = 1.0 - shadowUV.y;
-
-            // Outside shadow map = no shadow
-            if (shadowUV.x < 0 || shadowUV.x > 1 ||
-                shadowUV.y < 0 || shadowUV.y > 1 ||
-                projCoords.z > 1.0)
-                return 1.0;
-
-            float currentDepth = projCoords.z;
-            float cascadeIndexF = float(cascadeIndex);  // Explicit conversion to float
-
-            // Soft shadows: PCF 3x3 (9 samples), Hard shadows: 1 sample
-            if (gEnableSoftShadows == 1) {
-                // PCF 3x3 for soft shadow edges
-                float shadow = 0.0;
-                float2 texelSize = 1.0 / 2048.0;
-                [unroll]
-                for (int x = -1; x <= 1; x++) {
-                    [unroll]
-                    for (int y = -1; y <= 1; y++) {
-                        float2 uv = shadowUV + float2(x, y) * texelSize;
-                        shadow += gShadowMaps.SampleCmpLevelZero(gShadowSampler,
-                                                                 float3(uv.x, uv.y, cascadeIndexF),
-                                                                 currentDepth - gShadowBias);
-                    }
-                }
-                return shadow / 9.0;
-            } else {
-                // Single sample for hard shadows (faster)
-                return gShadowMaps.SampleCmpLevelZero(gShadowSampler,
-                                                      float3(shadowUV.x, shadowUV.y, cascadeIndexF),
-                                                      currentDepth - gShadowBias);
-            }
-        }
-
-        float4 main(PSIn i):SV_Target{
-            // Debug: Visualize cascade levels
-            if (gDebugShowCascades == 1) {
-                int cascadeIndex = SelectCascade(i.posWS, gCamPosWS);
-                float3 cascadeColors[4] = {
-                    float3(1.0, 0.0, 0.0),  // Cascade 0: Red
-                    float3(0.0, 1.0, 0.0),  // Cascade 1: Green
-                    float3(0.0, 0.0, 1.0),  // Cascade 2: Blue
-                    float3(1.0, 1.0, 0.0)   // Cascade 3: Yellow
-                };
-                return float4(cascadeColors[cascadeIndex], 1.0);
-            }
-
-            float3 albedo = gAlbedo.Sample(gSamp, i.uv).rgb;
-            float3 nTS    = gNormal.Sample(gSamp, i.uv).xyz * 2.0 - 1.0;
-            nTS = normalize(nTS);
-            float3 nWS = normalize(mul(nTS, i.TBN));
-
-            // Blinn-Phong lighting
-            float3 L = normalize(-gLightDirWS);
-            float3 V = normalize(gCamPosWS - i.posWS);
-            float3 H = normalize(L+V);
-            float NdotL = saturate(dot(nWS,L));
-            float NdotH = saturate(dot(nWS,H));
-
-            // Shadow factor (CSM) - using pre-calculated light space positions from VS
-            float shadowFactor = CalcShadowFactor(i.posWS, i.posLS0, i.posLS1, i.posLS2, i.posLS3);
-
-            // Diffuse and specular affected by shadow
-            float3 diff = albedo * NdotL * gLightColor * shadowFactor;
-            float3 spec = gSpecIntensity * pow(NdotH, gSpecPower) * NdotL * gLightColor * shadowFactor;
-
-            // Ambient not affected by shadow
-            float3 colorLin = gAmbient * albedo + diff + spec;
-            return float4(colorLin, 1.0);
-        }
-    )";
+    if (vsSource.empty() || psSource.empty()) {
+        OutputDebugStringA("ERROR: Failed to load shader files!\n");
+        return;
+    }
     UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
     compileFlags |= D3DCOMPILE_DEBUG;
 #endif
     ComPtr<ID3DBlob> vsBlob, psBlob, err;
-    D3DCompile(kVS, strlen(kVS), nullptr, nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    D3DCompile(kPS, strlen(kPS), nullptr, nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+
+    // Compile Vertex Shader
+    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "MainPass.vs.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            OutputDebugStringA("=== VERTEX SHADER COMPILATION ERROR ===\n");
+            OutputDebugStringA((const char*)err->GetBufferPointer());
+            OutputDebugStringA("\n========================================\n");
+        }
+        return;
+    }
+
+    // Compile Pixel Shader
+    hr = D3DCompile(psSource.c_str(), psSource.size(), "MainPass.ps.hlsl", nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            OutputDebugStringA("=== PIXEL SHADER COMPILATION ERROR ===\n");
+            OutputDebugStringA((const char*)err->GetBufferPointer());
+            OutputDebugStringA("\n=======================================\n");
+        }
+        return;
+    }
+
     device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
 
@@ -484,9 +344,6 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     }
 
     cf.camPosWS   = m_camPos;
-    cf.ambient = 0.38f;
-    cf.specPower = 64.0f;
-    cf.specIntensity = 0.3f;
     context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
 
     // Bind shadow map array
@@ -512,12 +369,22 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
         // 获取世界矩阵
         XMMATRIX worldMatrix = transform->WorldMatrix();
 
+        // 获取材质组件（如果没有则使用默认值）
+        auto* material = obj->GetComponent<Material>();
+        XMFLOAT3 albedo = material ? material->Albedo : XMFLOAT3(1.0f, 1.0f, 1.0f);
+        float metallic = material ? material->Metallic : 0.0f;
+        float roughness = material ? material->Roughness : 0.5f;
+
         // 绘制所有子网格（glTF 可能有多个）
         for (auto& gpuMesh : meshRenderer->meshes) {
             if (!gpuMesh) continue;
 
-            // 更新物体矩阵
-            CB_Object co{ XMMatrixTranspose(worldMatrix) };
+            // 更新物体矩阵和材质属性
+            CB_Object co{};
+            co.world = XMMatrixTranspose(worldMatrix);
+            co.albedo = albedo;
+            co.metallic = metallic;
+            co.roughness = roughness;
             context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
 
             // 绑定顶点和索引缓冲

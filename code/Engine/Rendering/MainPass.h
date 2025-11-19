@@ -58,6 +58,8 @@ public:
     DirectX::XMMATRIX GetCameraViewMatrix() const { return m_cameraView; }
     DirectX::XMMATRIX GetCameraProjMatrix() const { return m_cameraProj; }
 
+    // 获取 Skybox 环境贴图（用于 IBL 生成）
+    ID3D11ShaderResourceView* GetSkyboxEnvironmentMap() const { return m_skybox.GetEnvironmentMap(); }
 
 private:
     void ensureOffscreen(UINT w, UINT h);

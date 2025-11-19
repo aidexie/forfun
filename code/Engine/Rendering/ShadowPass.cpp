@@ -139,6 +139,29 @@ bool ShadowPass::Initialize()
         device->CreateSamplerState(&sampDesc, m_shadowSampler.GetAddressOf());
     }
 
+    // --- Create depth stencil state (depth test + write enabled) ---
+    {
+        D3D11_DEPTH_STENCIL_DESC dsd{};
+        dsd.DepthEnable = TRUE;
+        dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+        dsd.DepthFunc = D3D11_COMPARISON_LESS;
+        dsd.StencilEnable = FALSE;
+        device->CreateDepthStencilState(&dsd, m_depthState.GetAddressOf());
+    }
+
+    // --- Create rasterizer state (with depth bias to prevent shadow acne) ---
+    {
+        D3D11_RASTERIZER_DESC rd{};
+        rd.FillMode = D3D11_FILL_SOLID;
+        rd.CullMode = D3D11_CULL_BACK;
+        rd.FrontCounterClockwise = FALSE;
+        rd.DepthBias = 0;  // Will be set dynamically via DirectionalLight::ShadowBias
+        rd.DepthBiasClamp = 0.0f;
+        rd.SlopeScaledDepthBias = 0.0f;
+        rd.DepthClipEnable = TRUE;
+        device->CreateRasterizerState(&rd, m_rasterState.GetAddressOf());
+    }
+
     // --- Initialize output bundle ---
     m_output.cascadeCount = 1;
     m_output.shadowMapArray = m_defaultShadowMap.Get();  // Default: no shadow
@@ -167,6 +190,8 @@ void ShadowPass::Shutdown()
     m_inputLayout.Reset();
     m_cbLightSpace.Reset();
     m_cbObject.Reset();
+    m_depthState.Reset();
+    m_rasterState.Reset();
 }
 
 void ShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
@@ -490,6 +515,10 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
     context->PSSetShader(nullptr, nullptr, 0);  // Depth-only, no pixel shader
     context->VSSetConstantBuffers(0, 1, m_cbLightSpace.GetAddressOf());
     context->VSSetConstantBuffers(1, 1, m_cbObject.GetAddressOf());
+
+    // Set render states
+    context->OMSetDepthStencilState(m_depthState.Get(), 0);
+    context->RSSetState(m_rasterState.Get());
 
     // Set viewport (same for all cascades)
     D3D11_VIEWPORT vp{};

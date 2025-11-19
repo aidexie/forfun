@@ -11,6 +11,7 @@
 #include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
 #include "Engine/Rendering/MainPass.h"  // 主渲染流程
 #include "Engine/Rendering/ShadowPass.h"  // 阴影渲染流程
+#include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
 #include "Console.h"
 
 // ImGui
@@ -35,6 +36,7 @@ static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
 static const wchar_t* kWndTitle = L"ForFunEditor";
 static MainPass gMainPass;
 static ShadowPass gShadowPass;
+static IBLGenerator gIBLGen;
 static bool gMinimized = false;
 static POINT gLastMouse = { 0, 0 };
 
@@ -180,7 +182,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     gScene.selected = -1;                                // 默认无选中
     gEditorCam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
-    // 4) MainPass 和 ShadowPass 初始化
+    // 4) MainPass, ShadowPass 和 IBLGenerator 初始化
     if (!gMainPass.Initialize())
     {
         return -3;
@@ -188,6 +190,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     if (!gShadowPass.Initialize())
     {
         return -4;
+    }
+    if (!gIBLGen.Initialize())
+    {
+        return -5;
     }
 
     // // --- Setup World/GameObjects ---
@@ -275,7 +281,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // Main Pass (use shadow output bundle)
         gMainPass.Render(gScene, vpW, vpH, dt, &gShadowPass.GetOutput());
 
-
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
         ID3D11DepthStencilView* dsv = ctx.GetDSV();
         ctx.BindRenderTargets(rtv, dsv);
@@ -291,13 +296,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // main.cpp  —— 每帧渲染里，渲染完 3D 场景之后，提交 ImGui 之前
         {
             bool dockOpen = true;
-            Panels::DrawDockspace(&dockOpen, gScene); // DockSpace 容器
+            Panels::DrawDockspace(&dockOpen, gScene, &gMainPass, &gIBLGen); // DockSpace 容器
             Panels::DrawHierarchy(gScene);            // 层级面板
             Panels::DrawInspector(gScene);            // 检视面板
             Panels::DrawViewport(gScene, gEditorCam,
                 gMainPass.GetOffscreenSRV(),
                 gMainPass.GetOffscreenWidth(),
                 gMainPass.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
+            Panels::DrawIrradianceDebug(&gIBLGen);   // Irradiance map debug 窗口
         }
 
         // 5.5 提交 ImGui
@@ -311,6 +317,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 6) 清理
     gMainPass.Shutdown();
     gShadowPass.Shutdown();
+    gIBLGen.Shutdown();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

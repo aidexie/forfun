@@ -15,6 +15,13 @@ public:
     virtual void VisitBool(const char* name, bool& value) = 0;
     virtual void VisitString(const char* name, std::string& value) = 0;
 
+    // Float slider with range [min, max]
+    virtual void VisitFloatSlider(const char* name, float& value, float min, float max) {
+        // Fallback to regular float if not implemented
+        value = (value < min) ? min : (value > max) ? max : value; // Clamp
+        VisitFloat(name, value);
+    }
+
     // Math types
     virtual void VisitFloat3(const char* name, DirectX::XMFLOAT3& value) = 0;
 

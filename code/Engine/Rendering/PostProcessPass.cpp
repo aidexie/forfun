@@ -92,9 +92,13 @@ void PostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
     // Draw fullscreen quad
     context->Draw(4, 0);
 
-    // Unbind resources
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
+    // Unbind ALL resources to prevent hazards
+    ID3D11ShaderResourceView* nullSRVs[8] = { nullptr };
+    context->PSSetShaderResources(0, 8, nullSRVs);
+    context->VSSetShaderResources(0, 8, nullSRVs);
+
+    // Unbind render target to prevent hazards
+    context->OMSetRenderTargets(0, nullptr, nullptr);
 }
 
 void PostProcessPass::createFullscreenQuad() {
