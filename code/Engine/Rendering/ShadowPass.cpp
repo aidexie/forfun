@@ -552,7 +552,7 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
         context->ClearDepthStencilView(m_shadowDSVs[cascadeIndex].Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 
         // Render all objects to this cascade
-        for (auto& objPtr : scene.world.Objects()) {
+        for (auto& objPtr : scene.GetWorld().Objects()) {
             auto* obj = objPtr.get();
             auto* meshRenderer = obj->GetComponent<MeshRenderer>();
             auto* transform = obj->GetComponent<Transform>();

@@ -6,7 +6,7 @@
 #include <vector>
 
 // Forward declarations
-struct Scene;
+class Scene;
 class DirectionalLight;
 
 // ShadowPass: Renders shadow map from light's perspective

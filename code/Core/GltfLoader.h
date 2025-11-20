@@ -4,8 +4,9 @@
 #include "Mesh.h"
 
 struct GltfTextures {
-    std::string baseColorPath; // sRGB
-    std::string normalPath;    // Linear
+    std::string baseColorPath;          // sRGB (Albedo)
+    std::string normalPath;             // Linear (Tangent-space normal)
+    std::string metallicRoughnessPath;  // Linear (G=Roughness, B=Metallic, glTF 2.0 standard)
 };
 
 struct GltfMeshCPU {

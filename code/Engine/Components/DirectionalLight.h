@@ -10,6 +10,7 @@
 struct DirectionalLight : public Component {
     DirectX::XMFLOAT3 Color{1.0f, 1.0f, 1.0f};  // Light color (RGB)
     float Intensity = 1.0f;                      // Light intensity multiplier
+    float IblIntensity = 1.0f;                   // IBL (ambient) intensity multiplier (global)
 
     // Shadow parameters (DirectionalLight always casts shadows)
     int ShadowMapSizeIndex = 1;       // 0=1024, 1=2048, 2=4096 (default: 2048)
@@ -28,7 +29,8 @@ struct DirectionalLight : public Component {
 
     void VisitProperties(PropertyVisitor& visitor) override {
         visitor.VisitFloat3("Color", Color);
-        visitor.VisitFloat("Intensity", Intensity);
+        visitor.VisitFloatSlider("Intensity", Intensity, 0.0f, 10.0f);
+        visitor.VisitFloatSlider("IBL Intensity", IblIntensity, 0.0f, 10.0f);
 
         // Shadow parameters
         visitor.VisitEnum("Shadow Map Size", ShadowMapSizeIndex, {"1024", "2048", "4096"});

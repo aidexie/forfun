@@ -9,6 +9,7 @@ struct VertexPNT {
     float u, v;
     float tx, ty, tz;
     float tw;
+    float r, g, b, a;  // Vertex color (for baked AO or other per-vertex data)
 };
 
 struct MeshCPU_PNT {

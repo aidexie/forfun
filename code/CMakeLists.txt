@@ -70,6 +70,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/ComponentRegistry.h
     ${CODE_PATH}/Engine/World.h
     ${CODE_PATH}/Engine/PropertyVisitor.h
+    ${CODE_PATH}/Engine/Scene.h
+    ${CODE_PATH}/Engine/Scene.cpp
     ${CODE_PATH}/Engine/SceneSerializer.h
     ${CODE_PATH}/Engine/SceneSerializer.cpp
     ${CODE_PATH}/Engine/Components/Transform.h
@@ -97,6 +99,8 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
     ${CODE_PATH}/Shader/PreFilterEnvironmentMap.vs.hlsl
     ${CODE_PATH}/Shader/PreFilterEnvironmentMap.ps.hlsl
+    ${CODE_PATH}/Shader/BrdfLut.vs.hlsl
+    ${CODE_PATH}/Shader/BrdfLut.ps.hlsl
     ${CODE_PATH}/Shader/Skybox.vs.hlsl
     ${CODE_PATH}/Shader/Skybox.ps.hlsl
     ${CODE_PATH}/Shader/EquirectToCubemap.vs.hlsl

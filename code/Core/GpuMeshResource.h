@@ -11,6 +11,7 @@ public:
     UINT indexCount = 0;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> albedoSRV;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> normalSRV;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> metallicRoughnessSRV;  // G=Roughness, B=Metallic (glTF 2.0 standard)
 
     GpuMeshResource() = default;
     ~GpuMeshResource() = default;

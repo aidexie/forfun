@@ -3,10 +3,9 @@
 #include <wrl/client.h>
 #include <DirectXMath.h>
 #include "ShadowPass.h"
-#include "Skybox.h"
 #include "PostProcessPass.h"
 // Forward declarations
-struct Scene;
+class Scene;
 class ShadowPass;
 
 // MainPass: 主渲染流程
@@ -58,9 +57,6 @@ public:
     DirectX::XMMATRIX GetCameraViewMatrix() const { return m_cameraView; }
     DirectX::XMMATRIX GetCameraProjMatrix() const { return m_cameraProj; }
 
-    // 获取 Skybox 环境贴图（用于 IBL 生成）
-    ID3D11ShaderResourceView* GetSkyboxEnvironmentMap() const { return m_skybox.GetEnvironmentMap(); }
-
 private:
     void ensureOffscreen(UINT w, UINT h);
     void renderScene(Scene& scene, float dt, const ShadowPass::Output* shadowData);
@@ -83,6 +79,7 @@ private:
     // 默认纹理（兜底）
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultAlbedo;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultNormal;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultMetallicRoughness;  // G=Roughness=1, B=Metallic=1 (all white)
 
     // 相机状态
     DirectX::XMFLOAT3 m_camPos{ -6.0f, 0.8f, 0.0f };
@@ -93,9 +90,7 @@ private:
     DirectX::XMMATRIX m_cameraView = DirectX::XMMatrixIdentity();
     DirectX::XMMATRIX m_cameraProj = DirectX::XMMatrixIdentity();
 
-    // Skybox
-    Skybox m_skybox;
-
+    // Skybox is now managed by Scene singleton
     // Post-process (tone mapping + gamma correction)
     PostProcessPass m_postProcess;
 

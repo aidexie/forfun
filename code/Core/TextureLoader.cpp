@@ -46,22 +46,32 @@ bool LoadTextureWIC(ID3D11Device* device, const std::wstring& path,
     if (FAILED(hr)) return false;
 
     D3D11_TEXTURE2D_DESC td{};
-    td.Width=w; td.Height=h; td.MipLevels=1; td.ArraySize=1;
+    td.Width=w; td.Height=h;
+    td.MipLevels=0;  // 0 = auto-generate full mipmap chain
+    td.ArraySize=1;
     td.Format=ToDXGIFormat(srgb);
     td.SampleDesc.Count=1;
     td.Usage=D3D11_USAGE_DEFAULT;
-    td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-    D3D11_SUBRESOURCE_DATA srd{ pixels.data(), w*4, 0 };
+    td.BindFlags=D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;  // Need RENDER_TARGET for GenerateMips
+    td.MiscFlags=D3D11_RESOURCE_MISC_GENERATE_MIPS;  // Enable mipmap generation
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> tex;
-    hr = device->CreateTexture2D(&td, &srd, tex.GetAddressOf()); if (FAILED(hr)) return false;
+    hr = device->CreateTexture2D(&td, nullptr, tex.GetAddressOf()); if (FAILED(hr)) return false;
+
+    // Get immediate context and upload data to mip 0
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    device->GetImmediateContext(context.GetAddressOf());
+    context->UpdateSubresource(tex.Get(), 0, nullptr, pixels.data(), w*4, 0);
 
     D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
     sd.Format=td.Format;
     sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
-    sd.Texture2D.MipLevels=1;
+    sd.Texture2D.MipLevels=-1;  // -1 = all mipmap levels
     hr = device->CreateShaderResourceView(tex.Get(), &sd, outSRV.GetAddressOf());
     if (FAILED(hr)) return false;
+
+    // Generate mipmaps automatically (box filter)
+    context->GenerateMips(outSRV.Get());
 
     return true;
 }

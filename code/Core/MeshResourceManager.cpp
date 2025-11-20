@@ -164,6 +164,16 @@ std::shared_ptr<GpuMeshResource> MeshResourceManager::UploadGltfMesh(
         }
     }
 
+    // Load metallic-roughness texture (linear, G=Roughness, B=Metallic)
+    if (!gltfMesh.textures.metallicRoughnessPath.empty()) {
+        ComPtr<ID3D11ShaderResourceView> srv;
+        std::wstring wpath(gltfMesh.textures.metallicRoughnessPath.begin(),
+                          gltfMesh.textures.metallicRoughnessPath.end());
+        if (LoadTextureWIC(device, wpath, srv, /*srgb=*/false)) {
+            resource->metallicRoughnessSRV = srv;
+        }
+    }
+
     return resource;
 }
 

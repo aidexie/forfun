@@ -44,7 +44,7 @@ static std::string SaveFileDialog(const char* filter) {
     return "";
 }
 
-void Panels::DrawDockspace(bool* pOpen, Scene& scene, MainPass* mainPass, IBLGenerator* iblGen) {
+void Panels::DrawDockspace(bool* pOpen, Scene& scene, MainPass* mainPass) {
     ImGuiWindowFlags winFlags = ImGuiWindowFlags_NoDocking
         | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove

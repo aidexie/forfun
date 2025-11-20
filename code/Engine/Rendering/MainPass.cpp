@@ -52,12 +52,16 @@ struct alignas(16) CB_Frame {
     DirectX::XMFLOAT3 lightDirWS; float _pad1;
     DirectX::XMFLOAT3 lightColor; float _pad2;
     DirectX::XMFLOAT3 camPosWS;  float _pad3;
-    float shadowBias; DirectX::XMFLOAT3 _pad4;
+    float shadowBias;
+    float iblIntensity;  // IBL ambient multiplier (0-1 typical, can go higher for artistic effect)
+    DirectX::XMFLOAT2 _pad4;
 };
 struct alignas(16) CB_Object {
     DirectX::XMMATRIX world;
     DirectX::XMFLOAT3 albedo; float metallic;
-    float roughness; DirectX::XMFLOAT3 _pad;
+    float roughness;
+    int hasMetallicRoughnessTexture;  // 1 = use texture, 0 = use CB values
+    DirectX::XMFLOAT2 _pad;
 };
 
 static auto gPrev = std::chrono::steady_clock::now();
@@ -83,11 +87,13 @@ bool MainPass::Initialize()
         ComPtr<ID3D11ShaderResourceView> srv; device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
         return srv;
     };
-    m_defaultAlbedo = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB
-    m_defaultNormal = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // 线性
+    m_defaultAlbedo = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB (white)
+    m_defaultNormal = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // Linear (tangent-space up)
+    m_defaultMetallicRoughness = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);  // Linear (G=Roughness=1, B=Metallic=1)
+                                                                                              // All white = Material component values take full effect
 
-    // --- Initialize Skybox ---
-    m_skybox.Initialize("skybox/sunny_rose_garden_1k.hdr", 512);
+    // Skybox is now managed by Scene singleton
+    // No need to initialize here - Scene::Instance().Initialize() handles it
 
     // --- Initialize Post-Process ---
     m_postProcess.Initialize();
@@ -147,8 +153,9 @@ void MainPass::createPipeline()
         { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,     0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,        0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         { "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT,  0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT,  0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
-    device->CreateInputLayout(layout, 4, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
+    device->CreateInputLayout(layout, 5, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
 
     // constant buffers
     D3D11_BUFFER_DESC cb{};
@@ -290,7 +297,7 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
 
     // Collect DirectionalLight from scene
     DirectionalLight* dirLight = nullptr;
-    for (auto& objPtr : scene.world.Objects()) {
+    for (auto& objPtr : scene.GetWorld().Objects()) {
         dirLight = objPtr->GetComponent<DirectionalLight>();
         if (dirLight) break;  // Use first DirectionalLight found
     }
@@ -334,6 +341,7 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
             dirLight->Color.z * dirLight->Intensity
         );
         cf.shadowBias = dirLight->ShadowBias;
+        cf.iblIntensity = dirLight->IblIntensity;  // Read from DirectionalLight component
     } else {
         // Default light if no DirectionalLight component exists
         cf.lightDirWS = XMFLOAT3(0.4f, -1.0f, 0.2f);
@@ -341,6 +349,7 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
         XMStoreFloat3(&cf.lightDirWS, L);
         cf.lightColor = XMFLOAT3(1.0f, 1.0f, 1.0f);
         cf.shadowBias = 0.005f;
+        cf.iblIntensity = 1.0f;  // Default IBL intensity (when no DirectionalLight exists)
     }
 
     cf.camPosWS   = m_camPos;
@@ -351,8 +360,17 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
         context->PSSetShaderResources(2, 1, &shadowData->shadowMapArray);
     }
 
+    // Bind IBL textures (t3, t4, t5)
+    IBLGenerator& iblGen = Scene::Instance().GetIBLGenerator();
+    ID3D11ShaderResourceView* iblSRVs[3] = {
+        iblGen.GetIrradianceMapSRV(),    // t3: Irradiance cubemap
+        iblGen.GetPreFilteredMapSRV(),   // t4: Pre-filtered environment cubemap
+        iblGen.GetBrdfLutSRV()           // t5: BRDF LUT
+    };
+    context->PSSetShaderResources(3, 3, iblSRVs);
+
     // 遍历场景中的所有对象并渲染
-    for (auto& objPtr : scene.world.Objects()) {
+    for (auto& objPtr : scene.GetWorld().Objects()) {
         auto* obj = objPtr.get();
         auto* meshRenderer = obj->GetComponent<MeshRenderer>();
         auto* transform = obj->GetComponent<Transform>();
@@ -379,12 +397,17 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
         for (auto& gpuMesh : meshRenderer->meshes) {
             if (!gpuMesh) continue;
 
+            // Detect if using real texture or default fallback
+            bool hasRealMetallicRoughnessTexture = gpuMesh->metallicRoughnessSRV.Get() &&
+                                                   gpuMesh->metallicRoughnessSRV.Get() != m_defaultMetallicRoughness.Get();
+
             // 更新物体矩阵和材质属性
             CB_Object co{};
             co.world = XMMatrixTranspose(worldMatrix);
             co.albedo = albedo;
             co.metallic = metallic;
             co.roughness = roughness;
+            co.hasMetallicRoughnessTexture = hasRealMetallicRoughnessTexture ? 1 : 0;
             context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
 
             // 绑定顶点和索引缓冲
@@ -394,11 +417,17 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
             context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
 
             // 绑定纹理（如果为空则使用默认纹理）
+            // t0-t1: Albedo and Normal
             ID3D11ShaderResourceView* srvs[2] = {
                 gpuMesh->albedoSRV.Get() ? gpuMesh->albedoSRV.Get() : m_defaultAlbedo.Get(),
                 gpuMesh->normalSRV.Get() ? gpuMesh->normalSRV.Get() : m_defaultNormal.Get()
             };
             context->PSSetShaderResources(0, 2, srvs);
+
+            // t6: Metallic/Roughness (G=Roughness, B=Metallic)
+            ID3D11ShaderResourceView* metallicRoughnessSrv = gpuMesh->metallicRoughnessSRV.Get() ?
+                                                             gpuMesh->metallicRoughnessSRV.Get() : m_defaultMetallicRoughness.Get();
+            context->PSSetShaderResources(6, 1, &metallicRoughnessSrv);
 
             // 绘制
             context->DrawIndexed(gpuMesh->indexCount, 0, 0);
@@ -406,7 +435,8 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     }
 
     // 渲染 Skybox（最后渲染，使用深度测试但不写入）
-    m_skybox.Render(view, proj);
+    // Skybox is now managed by Scene singleton
+    Scene::Instance().GetSkybox().Render(view, proj);
 }
 
 void MainPass::ensureOffscreen(UINT w, UINT h)
@@ -450,17 +480,19 @@ void MainPass::ensureOffscreen(UINT w, UINT h)
 
     D3D11_TEXTURE2D_DESC ldrDesc{};
     ldrDesc.Width = w; ldrDesc.Height = h; ldrDesc.MipLevels = 1; ldrDesc.ArraySize = 1;
-    ldrDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;  // LDR sRGB (for gamma correction)
+    ldrDesc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;  // TYPELESS: Allows creating views with different formats
     ldrDesc.SampleDesc.Count = 1;
     ldrDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     device->CreateTexture2D(&ldrDesc, nullptr, m_offLDR.color.GetAddressOf());
 
     D3D11_RENDER_TARGET_VIEW_DESC ldrRTVDesc{};
-    ldrRTVDesc.Format = ldrDesc.Format; ldrRTVDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    ldrRTVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;  // RTV: Write with gamma correction (linear → sRGB)
+    ldrRTVDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
     device->CreateRenderTargetView(m_offLDR.color.Get(), &ldrRTVDesc, m_offLDR.rtv.GetAddressOf());
 
     D3D11_SHADER_RESOURCE_VIEW_DESC ldrSRVDesc{};
-    ldrSRVDesc.Format = ldrDesc.Format; ldrSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    ldrSRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // SRV: Sample without sRGB decode (data is already gamma-corrected)
+    ldrSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     ldrSRVDesc.Texture2D.MipLevels = 1;
     device->CreateShaderResourceView(m_offLDR.color.Get(), &ldrSRVDesc, m_offLDR.srv.GetAddressOf());
 }
@@ -499,12 +531,12 @@ void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
     renderScene(scene, dt, shadowData);
 
     // Apply post-processing: Tone mapping + Gamma correction (HDR → LDR sRGB)
-    m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h);
+    m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h, 1.0f);
 }
 
 void MainPass::Shutdown()
 {
-    m_skybox.Shutdown();
+    // Skybox is now managed by Scene singleton - no need to shut down here
     m_postProcess.Shutdown();
     m_cbFrame.Reset();
     m_cbObj.Reset();

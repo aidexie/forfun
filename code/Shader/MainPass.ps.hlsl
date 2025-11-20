@@ -4,6 +4,10 @@
 Texture2D gAlbedo : register(t0);
 Texture2D gNormal : register(t1);
 Texture2DArray gShadowMaps : register(t2);  // CSM: Texture2DArray
+TextureCube gIrradianceMap : register(t3);  // IBL: Diffuse irradiance
+TextureCube gPreFilteredMap : register(t4);  // IBL: Specular pre-filtered environment
+Texture2D gBrdfLUT : register(t5);  // IBL: BRDF lookup table
+Texture2D gMetallicRoughness : register(t6);  // G=Roughness, B=Metallic (glTF 2.0 standard)
 SamplerState gSamp : register(s0);
 SamplerComparisonState gShadowSampler : register(s1);
 
@@ -23,13 +27,17 @@ cbuffer CB_Frame : register(b0) {
     float3   gLightDirWS; float _pad1;
     float3   gLightColor; float _pad2;
     float3   gCamPosWS;   float _pad3;
-    float    gShadowBias; float3 _pad4;  // Removed Blinn-Phong parameters
+    float    gShadowBias;
+    float    gIblIntensity;  // IBL ambient multiplier
+    float2   _pad4;
 }
 
 cbuffer CB_Object : register(b1) {
     float4x4 gWorld;
     float3 gMatAlbedo; float gMatMetallic;
-    float gMatRoughness; float3 _padObj;
+    float gMatRoughness;
+    int gHasMetallicRoughnessTexture;  // 1 = use texture, 0 = use CB values
+    float2 _padObj;
 }
 
 struct PSIn {
@@ -42,6 +50,7 @@ struct PSIn {
     float4 posLS1 : TEXCOORD6;
     float4 posLS2 : TEXCOORD7;
     float4 posLS3 : TEXCOORD8;
+    float4 color : TEXCOORD9;  // Vertex color
 };
 
 // ============================================
@@ -75,6 +84,12 @@ float GeometrySmith(float NdotV, float NdotL, float roughness) {
 // Fresnel-Schlick approximation
 float3 FresnelSchlick(float VdotH, float3 F0) {
     return F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
+}
+
+// Fresnel-Schlick with roughness (for IBL)
+float3 FresnelSchlickRoughness(float NdotV, float3 F0, float roughness) {
+    float oneMinusRoughness = 1.0 - roughness;
+    return F0 + (max(float3(oneMinusRoughness, oneMinusRoughness, oneMinusRoughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
 }
 
 // ============================================
@@ -155,16 +170,32 @@ float4 main(PSIn i) : SV_Target {
     }
 
     // Sample textures
+    // Note: gAlbedo uses DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, GPU auto-converts sRGB→Linear
     float3 albedoTex = gAlbedo.Sample(gSamp, i.uv).rgb;
     float3 nTS = gNormal.Sample(gSamp, i.uv).xyz * 2.0 - 1.0;
+    nTS.y = -nTS.y;  // CRITICAL: Flip Y channel (glTF uses OpenGL format, Y+up; DirectX uses Y+down)
     nTS = normalize(nTS);
     float3 N = normalize(mul(nTS, i.TBN));
 
-    // Material properties from CB_Object (per-object material component)
-    float3 albedo = gMatAlbedo * albedoTex;  // Multiply material color with texture
-    float metallic = gMatMetallic;
-    float roughness = gMatRoughness;
-    float ao = 1.0;         // Full ambient occlusion (will add AO texture later)
+    // Sample metallic/roughness texture (glTF 2.0 standard: G=Roughness, B=Metallic)
+    float2 metallicRoughnessTex = gMetallicRoughness.Sample(gSamp, i.uv).gb;
+    float roughnessTex = metallicRoughnessTex.x;  // Green channel
+    float metallicTex = metallicRoughnessTex.y;   // Blue channel
+
+    // DIAGNOSTIC: Visualize vertex color to check if it's causing darkening
+    // return float4(i.color.rgb, 1.0);  // Uncomment to see vertex color
+
+    // Material properties: Choose texture or CB values based on flag (Unity/UE approach)
+    // If real texture exists: use texture values directly
+    // If default texture (no texture): use CB_Object values
+
+    // TEMPORARY FIX: Disable vertex color multiplication to test if it's causing the issue
+    // float3 albedo = gMatAlbedo * albedoTex * i.color.rgb;  // Original (may cause darkening)
+    float3 albedo = gMatAlbedo * albedoTex;  // Test without vertex color
+
+    float metallic = gHasMetallicRoughnessTexture ? metallicTex : gMatMetallic;
+    float roughness = gHasMetallicRoughnessTexture ? roughnessTex : gMatRoughness;
+    float ao = 1.0;  // AO disabled (no reliable source in glTF standard)
 
     // Calculate vectors
     float3 L = normalize(-gLightDirWS);  // Light direction
@@ -206,11 +237,40 @@ float4 main(PSIn i) : SV_Target {
     // Direct lighting (affected by shadow)
     float3 Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
 
-    // Simple ambient term (will be replaced by IBL later)
-    float3 ambient = float3(0.03, 0.03, 0.03) * albedo * ao;
+    // ============================================
+    // IBL (Image-Based Lighting)
+    // ============================================
+    // Calculate reflection vector for specular IBL
+    float3 R = reflect(-V, N);
+
+    // Diffuse IBL: Sample irradiance map
+    float3 irradiance = gIrradianceMap.Sample(gSamp, N).rgb;
+    float3 diffuseIBL = irradiance * albedo;
+
+    // Specular IBL: Sample pre-filtered map based on roughness
+    const float MAX_REFLECTION_LOD = 6.0;  // 7 mip levels (0-6)
+    float3 prefilteredColor = gPreFilteredMap.SampleLevel(gSamp, R, roughness * MAX_REFLECTION_LOD).rgb;
+
+    // Sample BRDF LUT (X: NdotV, Y: roughness)
+    float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;
+
+    // Combine pre-filtered color with BRDF (Split Sum Approximation)
+    // brdf.x = scale for F0, brdf.y = bias
+    float3 specularIBL = prefilteredColor * (F0 * brdf.x + brdf.y);
+
+    // Calculate IBL contribution with energy conservation
+    // For IBL, we use FresnelSchlickRoughness instead of the direct lighting Fresnel
+    float3 F_IBL = FresnelSchlickRoughness(NdotV, F0, roughness);
+    float3 kS_IBL = F_IBL;
+    float3 kD_IBL = float3(1.0, 1.0, 1.0) - kS_IBL;
+    kD_IBL *= 1.0 - metallic;
+
+    // Combine diffuse and specular IBL
+    float3 ambient = (kD_IBL * diffuseIBL + specularIBL) * ao;
 
     // Final color (linear space)
-    float3 colorLin = ambient + Lo;
+    // Apply IBL intensity to control ambient contribution and shadow visibility
+    float3 colorLin = (ambient * gIblIntensity) + Lo;
 
     return float4(colorLin, 1.0);
 }

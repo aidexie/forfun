@@ -53,6 +53,7 @@ bool LoadOBJ_PNT(const std::string& path, MeshCPU_PNT& out, bool flipZ, bool fli
                         else { v.nx=0; v.ny=1; v.nz=0; }
                         if (it>=0){ v.u=T[it*2+0]; v.v=T[it*2+1]; } else { v.u=0; v.v=0; }
                         v.tx=v.ty=v.tz=0; v.tw=1;
+                        v.r=v.g=v.b=v.a=1.0f;  // OBJ doesn't support vertex colors, default to white
                         oi=(uint32_t)out.vertices.size(); out.vertices.push_back(v); map.emplace(key,oi);
                     } else oi=itK->second;
                     out.indices.push_back(oi);

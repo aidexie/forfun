@@ -83,6 +83,7 @@ bool IBLGenerator::Initialize() {
     createFullscreenQuad();
     createIrradianceShader();
     createPreFilterShader();
+    createBrdfLutShader();
 
     // Create sampler state
     D3D11_SAMPLER_DESC sampDesc = {};
@@ -113,6 +114,7 @@ void IBLGenerator::Shutdown() {
     m_fullscreenVS.Reset();
     m_irradiancePS.Reset();
     m_prefilterPS.Reset();
+    m_brdfLutPS.Reset();
     m_fullscreenVB.Reset();
     m_sampler.Reset();
     m_cbFaceIndex.Reset();
@@ -121,6 +123,8 @@ void IBLGenerator::Shutdown() {
     m_irradianceSRV.Reset();
     m_preFilteredTexture.Reset();
     m_preFilteredSRV.Reset();
+    m_brdfLutTexture.Reset();
+    m_brdfLutSRV.Reset();
 }
 
 void IBLGenerator::createFullscreenQuad() {
@@ -609,4 +613,110 @@ ID3D11ShaderResourceView* IBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int
     }
 
     return m_debugPreFilteredFaceSRVs[srvIndex].Get();
+}
+
+void IBLGenerator::createBrdfLutShader() {
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+
+    std::string vsSource = LoadShaderSource("../source/code/Shader/BrdfLut.vs.hlsl");
+    std::string psSource = LoadShaderSource("../source/code/Shader/BrdfLut.ps.hlsl");
+
+    if (vsSource.empty() || psSource.empty()) {
+        std::cout << "ERROR: Failed to load BRDF LUT shaders!" << std::endl;
+        return;
+    }
+
+    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    compileFlags |= D3DCOMPILE_DEBUG;
+#endif
+
+    ComPtr<ID3DBlob> psBlob, err;
+
+    // Compile PS (VS already compiled in createIrradianceShader, can reuse m_fullscreenVS)
+    HRESULT hr = D3DCompile(psSource.c_str(), psSource.size(), "BrdfLut.ps.hlsl",
+                            nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            std::cout << "=== BRDF LUT PS COMPILATION ERROR ===" << std::endl;
+            std::cout << (const char*)err->GetBufferPointer() << std::endl;
+        }
+        return;
+    }
+
+    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_brdfLutPS.GetAddressOf());
+}
+
+ID3D11ShaderResourceView* IBLGenerator::GenerateBrdfLut(int resolution) {
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+
+    if (!device || !context) return nullptr;
+
+    std::cout << "IBL: Generating BRDF LUT (" << resolution << "x" << resolution << ")..." << std::endl;
+
+    // Create 2D texture (not cubemap)
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = resolution;
+    texDesc.Height = resolution;
+    texDesc.MipLevels = 1;
+    texDesc.ArraySize = 1;
+    texDesc.Format = DXGI_FORMAT_R16G16_FLOAT;  // RG channels for scale/bias
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    texDesc.MiscFlags = 0;  // NOT a cubemap
+
+    device->CreateTexture2D(&texDesc, nullptr, m_brdfLutTexture.ReleaseAndGetAddressOf());
+
+    // Create SRV for the whole texture
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texDesc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    device->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, m_brdfLutSRV.ReleaseAndGetAddressOf());
+
+    // Create RTV
+    D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+    rtvDesc.Format = texDesc.Format;
+    rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    rtvDesc.Texture2D.MipSlice = 0;
+
+    ComPtr<ID3D11RenderTargetView> rtv;
+    device->CreateRenderTargetView(m_brdfLutTexture.Get(), &rtvDesc, rtv.GetAddressOf());
+
+    // Set render target
+    context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+
+    // Set viewport
+    D3D11_VIEWPORT vp = {};
+    vp.Width = (float)resolution;
+    vp.Height = (float)resolution;
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    context->RSSetViewports(1, &vp);
+
+    // Clear to black (for debugging)
+    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    context->ClearRenderTargetView(rtv.Get(), clearColor);
+
+    // Set shaders
+    context->VSSetShader(m_fullscreenVS.Get(), nullptr, 0);
+    context->PSSetShader(m_brdfLutPS.Get(), nullptr, 0);
+
+    // No textures or constant buffers needed for BRDF LUT
+
+    // Draw fullscreen triangle (3 vertices, no vertex buffer)
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->IASetInputLayout(nullptr);
+    context->Draw(3, 0);
+
+    // Cleanup
+    ID3D11RenderTargetView* nullRTV = nullptr;
+    context->OMSetRenderTargets(1, &nullRTV, nullptr);
+
+    std::cout << "IBL: BRDF LUT generated successfully!" << std::endl;
+
+    return m_brdfLutSRV.Get();
 }

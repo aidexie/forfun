@@ -41,6 +41,13 @@ bool PostProcessPass::Initialize() {
     dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
     device->CreateDepthStencilState(&dsd, m_depthState.GetAddressOf());
 
+    // Create constant buffer for exposure
+    D3D11_BUFFER_DESC cbd{};
+    cbd.ByteWidth = 16;  // Align to 16 bytes (float4)
+    cbd.Usage = D3D11_USAGE_DEFAULT;
+    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    device->CreateBuffer(&cbd, nullptr, m_constantBuffer.GetAddressOf());
+
     return true;
 }
 
@@ -56,9 +63,14 @@ void PostProcessPass::Shutdown() {
 
 void PostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
                              ID3D11RenderTargetView* ldrOutput,
-                             UINT width, UINT height) {
+                             UINT width, UINT height,
+                             float exposure) {
     ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
     if (!context || !hdrInput || !ldrOutput) return;
+
+    // Update constant buffer with exposure
+    float cbData[4] = { exposure, 0.0f, 0.0f, 0.0f };  // Align to float4
+    context->UpdateSubresource(m_constantBuffer.Get(), 0, nullptr, cbData, 0, 0);
 
     // Set render target
     context->OMSetRenderTargets(1, &ldrOutput, nullptr);
@@ -86,6 +98,7 @@ void PostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
     context->VSSetShader(m_vs.Get(), nullptr, 0);
     context->PSSetShader(m_ps.Get(), nullptr, 0);
 
+    context->PSSetConstantBuffers(0, 1, m_constantBuffer.GetAddressOf());
     context->PSSetShaderResources(0, 1, &hdrInput);
     context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
 
@@ -148,6 +161,11 @@ void PostProcessPass::createShaders() {
         Texture2D hdrTexture : register(t0);
         SamplerState samp : register(s0);
 
+        cbuffer CB_PostProcess : register(b0) {
+            float gExposure;
+            float3 _pad;
+        };
+
         struct PSIn {
             float4 pos : SV_Position;
             float2 uv : TEXCOORD0;
@@ -171,6 +189,9 @@ void PostProcessPass::createShaders() {
         float4 main(PSIn input) : SV_Target {
             // Sample HDR input (linear space)
             float3 hdrColor = hdrTexture.Sample(samp, input.uv).rgb;
+
+            // Apply exposure (adjust brightness before tone mapping)
+            hdrColor *= gExposure;
 
             // Tone mapping: HDR → LDR [0, 1] (still linear space)
             float3 ldrColor = ACESFilm(hdrColor);

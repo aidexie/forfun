@@ -31,6 +31,19 @@ public:
         int numMipLevels = 1
     );
 
+    // Generate BRDF LUT for Split Sum Approximation
+    // Returns the generated BRDF LUT SRV (2D texture, RG channels)
+    // resolution: LUT resolution (typically 512x512)
+    ID3D11ShaderResourceView* GenerateBrdfLut(int resolution = 512);
+
+    // Get rendering resources (for PBR shader usage)
+    ID3D11ShaderResourceView* GetIrradianceMapSRV() const { return m_irradianceSRV.Get(); }
+    ID3D11ShaderResourceView* GetPreFilteredMapSRV() const { return m_preFilteredSRV.Get(); }
+    ID3D11ShaderResourceView* GetBrdfLutSRV() const { return m_brdfLutSRV.Get(); }
+
+    // Get the number of mip levels in the pre-filtered map (0 if not generated)
+    int GetPreFilteredMipLevels() const { return m_preFilteredMipLevels; }
+
     // Save the generated irradiance map to DDS file
     bool SaveIrradianceMapToDDS(const std::string& filepath);
 
@@ -44,12 +57,14 @@ private:
     void createFullscreenQuad();
     void createIrradianceShader();
     void createPreFilterShader();
+    void createBrdfLutShader();
 
 private:
     // Rendering resources
     Microsoft::WRL::ComPtr<ID3D11VertexShader> m_fullscreenVS;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> m_irradiancePS;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> m_prefilterPS;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_brdfLutPS;
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_fullscreenVB;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbFaceIndex;
@@ -63,6 +78,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_preFilteredTexture;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_preFilteredSRV;
     int m_preFilteredMipLevels = 0;
+
+    // Generated BRDF LUT
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_brdfLutTexture;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brdfLutSRV;
 
     // Debug: Individual face SRVs
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_debugFaceSRVs[6];

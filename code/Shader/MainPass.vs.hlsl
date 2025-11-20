@@ -31,6 +31,7 @@ struct VSIn {
     float3 n : NORMAL;
     float2 uv : TEXCOORD0;
     float4 t : TANGENT;
+    float4 color : COLOR;  // Vertex color (for baked AO or other per-vertex data)
 };
 
 struct VSOut {
@@ -43,6 +44,7 @@ struct VSOut {
     float4 posLS1 : TEXCOORD6;
     float4 posLS2 : TEXCOORD7;
     float4 posLS3 : TEXCOORD8;
+    float4 color : TEXCOORD9;  // Vertex color
 };
 
 VSOut main(VSIn i) {
@@ -54,6 +56,7 @@ VSOut main(VSIn i) {
     o.TBN = float3x3(tWS, bWS, nWS);
     o.posWS = posWS.xyz;
     o.uv = i.uv;
+    o.color = i.color;  // Pass vertex color to pixel shader
     float4 posV = mul(posWS, gView);
     o.posH = mul(posV, gProj);
 

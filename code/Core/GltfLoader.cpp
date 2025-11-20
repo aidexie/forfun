@@ -2,6 +2,7 @@
 #include <DirectXMath.h>
 #include <filesystem>
 #include <cassert>
+#include <iostream>
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
@@ -42,6 +43,25 @@ static void AppendPrimitive(const cgltf_primitive* prim,
     const cgltf_accessor* acc_nrm = nullptr;
     const cgltf_accessor* acc_uv0 = nullptr;
     const cgltf_accessor* acc_tan = nullptr;
+    const cgltf_accessor* acc_col = nullptr;
+
+    // Debug: Print all attributes to check for vertex colors
+    std::cout << "  Primitive attributes (" << prim->attributes_count << "):" << std::endl;
+    for (size_t a=0;a<prim->attributes_count;++a){
+        auto& att = prim->attributes[a];
+        const char* typeName = "UNKNOWN";
+        switch(att.type){
+            case cgltf_attribute_type_position: typeName = "POSITION"; break;
+            case cgltf_attribute_type_normal: typeName = "NORMAL"; break;
+            case cgltf_attribute_type_texcoord: typeName = "TEXCOORD"; break;
+            case cgltf_attribute_type_tangent: typeName = "TANGENT"; break;
+            case cgltf_attribute_type_color: typeName = "COLOR"; break;
+            case cgltf_attribute_type_joints: typeName = "JOINTS"; break;
+            case cgltf_attribute_type_weights: typeName = "WEIGHTS"; break;
+            default: break;
+        }
+        std::cout << "    - " << typeName << "_" << att.index << std::endl;
+    }
 
     for (size_t a=0;a<prim->attributes_count;++a){
         auto& att = prim->attributes[a];
@@ -50,6 +70,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
             case cgltf_attribute_type_normal:   acc_nrm = att.data; break;
             case cgltf_attribute_type_texcoord: if(att.index==0) acc_uv0 = att.data; break;
             case cgltf_attribute_type_tangent:  acc_tan = att.data; break;
+            case cgltf_attribute_type_color:    if(att.index==0) acc_col = att.data; break;
             default: break;
         }
     }
@@ -61,17 +82,27 @@ static void AppendPrimitive(const cgltf_primitive* prim,
     // 读取顶点
     std::vector<VertexPNT> verts(vcount);
     for (size_t i=0;i<vcount;++i){
-        float p[3]={0}, n[3]={0}, uv[2]={0}, t[4]={0,0,0,1};
+        float p[3]={0}, n[3]={0}, uv[2]={0}, t[4]={0,0,0,1}, c[4]={1,1,1,1};
         ReadVec3(acc_pos, i, p);
         if (acc_nrm) ReadVec3(acc_nrm, i, n);
         if (acc_uv0) ReadVec2(acc_uv0, i, uv);
         if (acc_tan) cgltf_accessor_read_float(acc_tan, i, t, 4);
+        if (acc_col) {
+            // glTF COLOR_0 can be VEC3 or VEC4
+            if (acc_col->type == cgltf_type_vec4) {
+                cgltf_accessor_read_float(acc_col, i, c, 4);
+            } else if (acc_col->type == cgltf_type_vec3) {
+                cgltf_accessor_read_float(acc_col, i, c, 3);
+                c[3] = 1.0f;  // Default alpha
+            }
+        }
 
         VertexPNT v{};
         v.px=p[0]; v.py=p[1]; v.pz=p[2];
         v.nx=n[0]; v.ny=n[1]; v.nz=n[2];
         v.u=uv[0]; v.v=uv[1];
         v.tx=t[0]; v.ty=t[1]; v.tz=t[2]; v.tw=t[3]; // 若 glTF 带切线，直接拿来用
+        v.r=c[0]; v.g=c[1]; v.b=c[2]; v.a=c[3];     // Vertex color (default white if not present)
 
         if (flipZ) ApplyFlipLH(v);
         verts[i]=v;
@@ -109,6 +140,12 @@ static void AppendPrimitive(const cgltf_primitive* prim,
             mat->normal_texture.texture->image &&
             mat->normal_texture.texture->image->uri){
             out.textures.normalPath = Join(baseDir, mat->normal_texture.texture->image->uri);
+        }
+        // metallic-roughness (glTF 2.0 standard: G=Roughness, B=Metallic)
+        if (mat->pbr_metallic_roughness.metallic_roughness_texture.texture &&
+            mat->pbr_metallic_roughness.metallic_roughness_texture.texture->image &&
+            mat->pbr_metallic_roughness.metallic_roughness_texture.texture->image->uri){
+            out.textures.metallicRoughnessPath = Join(baseDir, mat->pbr_metallic_roughness.metallic_roughness_texture.texture->image->uri);
         }
     }
 

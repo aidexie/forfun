@@ -151,8 +151,8 @@ bool SceneSerializer::SaveScene(const Scene& scene, const std::string& filepath)
         j["gameObjects"] = json::array();
 
         // Serialize all GameObjects
-        for (std::size_t i = 0; i < scene.world.Count(); ++i) {
-            auto* go = scene.world.Get(i);
+        for (std::size_t i = 0; i < scene.GetWorld().Count(); ++i) {
+            auto* go = scene.GetWorld().Get(i);
             if (!go) continue;
 
             json goJson;
@@ -205,16 +205,16 @@ bool SceneSerializer::LoadScene(Scene& scene, const std::string& filepath) {
         file.close();
 
         // Clear existing scene
-        while (scene.world.Count() > 0) {
-            scene.world.Destroy(0);
+        while (scene.GetWorld().Count() > 0) {
+            scene.GetWorld().Destroy(0);
         }
-        scene.selected = -1;
+        scene.SetSelected(-1);
 
         // Load GameObjects
         if (j.contains("gameObjects") && j["gameObjects"].is_array()) {
             for (const auto& goJson : j["gameObjects"]) {
                 std::string name = goJson.value("name", "GameObject");
-                auto* go = scene.world.Create(name);
+                auto* go = scene.GetWorld().Create(name);
 
                 // Load components
                 if (goJson.contains("components") && goJson["components"].is_array()) {

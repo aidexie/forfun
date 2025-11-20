@@ -2,7 +2,7 @@
 #include <string>
 
 // Forward declarations
-struct Scene;
+class Scene;
 
 // Scene serialization to/from JSON files
 class SceneSerializer {

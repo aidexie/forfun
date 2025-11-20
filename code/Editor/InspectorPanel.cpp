@@ -113,7 +113,7 @@ public:
 
 void Panels::DrawInspector(Scene& scene) {
     ImGui::Begin("Inspector");
-    auto* sel = scene.GetSelected();
+    auto* sel = scene.GetSelectedObject();
     if (sel) {
         // GameObject name
         std::string n = sel->GetName();
