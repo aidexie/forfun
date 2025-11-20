@@ -95,6 +95,12 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/MainPass.ps.hlsl
     ${CODE_PATH}/Shader/IrradianceConvolution.vs.hlsl
     ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
+    ${CODE_PATH}/Shader/PreFilterEnvironmentMap.vs.hlsl
+    ${CODE_PATH}/Shader/PreFilterEnvironmentMap.ps.hlsl
+    ${CODE_PATH}/Shader/Skybox.vs.hlsl
+    ${CODE_PATH}/Shader/Skybox.ps.hlsl
+    ${CODE_PATH}/Shader/EquirectToCubemap.vs.hlsl
+    ${CODE_PATH}/Shader/EquirectToCubemap.ps.hlsl
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})

@@ -82,6 +82,7 @@ bool IBLGenerator::Initialize() {
 
     createFullscreenQuad();
     createIrradianceShader();
+    createPreFilterShader();
 
     // Create sampler state
     D3D11_SAMPLER_DESC sampDesc = {};
@@ -101,17 +102,25 @@ bool IBLGenerator::Initialize() {
     cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     device->CreateBuffer(&cbDesc, nullptr, m_cbFaceIndex.GetAddressOf());
 
+    // Create constant buffer for roughness
+    cbDesc.ByteWidth = 16;  // float + float + padding
+    device->CreateBuffer(&cbDesc, nullptr, m_cbRoughness.GetAddressOf());
+
     return true;
 }
 
 void IBLGenerator::Shutdown() {
     m_fullscreenVS.Reset();
     m_irradiancePS.Reset();
+    m_prefilterPS.Reset();
     m_fullscreenVB.Reset();
     m_sampler.Reset();
     m_cbFaceIndex.Reset();
+    m_cbRoughness.Reset();
     m_irradianceTexture.Reset();
     m_irradianceSRV.Reset();
+    m_preFilteredTexture.Reset();
+    m_preFilteredSRV.Reset();
 }
 
 void IBLGenerator::createFullscreenQuad() {
@@ -160,6 +169,38 @@ void IBLGenerator::createIrradianceShader() {
 
     device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_fullscreenVS.GetAddressOf());
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_irradiancePS.GetAddressOf());
+}
+
+void IBLGenerator::createPreFilterShader() {
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+
+    std::string vsSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.vs.hlsl");
+    std::string psSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.ps.hlsl");
+
+    if (vsSource.empty() || psSource.empty()) {
+        std::cout << "ERROR: Failed to load pre-filter shaders!" << std::endl;
+        return;
+    }
+
+    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    compileFlags |= D3DCOMPILE_DEBUG;
+#endif
+
+    ComPtr<ID3DBlob> psBlob, err;
+
+    // Compile PS (VS already compiled in createIrradianceShader)
+    HRESULT hr = D3DCompile(psSource.c_str(), psSource.size(), "PreFilterEnvironmentMap.ps.hlsl",
+                            nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            std::cout << "=== PREFILTER PS COMPILATION ERROR ===" << std::endl;
+            std::cout << (const char*)err->GetBufferPointer() << std::endl;
+        }
+        return;
+    }
+
+    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_prefilterPS.GetAddressOf());
 }
 
 ID3D11ShaderResourceView* IBLGenerator::GenerateIrradianceMap(
@@ -379,4 +420,193 @@ ID3D11ShaderResourceView* IBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
     }
 
     return m_debugFaceSRVs[faceIndex].Get();
+}
+
+ID3D11ShaderResourceView* IBLGenerator::GeneratePreFilteredMap(
+    ID3D11ShaderResourceView* envMap,
+    int outputSize,
+    int numMipLevels)
+{
+    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+
+    if (!device || !context || !envMap) return nullptr;
+
+    // Clamp mip levels to reasonable range
+    numMipLevels = std::max(1, std::min(numMipLevels, 10));
+    m_preFilteredMipLevels = numMipLevels;
+
+    std::cout << "IBL: Generating pre-filtered map (" << outputSize << "x" << outputSize
+              << ", " << numMipLevels << " mip levels)..." << std::endl;
+
+    // Get environment map description for resolution
+    ID3D11Resource* envResource;
+    envMap->GetResource(&envResource);
+    ComPtr<ID3D11Texture2D> envTexture;
+    envResource->QueryInterface(envTexture.GetAddressOf());
+    D3D11_TEXTURE2D_DESC envDesc;
+    envTexture->GetDesc(&envDesc);
+    float envResolution = (float)envDesc.Width;
+
+    std::cout << "IBL: Environment map info: " << envDesc.Width << "x" << envDesc.Height
+              << ", " << envDesc.MipLevels << " mip levels" << std::endl;
+
+    if (envDesc.MipLevels <= 1) {
+        std::cout << "WARNING: Environment map has no mipmaps! Pre-filtering quality will be poor." << std::endl;
+    }
+
+    envResource->Release();
+
+    // Create output cubemap texture with mipmaps
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = outputSize;
+    texDesc.Height = outputSize;
+    texDesc.MipLevels = numMipLevels;
+    texDesc.ArraySize = 6;  // 6 faces
+    texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR format
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    texDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+
+    device->CreateTexture2D(&texDesc, nullptr, m_preFilteredTexture.ReleaseAndGetAddressOf());
+
+    // Create SRV for the whole cubemap
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texDesc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+    srvDesc.TextureCube.MipLevels = numMipLevels;
+    srvDesc.TextureCube.MostDetailedMip = 0;
+    device->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, m_preFilteredSRV.ReleaseAndGetAddressOf());
+
+    // Render to each mip level
+    for (int mip = 0; mip < numMipLevels; ++mip) {
+        int mipWidth = outputSize >> mip;   // outputSize / 2^mip
+        int mipHeight = outputSize >> mip;
+
+        // Calculate roughness for this mip level (linear mapping)
+        float roughness = (numMipLevels != 1) ? (float)mip / (float)(numMipLevels - 1) : 0.0f;
+
+        // Calculate expected sample count (matches shader logic)
+        int expectedSamples;
+        if (roughness < 0.1f) {
+            expectedSamples = 65536;
+        } else if (roughness < 0.3f) {
+            expectedSamples = 32768;
+        } else if (roughness < 0.6f) {
+            expectedSamples = 16384;
+        } else {
+            expectedSamples = 8192;
+        }
+
+        std::cout << "  Mip " << mip << ": " << mipWidth << "x" << mipHeight
+                  << ", roughness=" << roughness
+                  << ", samples=" << expectedSamples << std::endl;
+
+        // Render to each cubemap face at this mip level
+        for (int face = 0; face < 6; ++face) {
+            // Create RTV for this face and mip level
+            D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+            rtvDesc.Format = texDesc.Format;
+            rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+            rtvDesc.Texture2DArray.MipSlice = mip;
+            rtvDesc.Texture2DArray.FirstArraySlice = face;
+            rtvDesc.Texture2DArray.ArraySize = 1;
+
+            ComPtr<ID3D11RenderTargetView> rtv;
+            HRESULT hr = device->CreateRenderTargetView(m_preFilteredTexture.Get(), &rtvDesc, rtv.GetAddressOf());
+            if (FAILED(hr)) {
+                std::cout << "ERROR: Failed to create RTV for face " << face << ", mip " << mip << std::endl;
+                continue;
+            }
+
+            // Set render target
+            context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+
+            // Clear to magenta for debugging (will be overwritten if rendering works)
+            const float clearColor[4] = { 1.0f, 0.0f, 1.0f, 1.0f };  // Magenta
+            context->ClearRenderTargetView(rtv.Get(), clearColor);
+
+            // Set viewport
+            D3D11_VIEWPORT vp = {};
+            vp.Width = (float)mipWidth;
+            vp.Height = (float)mipHeight;
+            vp.MinDepth = 0.0f;
+            vp.MaxDepth = 1.0f;
+            context->RSSetViewports(1, &vp);
+
+            // Update face index constant buffer
+            D3D11_MAPPED_SUBRESOURCE mapped;
+            context->Map(m_cbFaceIndex.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+            *(int*)mapped.pData = face;
+            context->Unmap(m_cbFaceIndex.Get(), 0);
+
+            // Update roughness constant buffer
+            context->Map(m_cbRoughness.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+            float* cbData = (float*)mapped.pData;
+            cbData[0] = roughness;
+            cbData[1] = envResolution;
+            context->Unmap(m_cbRoughness.Get(), 0);
+
+            // Set shaders and resources
+            context->VSSetShader(m_fullscreenVS.Get(), nullptr, 0);
+            context->PSSetShader(m_prefilterPS.Get(), nullptr, 0);
+            context->PSSetShaderResources(0, 1, &envMap);
+            context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
+            context->PSSetConstantBuffers(0, 1, m_cbFaceIndex.GetAddressOf());
+            context->PSSetConstantBuffers(1, 1, m_cbRoughness.GetAddressOf());
+
+            // Verify shader is valid
+            if (!m_fullscreenVS || !m_prefilterPS) {
+                std::cout << "ERROR: Pre-filter shaders not compiled!" << std::endl;
+                continue;
+            }
+
+            // Draw fullscreen triangle (3 vertices, no vertex buffer)
+            context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context->IASetInputLayout(nullptr);
+            context->Draw(3, 0);
+        }
+        std::cout << "    Rendered all 6 faces for mip " << mip << std::endl;
+    }
+
+    // Cleanup
+    ID3D11RenderTargetView* nullRTV = nullptr;
+    context->OMSetRenderTargets(1, &nullRTV, nullptr);
+    ID3D11ShaderResourceView* nullSRV = nullptr;
+    context->PSSetShaderResources(0, 1, &nullSRV);
+
+    std::cout << "IBL: Pre-filtered map generated successfully!" << std::endl;
+
+    return m_preFilteredSRV.Get();
+}
+
+ID3D11ShaderResourceView* IBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int mipLevel) {
+    if (faceIndex < 0 || faceIndex >= 6) return nullptr;
+    if (mipLevel < 0 || mipLevel >= m_preFilteredMipLevels) return nullptr;
+    if (!m_preFilteredTexture) return nullptr;
+
+    int srvIndex = mipLevel * 6 + faceIndex;
+    if (srvIndex < 0 || srvIndex >= 6 * 10) return nullptr;
+
+    // Create face SRV on-demand
+    if (!m_debugPreFilteredFaceSRVs[srvIndex]) {
+        ID3D11Device* device = DX11Context::Instance().GetDevice();
+
+        D3D11_TEXTURE2D_DESC desc;
+        m_preFilteredTexture->GetDesc(&desc);
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = desc.Format;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        srvDesc.Texture2DArray.MostDetailedMip = mipLevel;
+        srvDesc.Texture2DArray.MipLevels = 1;
+        srvDesc.Texture2DArray.FirstArraySlice = faceIndex;
+        srvDesc.Texture2DArray.ArraySize = 1;
+
+        device->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc,
+                                        m_debugPreFilteredFaceSRVs[srvIndex].GetAddressOf());
+    }
+
+    return m_debugPreFilteredFaceSRVs[srvIndex].Get();
 }

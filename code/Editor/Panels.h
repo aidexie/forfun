@@ -15,5 +15,5 @@ namespace Panels {
     void DrawViewport(Scene& scene, EditorCamera& editorCam,
         ID3D11ShaderResourceView* srv,
         size_t srcWidth, size_t srcHeight);
-    void DrawIrradianceDebug(IBLGenerator* iblGen);
+    void DrawIrradianceDebug(IBLGenerator* iblGen, MainPass* mainPass);
 }

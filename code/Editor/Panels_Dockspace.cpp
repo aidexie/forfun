@@ -80,35 +80,6 @@ void Panels::DrawDockspace(bool* pOpen, Scene& scene, MainPass* mainPass, IBLGen
                 }
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Generate IBL")) {
-                if (mainPass && iblGen) {
-                    // Get environment map from skybox
-                    ID3D11ShaderResourceView* envMap = mainPass->GetSkyboxEnvironmentMap();
-                    if (envMap) {
-                        std::cout << "IBL: Starting irradiance map generation..." << std::endl;
-
-                        // Generate irradiance map
-                        ID3D11ShaderResourceView* irradianceMap = iblGen->GenerateIrradianceMap(envMap, 32);
-                        if (irradianceMap) {
-                            std::cout << "IBL: Irradiance map generated successfully!" << std::endl;
-
-                            // // Save to assets/ibl/irradiance.dds
-                            // bool saved = iblGen->SaveIrradianceMapToDDS("ibl/irradiance.dds");
-                            // if (saved) {
-                            //     std::cout << "IBL: Saved to assets/ibl/irradiance.dds" << std::endl;
-                            //     MessageBoxA(nullptr, "IBL irradiance map generated and saved successfully!", "Success", MB_OK | MB_ICONINFORMATION);
-                            // } else {
-                            //     std::cout << "ERROR: Failed to save irradiance map!" << std::endl;
-                            //     MessageBoxA(nullptr, "Failed to save irradiance map to file!", "Error", MB_OK | MB_ICONERROR);
-                            // }
-                        }
-                    } else {
-                        std::cout << "ERROR: No environment map found in skybox!" << std::endl;
-                        MessageBoxA(nullptr, "No environment map found in skybox!", "Error", MB_OK | MB_ICONERROR);
-                    }
-                }
-            }
-            ImGui::Separator();
             if (ImGui::MenuItem("Exit")) {
                 *pOpen = false;
             }

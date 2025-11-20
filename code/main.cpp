@@ -303,7 +303,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 gMainPass.GetOffscreenSRV(),
                 gMainPass.GetOffscreenWidth(),
                 gMainPass.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
-            Panels::DrawIrradianceDebug(&gIBLGen);   // Irradiance map debug 窗口
+            Panels::DrawIrradianceDebug(&gIBLGen, &gMainPass);   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment 三个 Tab）
         }
 
         // 5.5 提交 ImGui

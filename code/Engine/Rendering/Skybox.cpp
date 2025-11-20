@@ -5,6 +5,7 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <iostream>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -178,24 +179,24 @@ void Skybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     srvDesc.Texture2D.MipLevels = 1;
     device->CreateShaderResourceView(equirectTexture.Get(), &srvDesc, equirectSRV.GetAddressOf());
 
-    // Create cubemap texture
+    // Create cubemap texture with mipmaps
     D3D11_TEXTURE2D_DESC cubeDesc{};
     cubeDesc.Width = size;
     cubeDesc.Height = size;
-    cubeDesc.MipLevels = 1;
+    cubeDesc.MipLevels = 0;  // 0 = auto-generate full mip chain
     cubeDesc.ArraySize = 6;
     cubeDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     cubeDesc.SampleDesc.Count = 1;
     cubeDesc.Usage = D3D11_USAGE_DEFAULT;
     cubeDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    cubeDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+    cubeDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE | D3D11_RESOURCE_MISC_GENERATE_MIPS;  // Enable mipmap generation
     device->CreateTexture2D(&cubeDesc, nullptr, m_envTexture.GetAddressOf());
 
-    // Create SRV for cubemap
+    // Create SRV for cubemap (all mip levels)
     D3D11_SHADER_RESOURCE_VIEW_DESC cubeSRVDesc{};
     cubeSRVDesc.Format = cubeDesc.Format;
     cubeSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    cubeSRVDesc.TextureCube.MipLevels = 1;
+    cubeSRVDesc.TextureCube.MipLevels = -1;  // -1 = all mip levels
     device->CreateShaderResourceView(m_envTexture.Get(), &cubeSRVDesc, m_envCubemap.GetAddressOf());
 
     // Load conversion shaders from files
@@ -350,6 +351,20 @@ void Skybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     context->OMSetRenderTargets(1, &nullRTV, nullptr);
     ID3D11ShaderResourceView* nullSRV = nullptr;
     context->PSSetShaderResources(0, 1, &nullSRV);
+
+    // Calculate mip level count before generation
+    D3D11_TEXTURE2D_DESC finalDesc;
+    m_envTexture->GetDesc(&finalDesc);
+    int mipCount = finalDesc.MipLevels;
+
+    std::cout << "Skybox: Generating mipmaps for " << size << "x" << size
+              << " cubemap (" << mipCount << " levels)..." << std::endl;
+
+    // Generate mipmaps for the cubemap
+    context->GenerateMips(m_envCubemap.Get());
+
+    std::cout << "Skybox: Environment cubemap ready (" << size << "x" << size
+              << ", " << mipCount << " mip levels)" << std::endl;
 }
 
 void Skybox::createCubeMesh() {
