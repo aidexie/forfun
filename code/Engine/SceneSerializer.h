@@ -2,14 +2,17 @@
 #include <string>
 
 // Forward declarations
-class Scene;
+class CScene;
 
-// Scene serialization to/from JSON files
-class SceneSerializer {
+// CScene serialization to/from JSON files
+class CSceneSerializer {
 public:
     // Save scene to JSON file
-    static bool SaveScene(const Scene& scene, const std::string& filepath);
+    static bool SaveScene(const CScene& scene, const std::string& filepath);
 
-    // Load scene from JSON file (clears existing scene)
-    static bool LoadScene(Scene& scene, const std::string& filepath);
+    // Load scene from JSON file (clears existing CScene)
+    static bool LoadScene(CScene& scene, const std::string& filepath);
 };
+
+
+

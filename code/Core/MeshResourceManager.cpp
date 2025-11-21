@@ -9,19 +9,19 @@
 
 using Microsoft::WRL::ComPtr;
 
-MeshResourceManager& MeshResourceManager::Instance() {
-    static MeshResourceManager instance;
+CMeshResourceManager& CMeshResourceManager::Instance() {
+    static CMeshResourceManager instance;
     return instance;
 }
 
-std::vector<std::shared_ptr<GpuMeshResource>> MeshResourceManager::GetOrLoad(
+std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
     const std::string& path
 ) {
     if (path.empty()) {
         return {};
     }
 
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) {
         return {};
     }
@@ -58,7 +58,7 @@ std::vector<std::shared_ptr<GpuMeshResource>> MeshResourceManager::GetOrLoad(
 
     // Load OBJ
     if (lower.size() >= 4 && lower.substr(lower.size() - 4) == ".obj") {
-        MeshCPU_PNT cpu;
+        SMeshCPU_PNT cpu;
         if (!LoadOBJ_PNT(path, cpu, /*flipZ*/true, /*flipWinding*/true)) {
             return {};
         }
@@ -71,7 +71,7 @@ std::vector<std::shared_ptr<GpuMeshResource>> MeshResourceManager::GetOrLoad(
     }
     // Load glTF
     else if (lower.size() >= 5 && lower.substr(lower.size() - 5) == ".gltf") {
-        std::vector<GltfMeshCPU> meshes;
+        std::vector<SGltfMeshCPU> meshes;
         if (!LoadGLTF_PNT(path.c_str(), meshes, /*flipZ_to_LH*/true, /*flipWinding*/true)) {
             return {};
         }
@@ -98,10 +98,10 @@ std::vector<std::shared_ptr<GpuMeshResource>> MeshResourceManager::GetOrLoad(
     return resources;
 }
 
-std::shared_ptr<GpuMeshResource> MeshResourceManager::UploadMesh(
-    const MeshCPU_PNT& cpu
+std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadMesh(
+    const SMeshCPU_PNT& cpu
 ) {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) {
         return nullptr;
     }
@@ -110,7 +110,7 @@ std::shared_ptr<GpuMeshResource> MeshResourceManager::UploadMesh(
 
     // Create VBO
     D3D11_BUFFER_DESC bd{};
-    bd.ByteWidth = (UINT)(cpu.vertices.size() * sizeof(VertexPNT));
+    bd.ByteWidth = (UINT)(cpu.vertices.size() * sizeof(SVertexPNT));
     bd.Usage = D3D11_USAGE_DEFAULT;
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
     D3D11_SUBRESOURCE_DATA initVB{ cpu.vertices.data(), 0, 0 };
@@ -135,13 +135,13 @@ std::shared_ptr<GpuMeshResource> MeshResourceManager::UploadMesh(
     return resource;
 }
 
-std::shared_ptr<GpuMeshResource> MeshResourceManager::UploadGltfMesh(
-    const GltfMeshCPU& gltfMesh
+std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadGltfMesh(
+    const SGltfMeshCPU& gltfMesh
 ) {
     auto resource = UploadMesh(gltfMesh.mesh);
     if (!resource) return nullptr;
 
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return nullptr;
 
     // Load albedo texture (sRGB)
@@ -177,7 +177,7 @@ std::shared_ptr<GpuMeshResource> MeshResourceManager::UploadGltfMesh(
     return resource;
 }
 
-void MeshResourceManager::CollectGarbage() {
+void CMeshResourceManager::CollectGarbage() {
     for (auto it = m_cache.begin(); it != m_cache.end(); ) {
         bool anyValid = false;
         for (auto& weakPtr : it->second) {
@@ -195,6 +195,6 @@ void MeshResourceManager::CollectGarbage() {
     }
 }
 
-void MeshResourceManager::ClearCache() {
+void CMeshResourceManager::ClearCache() {
     m_cache.clear();
 }

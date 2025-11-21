@@ -44,7 +44,7 @@ static std::string SaveFileDialog(const char* filter) {
     return "";
 }
 
-void Panels::DrawDockspace(bool* pOpen, Scene& scene, MainPass* mainPass) {
+void Panels::DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass) {
     ImGuiWindowFlags winFlags = ImGuiWindowFlags_NoDocking
         | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
@@ -70,13 +70,13 @@ void Panels::DrawDockspace(bool* pOpen, Scene& scene, MainPass* mainPass) {
             if (ImGui::MenuItem("Save Scene", "Ctrl+S")) {
                 std::string path = SaveFileDialog("Scene Files (*.scene)\0*.scene\0All Files (*.*)\0*.*\0");
                 if (!path.empty()) {
-                    SceneSerializer::SaveScene(scene, path);
+                    CSceneSerializer::SaveScene(scene, path);
                 }
             }
             if (ImGui::MenuItem("Load Scene", "Ctrl+O")) {
                 std::string path = OpenFileDialog("Scene Files (*.scene)\0*.scene\0All Files (*.*)\0*.*\0");
                 if (!path.empty()) {
-                    SceneSerializer::LoadScene(scene, path);
+                    CSceneSerializer::LoadScene(scene, path);
                 }
             }
             ImGui::Separator();

@@ -13,7 +13,7 @@
 #include <commdlg.h>
 
 // ImGui implementation of PropertyVisitor for reflection-based UI
-class ImGuiPropertyVisitor : public PropertyVisitor {
+class ImGuiPropertyVisitor : public CPropertyVisitor {
 public:
     void VisitFloat(const char* name, float& value) override {
         ImGui::DragFloat(name, &value, 0.1f);
@@ -111,7 +111,7 @@ public:
     }
 };
 
-void Panels::DrawInspector(Scene& scene) {
+void Panels::DrawInspector(CScene& scene) {
     ImGui::Begin("Inspector");
     auto* sel = scene.GetSelectedObject();
     if (sel) {
@@ -129,45 +129,45 @@ void Panels::DrawInspector(Scene& scene) {
         ImGuiPropertyVisitor visitor;
 
         // Transform component
-        if (auto* tr = sel->GetComponent<Transform>()) {
+        if (auto* tr = sel->GetComponent<STransform>()) {
             if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
                 tr->VisitProperties(visitor);
             }
         } else {
             if (ImGui::Button("Add Transform")) {
-                sel->AddComponent<Transform>();
+                sel->AddComponent<STransform>();
             }
         }
 
         // MeshRenderer component
-        if (auto* mr = sel->GetComponent<MeshRenderer>()) {
+        if (auto* mr = sel->GetComponent<SMeshRenderer>()) {
             if (ImGui::CollapsingHeader("MeshRenderer", ImGuiTreeNodeFlags_DefaultOpen)) {
                 mr->VisitProperties(visitor);
             }
         } else {
             if (ImGui::Button("Add MeshRenderer")) {
-                sel->AddComponent<MeshRenderer>();
+                sel->AddComponent<SMeshRenderer>();
             }
         }
         // DirectionalLight component
-        if (auto* dl = sel->GetComponent<DirectionalLight>()) {
+        if (auto* dl = sel->GetComponent<SDirectionalLight>()) {
             if (ImGui::CollapsingHeader("DirectionalLight", ImGuiTreeNodeFlags_DefaultOpen)) {
                 dl->VisitProperties(visitor);
             }
         } else {
             if (ImGui::Button("Add DirectionalLight")) {
-                sel->AddComponent<DirectionalLight>();
+                sel->AddComponent<SDirectionalLight>();
             }
         }
 
         // Material component
-        if (auto* mat = sel->GetComponent<Material>()) {
+        if (auto* mat = sel->GetComponent<SMaterial>()) {
             if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
                 mat->VisitProperties(visitor);
             }
         } else {
             if (ImGui::Button("Add Material")) {
-                sel->AddComponent<Material>();
+                sel->AddComponent<SMaterial>();
             }
         }
     } else {

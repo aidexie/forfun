@@ -5,9 +5,9 @@
 
 // Property visitor interface for component reflection system
 // Components expose their properties by implementing VisitProperties()
-class PropertyVisitor {
+class CPropertyVisitor {
 public:
-    virtual ~PropertyVisitor() = default;
+    virtual ~CPropertyVisitor() = default;
 
     // Basic types
     virtual void VisitFloat(const char* name, float& value) = 0;
@@ -37,3 +37,4 @@ public:
     // Read-only label (for display only, like component info)
     virtual void VisitLabel(const char* name, const char* value) {}
 };
+

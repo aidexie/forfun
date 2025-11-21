@@ -45,12 +45,11 @@ struct PSIn {
     float3 posWS : TEXCOORD0;
     float2 uv : TEXCOORD1;
     float3x3 TBN : TEXCOORD2;
-    // Light space positions for all cascades (pre-calculated in VS)
+    // Light space positions for first 3 cascades (pre-calculated in VS)
     float4 posLS0 : TEXCOORD5;
     float4 posLS1 : TEXCOORD6;
     float4 posLS2 : TEXCOORD7;
-    float4 posLS3 : TEXCOORD8;
-    float4 color : TEXCOORD9;  // Vertex color
+    float4 color : COLOR0;  // Vertex color (moved from TEXCOORD9 to COLOR0)
 };
 
 // ============================================
@@ -105,14 +104,15 @@ int SelectCascade(float3 posWS, float3 camPosWS) {
     return gCascadeCount - 1;
 }
 
-float CalcShadowFactor(float3 posWS, float4 posLS0, float4 posLS1, float4 posLS2, float4 posLS3) {
+float CalcShadowFactor(float3 posWS, float4 posLS0, float4 posLS1, float4 posLS2) {
     // Select cascade using spherical distance
     int cascadeIndex = SelectCascade(posWS, gCamPosWS);
 
     // Select pre-calculated light space position for the chosen cascade
+    // For cascade 3, calculate dynamically to save interpolators
     float4 posLS = (cascadeIndex == 0) ? posLS0 :
                    (cascadeIndex == 1) ? posLS1 :
-                   (cascadeIndex == 2) ? posLS2 : posLS3;
+                   (cascadeIndex == 2) ? posLS2 : mul(float4(posWS, 1.0), gLightSpaceVPs[3]);
 
     float3 projCoords = posLS.xyz / posLS.w;
 
@@ -189,13 +189,13 @@ float4 main(PSIn i) : SV_Target {
     // If real texture exists: use texture values directly
     // If default texture (no texture): use CB_Object values
 
-    // TEMPORARY FIX: Disable vertex color multiplication to test if it's causing the issue
-    // float3 albedo = gMatAlbedo * albedoTex * i.color.rgb;  // Original (may cause darkening)
-    float3 albedo = gMatAlbedo * albedoTex;  // Test without vertex color
+    // Use vertex color as baked AO (common in glTF models)
+    // Vertex color R channel typically contains AO data
+    float3 albedo = gMatAlbedo * albedoTex;
 
     float metallic = gHasMetallicRoughnessTexture ? metallicTex : gMatMetallic;
     float roughness = gHasMetallicRoughnessTexture ? roughnessTex : gMatRoughness;
-    float ao = 1.0;  // AO disabled (no reliable source in glTF standard)
+    float ao = i.color.r;  // Use vertex color R channel as AO (common in glTF baked lighting)
 
     // Calculate vectors
     float3 L = normalize(-gLightDirWS);  // Light direction
@@ -232,7 +232,7 @@ float4 main(PSIn i) : SV_Target {
     float3 diffuse = kD * albedo / PI;
 
     // Shadow factor
-    float shadowFactor = CalcShadowFactor(i.posWS, i.posLS0, i.posLS1, i.posLS2, i.posLS3);
+    float shadowFactor = CalcShadowFactor(i.posWS, i.posLS0, i.posLS1, i.posLS2);
 
     // Direct lighting (affected by shadow)
     float3 Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
@@ -268,9 +268,14 @@ float4 main(PSIn i) : SV_Target {
     // Combine diffuse and specular IBL
     float3 ambient = (kD_IBL * diffuseIBL + specularIBL) * ao;
 
+    // Shadow should also affect ambient light (like Unity/UE)
+    // In shadowed areas, reduce ambient to 20-40% to create stronger shadow contrast
+    // This simulates indirect lighting occlusion in real-world shadows
+    float ambientOcclusion = lerp(0.3, 1.0, shadowFactor);  // Shadow reduces ambient to 30%
+
     // Final color (linear space)
-    // Apply IBL intensity to control ambient contribution and shadow visibility
-    float3 colorLin = (ambient * gIblIntensity) + Lo;
+    // Apply IBL intensity and ambient occlusion from shadows
+    float3 colorLin = (ambient * ambientOcclusion * gIblIntensity) + Lo;
 
     return float4(colorLin, 1.0);
 }

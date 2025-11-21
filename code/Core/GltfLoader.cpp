@@ -25,7 +25,7 @@ static std::string Join(const std::string& a, const std::string& b){
     return (std::filesystem::path(a) / std::filesystem::path(b)).string();
 }
 
-static void ApplyFlipLH(VertexPNT& v){
+static void ApplyFlipLH(SVertexPNT& v){
     // 右手→左手：Z 取反；法线 Z 取反；切线 Z 取反；handedness 需要翻吗？通常保持即可，或按需要修正
     v.pz = -v.pz;
     v.nz = -v.nz;
@@ -36,7 +36,7 @@ static void ApplyFlipLH(VertexPNT& v){
 static void AppendPrimitive(const cgltf_primitive* prim,
                             const std::string& baseDir,
                             bool flipZ, bool flipWinding,
-                            GltfMeshCPU& out)
+                            SGltfMeshCPU& out)
 {
     // --- attributes ---
     const cgltf_accessor* acc_pos = nullptr;
@@ -80,7 +80,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
     size_t icount = prim->indices ? prim->indices->count : 0;
 
     // 读取顶点
-    std::vector<VertexPNT> verts(vcount);
+    std::vector<SVertexPNT> verts(vcount);
     for (size_t i=0;i<vcount;++i){
         float p[3]={0}, n[3]={0}, uv[2]={0}, t[4]={0,0,0,1}, c[4]={1,1,1,1};
         ReadVec3(acc_pos, i, p);
@@ -97,7 +97,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
             }
         }
 
-        VertexPNT v{};
+        SVertexPNT v{};
         v.px=p[0]; v.py=p[1]; v.pz=p[2];
         v.nx=n[0]; v.ny=n[1]; v.nz=n[2];
         v.u=uv[0]; v.v=uv[1];
@@ -160,7 +160,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
 }
 
 bool LoadGLTF_PNT(const std::string& gltfPath,
-                  std::vector<GltfMeshCPU>& outMeshes,
+                  std::vector<SGltfMeshCPU>& outMeshes,
                   bool flipZ_to_LH, bool flipWinding)
 {
     outMeshes.clear();
@@ -176,7 +176,7 @@ bool LoadGLTF_PNT(const std::string& gltfPath,
     for (size_t mi=0; mi<data->meshes_count; ++mi){
         auto* mesh = &data->meshes[mi];
         for (size_t pi=0; pi<mesh->primitives_count; ++pi){
-            GltfMeshCPU m{};
+            SGltfMeshCPU m{};
             AppendPrimitive(&mesh->primitives[pi], baseDir, flipZ_to_LH, flipWinding, m);
             if (!m.mesh.vertices.empty()) outMeshes.push_back(std::move(m));
         }

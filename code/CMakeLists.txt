@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.15)
+project(ForFunEngine)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,3 +110,34 @@ set(SHADER_SOURCES
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})
+
+# Configure shader compilation for Visual Studio
+if (MSVC)
+    # Vertex Shaders
+    set_source_files_properties(
+        ${CODE_PATH}/Shader/MainPass.vs.hlsl
+        ${CODE_PATH}/Shader/IrradianceConvolution.vs.hlsl
+        ${CODE_PATH}/Shader/PreFilterEnvironmentMap.vs.hlsl
+        ${CODE_PATH}/Shader/BrdfLut.vs.hlsl
+        ${CODE_PATH}/Shader/Skybox.vs.hlsl
+        ${CODE_PATH}/Shader/EquirectToCubemap.vs.hlsl
+        PROPERTIES
+        VS_SHADER_TYPE Vertex
+        VS_SHADER_MODEL 5.0
+        VS_SHADER_ENTRYPOINT main
+    )
+
+    # Pixel Shaders
+    set_source_files_properties(
+        ${CODE_PATH}/Shader/MainPass.ps.hlsl
+        ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
+        ${CODE_PATH}/Shader/PreFilterEnvironmentMap.ps.hlsl
+        ${CODE_PATH}/Shader/BrdfLut.ps.hlsl
+        ${CODE_PATH}/Shader/Skybox.ps.hlsl
+        ${CODE_PATH}/Shader/EquirectToCubemap.ps.hlsl
+        PROPERTIES
+        VS_SHADER_TYPE Pixel
+        VS_SHADER_MODEL 5.0
+        VS_SHADER_ENTRYPOINT main
+    )
+endif()

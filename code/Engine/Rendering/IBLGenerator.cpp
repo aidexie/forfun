@@ -76,8 +76,8 @@ static std::string LoadShaderSource(const std::string& filepath) {
     return buffer.str();
 }
 
-bool IBLGenerator::Initialize() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+bool CIBLGenerator::Initialize() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return false;
 
     createFullscreenQuad();
@@ -110,7 +110,7 @@ bool IBLGenerator::Initialize() {
     return true;
 }
 
-void IBLGenerator::Shutdown() {
+void CIBLGenerator::Shutdown() {
     m_fullscreenVS.Reset();
     m_irradiancePS.Reset();
     m_prefilterPS.Reset();
@@ -127,12 +127,12 @@ void IBLGenerator::Shutdown() {
     m_brdfLutSRV.Reset();
 }
 
-void IBLGenerator::createFullscreenQuad() {
+void CIBLGenerator::createFullscreenQuad() {
     // No vertex buffer needed - using SV_VertexID trick in shader
 }
 
-void IBLGenerator::createIrradianceShader() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CIBLGenerator::createIrradianceShader() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.ps.hlsl");
@@ -175,8 +175,8 @@ void IBLGenerator::createIrradianceShader() {
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_irradiancePS.GetAddressOf());
 }
 
-void IBLGenerator::createPreFilterShader() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CIBLGenerator::createPreFilterShader() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.ps.hlsl");
@@ -207,12 +207,12 @@ void IBLGenerator::createPreFilterShader() {
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_prefilterPS.GetAddressOf());
 }
 
-ID3D11ShaderResourceView* IBLGenerator::GenerateIrradianceMap(
+ID3D11ShaderResourceView* CIBLGenerator::GenerateIrradianceMap(
     ID3D11ShaderResourceView* envMap,
     int outputSize)
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
 
     if (!device || !context || !envMap) return nullptr;
 
@@ -292,14 +292,14 @@ ID3D11ShaderResourceView* IBLGenerator::GenerateIrradianceMap(
     return m_irradianceSRV.Get();
 }
 
-bool IBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
+bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     if (!m_irradianceTexture) {
         std::cout << "ERROR: No irradiance map to save!" << std::endl;
         return false;
     }
 
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
 
     // Get texture description
     D3D11_TEXTURE2D_DESC desc;
@@ -400,13 +400,13 @@ bool IBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     return true;
 }
 
-ID3D11ShaderResourceView* IBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
+ID3D11ShaderResourceView* CIBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
     if (faceIndex < 0 || faceIndex >= 6) return nullptr;
     if (!m_irradianceTexture) return nullptr;
 
     // Create face SRV on-demand
     if (!m_debugFaceSRVs[faceIndex]) {
-        ID3D11Device* device = DX11Context::Instance().GetDevice();
+        ID3D11Device* device = CDX11Context::Instance().GetDevice();
 
         D3D11_TEXTURE2D_DESC desc;
         m_irradianceTexture->GetDesc(&desc);
@@ -426,13 +426,13 @@ ID3D11ShaderResourceView* IBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
     return m_debugFaceSRVs[faceIndex].Get();
 }
 
-ID3D11ShaderResourceView* IBLGenerator::GeneratePreFilteredMap(
+ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
     ID3D11ShaderResourceView* envMap,
     int outputSize,
     int numMipLevels)
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
 
     if (!device || !context || !envMap) return nullptr;
 
@@ -585,7 +585,7 @@ ID3D11ShaderResourceView* IBLGenerator::GeneratePreFilteredMap(
     return m_preFilteredSRV.Get();
 }
 
-ID3D11ShaderResourceView* IBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int mipLevel) {
+ID3D11ShaderResourceView* CIBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int mipLevel) {
     if (faceIndex < 0 || faceIndex >= 6) return nullptr;
     if (mipLevel < 0 || mipLevel >= m_preFilteredMipLevels) return nullptr;
     if (!m_preFilteredTexture) return nullptr;
@@ -595,7 +595,7 @@ ID3D11ShaderResourceView* IBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int
 
     // Create face SRV on-demand
     if (!m_debugPreFilteredFaceSRVs[srvIndex]) {
-        ID3D11Device* device = DX11Context::Instance().GetDevice();
+        ID3D11Device* device = CDX11Context::Instance().GetDevice();
 
         D3D11_TEXTURE2D_DESC desc;
         m_preFilteredTexture->GetDesc(&desc);
@@ -615,8 +615,8 @@ ID3D11ShaderResourceView* IBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int
     return m_debugPreFilteredFaceSRVs[srvIndex].Get();
 }
 
-void IBLGenerator::createBrdfLutShader() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CIBLGenerator::createBrdfLutShader() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/BrdfLut.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/BrdfLut.ps.hlsl");
@@ -647,9 +647,9 @@ void IBLGenerator::createBrdfLutShader() {
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_brdfLutPS.GetAddressOf());
 }
 
-ID3D11ShaderResourceView* IBLGenerator::GenerateBrdfLut(int resolution) {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
 
     if (!device || !context) return nullptr;
 

@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cmake --build:*)"
+      "Bash(cmake --build:*)",
+      "Bash(powershell -Command \"Get-Content ''Engine/Component.h'' | Select-Object -First 20\")",
+      "Bash(powershell -Command \"\n(Get-Content ''Engine/Component.h'' -Raw) -replace ''\\bComponent\\b'', ''CComponent'' -replace ''\\bGameObject\\b'', ''CGameObject'' -replace ''\\bPropertyVisitor\\b'', ''CPropertyVisitor'' | Set-Content ''Engine/Component.h''\nWrite-Host ''Updated Component.h''\n\")",
+      "Bash(powershell -Command \"\n(Get-Content ''Engine/GameObject.h'' -Raw) -replace ''\\bGameObject\\b'', ''CGameObject'' -replace ''\\bComponent\\b'', ''CComponent'' | Set-Content ''Engine/GameObject.h''\nWrite-Host ''Updated GameObject.h''\n\")",
+      "Bash(powershell -Command:*)",
+      "Bash(cmake:*)",
+      "Bash(tee:*)",
+      "Bash(find:*)",
+      "Bash(./build/Debug/forfun.exe:*)",
+      "Bash(timeout 5 ./build/Debug/forfun.exe:*)",
+      "Bash(cat:*)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

@@ -4,7 +4,7 @@
 #include "ComponentRegistry.h"
 #include <DirectXMath.h>
 
-struct Transform : public Component {
+struct STransform : public CComponent {
     DirectX::XMFLOAT3 position{0,0,0};
     DirectX::XMFLOAT3 rotationEuler{0,0,0}; // radians
     DirectX::XMFLOAT3 scale{1,1,1};
@@ -19,7 +19,7 @@ struct Transform : public Component {
 
     const char* GetTypeName() const override { return "Transform"; }
 
-    void VisitProperties(PropertyVisitor& visitor) override {
+    void VisitProperties(CPropertyVisitor& visitor) override {
         visitor.VisitFloat3("Position", position);
         visitor.VisitFloat3("Rotation", rotationEuler);
         visitor.VisitFloat3("Scale", scale);
@@ -27,4 +27,4 @@ struct Transform : public Component {
 };
 
 // Auto-register component
-REGISTER_COMPONENT(Transform)
+REGISTER_COMPONENT(STransform)

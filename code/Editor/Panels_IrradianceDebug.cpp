@@ -57,7 +57,7 @@ static ID3D11ShaderResourceView* GetEnvironmentFaceSRV(
     }
 
     // Create new SRV for this face and mip level
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return nullptr;
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -89,8 +89,8 @@ void Panels::DrawIrradianceDebug() {
     ImGui::Separator();
 
     // Get Scene singleton references
-    IBLGenerator& iblGen = Scene::Instance().GetIBLGenerator();
-    Skybox& skybox = Scene::Instance().GetSkybox();
+    CIBLGenerator& iblGen = CScene::Instance().GetIBLGenerator();
+    CSkybox& skybox = CScene::Instance().GetSkybox();
 
     ImGui::Separator();
 

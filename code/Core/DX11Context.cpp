@@ -1,13 +1,13 @@
 #include "DX11Context.h"
 #include <cassert>
 
-DX11Context& DX11Context::Instance()
+CDX11Context& CDX11Context::Instance()
 {
-    static DX11Context s;
+    static CDX11Context s;
     return s;
 }
 
-bool DX11Context::Initialize(HWND hwnd, UINT width, UINT height)
+bool CDX11Context::Initialize(HWND hwnd, UINT width, UINT height)
 {
     m_hwnd  = hwnd;
     m_width = width;
@@ -20,7 +20,7 @@ bool DX11Context::Initialize(HWND hwnd, UINT width, UINT height)
     return true;
 }
 
-void DX11Context::Shutdown()
+void CDX11Context::Shutdown()
 {
     // 解绑
     if (m_context) {
@@ -37,7 +37,7 @@ void DX11Context::Shutdown()
     m_width = m_height = 0;
 }
 
-bool DX11Context::createDeviceAndSwapchain(HWND hwnd)
+bool CDX11Context::createDeviceAndSwapchain(HWND hwnd)
 {
     DXGI_SWAP_CHAIN_DESC sd{};
     sd.BufferCount = 2;
@@ -73,7 +73,7 @@ bool DX11Context::createDeviceAndSwapchain(HWND hwnd)
     return SUCCEEDED(hr);
 }
 
-void DX11Context::createBackbufferViews()
+void CDX11Context::createBackbufferViews()
 {
     // Backbuffer RTV
     Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuf;
@@ -100,14 +100,14 @@ void DX11Context::createBackbufferViews()
     assert(SUCCEEDED(hr));
 }
 
-void DX11Context::destroyBackbufferViews()
+void CDX11Context::destroyBackbufferViews()
 {
     m_dsv.Reset();
     m_depthTex.Reset();
     m_backbufferRTV.Reset();
 }
 
-void DX11Context::OnResize(UINT width, UINT height)
+void CDX11Context::OnResize(UINT width, UINT height)
 {
     if (!m_swapchain) return;
 
@@ -128,12 +128,12 @@ void DX11Context::OnResize(UINT width, UINT height)
     createBackbufferViews();
 }
 
-void DX11Context::BindRenderTargets(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv)
+void CDX11Context::BindRenderTargets(ID3D11RenderTargetView* rtv, ID3D11DepthStencilView* dsv)
 {
     m_context->OMSetRenderTargets(1, &rtv, dsv);
 }
 
-void DX11Context::SetViewport(float x, float y, float w, float h)
+void CDX11Context::SetViewport(float x, float y, float w, float h)
 {
     D3D11_VIEWPORT vp{};
     vp.TopLeftX = x; vp.TopLeftY = y;
@@ -142,17 +142,17 @@ void DX11Context::SetViewport(float x, float y, float w, float h)
     m_context->RSSetViewports(1, &vp);
 }
 
-void DX11Context::ClearRTV(ID3D11RenderTargetView* rtv, const float color[4])
+void CDX11Context::ClearRTV(ID3D11RenderTargetView* rtv, const float color[4])
 {
     m_context->ClearRenderTargetView(rtv, color);
 }
 
-void DX11Context::ClearDSV(ID3D11DepthStencilView* dsv, float depth, UINT8 stencil)
+void CDX11Context::ClearDSV(ID3D11DepthStencilView* dsv, float depth, UINT8 stencil)
 {
     m_context->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, depth, stencil);
 }
 
-void DX11Context::Present(UINT sync, UINT flags)
+void CDX11Context::Present(UINT sync, UINT flags)
 {
     m_swapchain->Present(sync, flags);
 }

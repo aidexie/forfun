@@ -5,10 +5,10 @@
 #include <string>
 
 // Skybox renderer using HDR cubemap
-class Skybox {
+class CSkybox {
 public:
-    Skybox() = default;
-    ~Skybox() = default;
+    CSkybox() = default;
+    ~CSkybox() = default;
 
     // Load HDR environment map and convert to cubemap
     bool Initialize(const std::string& hdrPath, int cubemapSize = 512);

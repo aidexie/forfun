@@ -2,7 +2,7 @@
 #include <d3d11.h>
 #include <wrl.h>
 
-struct OffscreenRT {
+struct SOffscreenRT {
     UINT width=0, height=0;
     DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM;
 

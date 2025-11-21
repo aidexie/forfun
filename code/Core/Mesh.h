@@ -3,7 +3,7 @@
 #include <vector>
 #include <cstdint>
 
-struct VertexPNT {
+struct SVertexPNT {
     float px, py, pz;
     float nx, ny, nz;
     float u, v;
@@ -12,9 +12,9 @@ struct VertexPNT {
     float r, g, b, a;  // Vertex color (for baked AO or other per-vertex data)
 };
 
-struct MeshCPU_PNT {
-    std::vector<VertexPNT> vertices;
+struct SMeshCPU_PNT {
+    std::vector<SVertexPNT> vertices;
     std::vector<uint32_t> indices;
 };
 
-void ComputeTangents(std::vector<VertexPNT>& vtx, const std::vector<uint32_t>& idx);
+void ComputeTangents(std::vector<SVertexPNT>& vtx, const std::vector<uint32_t>& idx);

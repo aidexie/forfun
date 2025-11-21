@@ -26,6 +26,96 @@ This is a mid-sized game engine and editor project, targeting functionality simi
 
 ## Coding Standards
 
+### Naming Conventions
+
+**CRITICAL RULE**: All code must follow these naming conventions consistently.
+
+#### Type Names
+
+**Classes**:
+- Prefix with `C`, followed by PascalCase
+- Examples: `CDX11Context`, `CMeshResourceManager`, `CGameObject`
+
+**Structs**:
+- Prefix with `S`, followed by PascalCase
+- Examples: `STransform`, `SMaterial`, `SVertexPNT`
+
+**Rationale**:
+- Clear visual distinction between classes (encapsulation) and structs (data-oriented)
+- Easier to identify type category in code
+
+#### Variable Names
+
+**Class Member Variables**:
+- Prefix with `m_`, followed by snake_case
+- Examples: `m_device`, `m_vertex_buffer`, `m_shadow_map_size`
+
+**Struct Member Variables**:
+- Use snake_case (no prefix)
+- Examples: `position`, `rotation_euler`, `albedo_color`
+
+**Local Variables**:
+- Use snake_case (no prefix)
+- Examples: `mesh_path`, `vertex_count`, `light_direction`
+
+**Global Variables**:
+- Prefix with `g_`, followed by snake_case
+- Examples: `g_main_pass`, `g_shadow_pass`, `g_scene`
+
+**Rationale**:
+- Prefixes prevent naming collisions and improve readability
+- snake_case provides consistent word separation
+- Immediate visual identification of variable scope
+
+#### Functions and Methods
+
+**Public Methods**:
+- Use PascalCase for class methods
+- Examples: `Initialize()`, `GetDevice()`, `CreateBuffer()`
+
+**Private/Protected Methods**:
+- Use camelCase for internal methods
+- Examples: `createDeviceAndSwapchain()`, `ensureOffscreen()`
+
+**Free Functions**:
+- Use PascalCase for public API functions
+- Use camelCase for internal/helper functions
+
+#### Constants and Enumerations
+
+**Constants**:
+- Prefix with `k_`, followed by snake_case
+- Examples: `k_window_width`, `k_max_cascades`, `k_assets_path`
+
+**Enum Values**:
+- Use UPPER_SNAKE_CASE
+- Examples: `RENDER_PASS_MAIN`, `SHADOW_MAP_SIZE_2048`
+
+#### File Names
+
+**Header Files**:
+- Match primary class/struct name
+- Examples: `CDX11Context.h`, `SMaterial.h`
+
+**Implementation Files**:
+- Match header name with `.cpp` extension
+- Examples: `CDX11Context.cpp`, `CMainPass.cpp`
+
+**Special Cases**:
+- Panel implementations: `Panels_Hierarchy.cpp`, `Panels_Inspector.cpp`
+- Shader files: `MainPass.vs.hlsl`, `MainPass.ps.hlsl`
+
+#### Include Guards
+
+**All headers must use**:
+```cpp
+#pragma once
+```
+
+Do NOT use traditional include guards (`#ifndef`/`#define`/`#endif`).
+
+---
+
 ### Coordinate System Convention
 
 **CRITICAL RULE**: This engine uses **DirectX left-handed coordinate system** throughout the entire codebase.

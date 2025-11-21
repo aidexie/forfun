@@ -4,11 +4,11 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 
-class DX11Context
+class CDX11Context
 {
 public:
     // ---- Singleton ----
-    static DX11Context& Instance();
+    static CDX11Context& Instance();
 
     // 不负责创建窗口；由外部传入 hwnd 和初始宽高
     bool Initialize(HWND hwnd, UINT width, UINT height);
@@ -32,10 +32,10 @@ public:
     UINT GetHeight() const { return m_height; }
 
 private:
-    DX11Context() = default;
-    ~DX11Context() = default;
-    DX11Context(const DX11Context&) = delete;
-    DX11Context& operator=(const DX11Context&) = delete;
+    CDX11Context() = default;
+    ~CDX11Context() = default;
+    CDX11Context(const CDX11Context&) = delete;
+    CDX11Context& operator=(const CDX11Context&) = delete;
 
     bool createDeviceAndSwapchain(HWND hwnd);
     void createBackbufferViews();

@@ -6,15 +6,15 @@
 #include <vector>
 
 // Forward declarations
-class Scene;
-class DirectionalLight;
+class CScene;
+struct SDirectionalLight;
 
-// ShadowPass: Renders shadow map from light's perspective
-// Used by MainPass to apply shadows in final rendering
-class ShadowPass
+// CShadowPass: Renders shadow map from light's perspective
+// Used by CMainPass to apply shadows in final rendering
+class CShadowPass
 {
 public:
-    // Output bundle containing all shadow resources needed by MainPass
+    // Output bundle containing all shadow resources needed by CMainPass
     struct Output {
         static const int MAX_CASCADES = 4;
 
@@ -28,8 +28,8 @@ public:
         bool enableSoftShadows;                             // Enable PCF for soft shadows (3x3 sampling)
     };
 
-    ShadowPass() = default;
-    ~ShadowPass() = default;
+    CShadowPass() = default;
+    ~CShadowPass() = default;
 
     // Initialize shadow pass resources
     bool Initialize();
@@ -38,7 +38,7 @@ public:
     // Render shadow map from directional light's perspective
     // Uses tight frustum fitting based on camera view frustum
     // cameraView, cameraProj: Camera matrices for frustum extraction
-    void Render(Scene& scene, DirectionalLight* light,
+    void Render(CScene& scene, SDirectionalLight* light,
                 const DirectX::XMMATRIX& cameraView,
                 const DirectX::XMMATRIX& cameraProj);
 
@@ -62,7 +62,7 @@ private:
 
     DirectX::XMMATRIX calculateTightLightMatrix(
         const std::array<DirectX::XMFLOAT3, 8>& frustumCornersWS,
-        DirectionalLight* light,
+        SDirectionalLight* light,
         float cascadeFarDist) const;
 
     // Calculate cascade split distances using Practical Split Scheme

@@ -72,7 +72,7 @@ ImVec2 Panels::GetViewportLastSize() {
     return s_lastAvail;
 }
 
-void Panels::DrawViewport(Scene& scene, EditorCamera& editorCam,
+void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
     ID3D11ShaderResourceView* srv,
     size_t srcWidth, size_t srcHeight)
 {

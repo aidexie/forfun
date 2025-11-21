@@ -4,7 +4,7 @@
 #include "World.h"
 #include "GameObject.h"
 
-void Panels::DrawHierarchy(Scene& scene) {
+void Panels::DrawHierarchy(CScene& scene) {
     ImGui::Begin("Hierarchy");
     for (int i=0;i<(int)scene.GetWorld().Count();++i) {
         auto* go = scene.GetWorld().Get((std::size_t)i);

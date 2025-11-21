@@ -23,9 +23,9 @@ struct alignas(16) CB_Object {
     DirectX::XMMATRIX world;
 };
 
-bool ShadowPass::Initialize()
+bool CShadowPass::Initialize()
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return false;
 
     // Depth-only vertex shader
@@ -111,7 +111,7 @@ bool ShadowPass::Initialize()
         device->CreateDepthStencilView(defaultShadowTex.Get(), &dsvDesc, dsv.GetAddressOf());
 
         // Clear to 1.0 (no shadow)
-        ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+        ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
         context->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 
         // Create SRV for reading
@@ -177,7 +177,7 @@ bool ShadowPass::Initialize()
     return true;
 }
 
-void ShadowPass::Shutdown()
+void CShadowPass::Shutdown()
 {
     m_shadowMapArray.Reset();
     m_shadowArraySRV.Reset();
@@ -194,9 +194,9 @@ void ShadowPass::Shutdown()
     m_rasterState.Reset();
 }
 
-void ShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
+void CShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     if (size == 0) size = 2048;  // Default
@@ -255,7 +255,7 @@ void ShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
 // CSM Helper Functions
 // ===========================
 
-std::vector<float> ShadowPass::calculateCascadeSplits(
+std::vector<float> CShadowPass::calculateCascadeSplits(
     int cascadeCount,
     float nearPlane,
     float farPlane,
@@ -283,7 +283,7 @@ std::vector<float> ShadowPass::calculateCascadeSplits(
     return splits;
 }
 
-std::array<XMFLOAT3, 8> ShadowPass::extractSubFrustum(
+std::array<XMFLOAT3, 8> CShadowPass::extractSubFrustum(
     const XMMATRIX& view,
     const XMMATRIX& proj,
     float nearDist,
@@ -301,7 +301,7 @@ std::array<XMFLOAT3, 8> ShadowPass::extractSubFrustum(
     return extractFrustumCorners(view, subProj);
 }
 
-ShadowPass::BoundingSphere ShadowPass::calculateBoundingSphere(
+CShadowPass::BoundingSphere CShadowPass::calculateBoundingSphere(
     const std::array<XMFLOAT3, 8>& points) const
 {
     // Simple bounding sphere: use centroid as center, max distance as radius
@@ -333,7 +333,7 @@ ShadowPass::BoundingSphere ShadowPass::calculateBoundingSphere(
 // Tight Frustum Fitting
 // ===========================
 
-std::array<XMFLOAT3, 8> ShadowPass::extractFrustumCorners(
+std::array<XMFLOAT3, 8> CShadowPass::extractFrustumCorners(
     const XMMATRIX& view,
     const XMMATRIX& proj) const
 {
@@ -358,9 +358,9 @@ std::array<XMFLOAT3, 8> ShadowPass::extractFrustumCorners(
     return worldCorners;
 }
 
-XMMATRIX ShadowPass::calculateTightLightMatrix(
+XMMATRIX CShadowPass::calculateTightLightMatrix(
     const std::array<XMFLOAT3, 8>& frustumCornersWS,
-    DirectionalLight* light,
+    SDirectionalLight* light,
     float cascadeFarDist) const
 {
     if (!light) return XMMatrixIdentity();
@@ -434,7 +434,7 @@ XMMATRIX ShadowPass::calculateTightLightMatrix(
     }
 
     // Apply Shadow Near Plane Offset to capture tall objects
-    float nearPlaneOffset = light->ShadowNearPlaneOffset;
+    float nearPlaneOffset = light->shadow_near_plane_offset;
     minZ -= nearPlaneOffset;
     maxZ += 10.0f;  // Small margin for far plane
 
@@ -483,16 +483,16 @@ XMMATRIX ShadowPass::calculateTightLightMatrix(
 //    return view * proj;
 //}
 
-void ShadowPass::Render(Scene& scene, DirectionalLight* light,
+void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
                         const XMMATRIX& cameraView,
                         const XMMATRIX& cameraProj)
 {
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context || !light) return;
 
     // Get CSM parameters from light
-    int cascadeCount = std::min(std::max(light->CascadeCount, 1), 4);
-    float shadowDistance = light->ShadowDistance;
+    int cascadeCount = std::min(std::max(light->cascade_count, 1), 4);
+    float shadowDistance = light->shadow_distance;
     UINT shadowMapSize = (UINT)light->GetShadowMapResolution();
 
     // Unbind resources before recreating shadow maps to avoid hazards
@@ -506,7 +506,7 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
     // Calculate cascade split distances (in camera space)
     float cameraNear = 0.1f;  // TODO: Get from camera settings
     auto splits = calculateCascadeSplits(cascadeCount, cameraNear, shadowDistance,
-                                         std::clamp(light->CascadeSplitLambda, 0.0f, 1.0f));
+                                         std::clamp(light->cascade_split_lambda, 0.0f, 1.0f));
 
     // Bind pipeline (shared across all cascades)
     context->IASetInputLayout(m_inputLayout.Get());
@@ -554,8 +554,8 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
         // Render all objects to this cascade
         for (auto& objPtr : scene.GetWorld().Objects()) {
             auto* obj = objPtr.get();
-            auto* meshRenderer = obj->GetComponent<MeshRenderer>();
-            auto* transform = obj->GetComponent<Transform>();
+            auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+            auto* transform = obj->GetComponent<STransform>();
 
             if (!meshRenderer || !transform) continue;
 
@@ -576,7 +576,7 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
                 context->UpdateSubresource(m_cbObject.Get(), 0, nullptr, &cbObj, 0, 0);
 
                 // Bind vertex/index buffers
-                UINT stride = sizeof(VertexPNT), offset = 0;
+                UINT stride = sizeof(SVertexPNT), offset = 0;
                 ID3D11Buffer* vbo = gpuMesh->vbo.Get();
                 context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
                 context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
@@ -598,7 +598,7 @@ void ShadowPass::Render(Scene& scene, DirectionalLight* light,
     m_output.cascadeCount = cascadeCount;
     m_output.shadowMapArray = m_shadowArraySRV.Get();
     m_output.shadowSampler = m_shadowSampler.Get();
-    m_output.cascadeBlendRange = std::clamp(light->CascadeBlendRange, 0.0f, 0.5f);
-    m_output.debugShowCascades = light->DebugShowCascades;
-    m_output.enableSoftShadows = light->EnableSoftShadows;
+    m_output.cascadeBlendRange = std::clamp(light->cascade_blend_range, 0.0f, 0.5f);
+    m_output.debugShowCascades = light->debug_show_cascades;
+    m_output.enableSoftShadows = light->enable_soft_shadows;
 }

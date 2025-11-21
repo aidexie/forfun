@@ -15,7 +15,7 @@ static void RGBEToFloat(unsigned char* rgbe, float* rgb) {
     }
 }
 
-bool LoadHdrFile(const std::string& path, HdrImage& outImage) {
+bool LoadHdrFile(const std::string& path, SHdrImage& outImage) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
         return false;

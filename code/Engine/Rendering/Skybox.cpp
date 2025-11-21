@@ -32,8 +32,8 @@ struct CB_SkyboxTransform {
     XMMATRIX viewProj;
 };
 
-bool Skybox::Initialize(const std::string& hdrPath, int cubemapSize) {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return false;
 
     // Convert equirectangular HDR to cubemap
@@ -79,7 +79,7 @@ bool Skybox::Initialize(const std::string& hdrPath, int cubemapSize) {
     return true;
 }
 
-void Skybox::Shutdown() {
+void CSkybox::Shutdown() {
     m_envTexture.Reset();
     m_envCubemap.Reset();
     m_vs.Reset();
@@ -93,8 +93,8 @@ void Skybox::Shutdown() {
     m_depthState.Reset();
 }
 
-void Skybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context || !m_envCubemap) return;
 
     // Remove translation from view matrix
@@ -134,13 +134,13 @@ void Skybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     context->PSSetShaderResources(0, 1, &nullSRV);
 }
 
-void Skybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!device || !context) return;
 
     // Load HDR file
-    HdrImage hdrImage;
+    SHdrImage hdrImage;
     if (!LoadHdrFile(hdrPath, hdrImage)) {
         return;
     }
@@ -367,8 +367,8 @@ void Skybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
               << ", " << mipCount << " mip levels)" << std::endl;
 }
 
-void Skybox::createCubeMesh() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CSkybox::createCubeMesh() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     // Cube vertices (positions only)
@@ -415,8 +415,8 @@ void Skybox::createCubeMesh() {
     device->CreateBuffer(&ibd, &ibData, m_indexBuffer.GetAddressOf());
 }
 
-void Skybox::createShaders() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CSkybox::createShaders() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     // Load shader source from files (paths relative to E:\forfun\assets working directory)

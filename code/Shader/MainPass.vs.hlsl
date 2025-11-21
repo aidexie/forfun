@@ -43,8 +43,7 @@ struct VSOut {
     float4 posLS0 : TEXCOORD5;
     float4 posLS1 : TEXCOORD6;
     float4 posLS2 : TEXCOORD7;
-    float4 posLS3 : TEXCOORD8;
-    float4 color : TEXCOORD9;  // Vertex color
+    float4 color : COLOR0;  // Vertex color (moved from TEXCOORD9 to COLOR0)
 };
 
 VSOut main(VSIn i) {
@@ -60,12 +59,11 @@ VSOut main(VSIn i) {
     float4 posV = mul(posWS, gView);
     o.posH = mul(posV, gProj);
 
-    // Pre-calculate light space positions for all cascades in VS
-    // This is much faster than calculating in PS (done once per vertex vs per fragment)
+    // Pre-calculate light space positions for first 3 cascades in VS
+    // Cascade 3 is calculated in PS to save interpolators (TEXCOORD limit)
     o.posLS0 = mul(posWS, gLightSpaceVPs[0]);
     o.posLS1 = mul(posWS, gLightSpaceVPs[1]);
     o.posLS2 = mul(posWS, gLightSpaceVPs[2]);
-    o.posLS3 = mul(posWS, gLightSpaceVPs[3]);
 
     return o;
 }

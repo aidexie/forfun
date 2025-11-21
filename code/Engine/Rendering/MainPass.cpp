@@ -66,9 +66,9 @@ struct alignas(16) CB_Object {
 
 static auto gPrev = std::chrono::steady_clock::now();
 
-bool MainPass::Initialize()
+bool CMainPass::Initialize()
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return false;
 
     // --- 管线与状态 ---
@@ -103,9 +103,9 @@ bool MainPass::Initialize()
 }
 
 
-void MainPass::createPipeline()
+void CMainPass::createPipeline()
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     // Load shader source from files
@@ -175,9 +175,9 @@ void MainPass::createPipeline()
     device->CreateSamplerState(&sd, m_sampler.GetAddressOf());
 }
 
-void MainPass::createRasterStates()
+void CMainPass::createRasterStates()
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     // Rasterizer states
@@ -200,7 +200,7 @@ void MainPass::createRasterStates()
     device->CreateDepthStencilState(&dsd, m_depthStateDefault.GetAddressOf());
 }
 
-void MainPass::OnMouseDelta(int dx, int dy)
+void CMainPass::OnMouseDelta(int dx, int dy)
 {
     if (!m_rmbLook) return;
     const float sens = 0.0022f;
@@ -209,9 +209,9 @@ void MainPass::OnMouseDelta(int dx, int dy)
     const float limit = 1.5533f;
     m_pitch = std::clamp(m_pitch, -limit, limit);
 }
-void MainPass::OnRButton(bool down) { m_rmbLook = down; }
+void CMainPass::OnRButton(bool down) { m_rmbLook = down; }
 
-void MainPass::UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt)
+void CMainPass::UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt)
 {
     updateInput(dt);
 
@@ -228,7 +228,7 @@ void MainPass::UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt)
     m_cameraProj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 1000.0f);
 }
 
-void MainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
+void CMainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
 {
     m_camPos = eye;
     XMVECTOR e = XMLoadFloat3(&m_camPos);
@@ -239,7 +239,7 @@ void MainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
     m_pitch = std::asin(std::clamp(f.y, -1.0f, 1.0f));
 }
 
-void MainPass::updateInput(float dt)
+void CMainPass::updateInput(float dt)
 {
     auto down = [](int vk){ return (GetAsyncKeyState(vk) & 0x8000) != 0; };
 
@@ -261,9 +261,9 @@ void MainPass::updateInput(float dt)
     if (down('R')) { ResetCameraLookAt(XMFLOAT3(-6.0f,0.8f,0.0f), XMFLOAT3(0,0,0)); }
 }
 
-void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* shadowData)
+void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData)
 {
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context) return;
 
     updateInput(dt);
@@ -296,9 +296,9 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     XMVECTOR eye = XMLoadFloat3(&m_camPos);
 
     // Collect DirectionalLight from scene
-    DirectionalLight* dirLight = nullptr;
+    SDirectionalLight* dirLight = nullptr;
     for (auto& objPtr : scene.GetWorld().Objects()) {
-        dirLight = objPtr->GetComponent<DirectionalLight>();
+        dirLight = objPtr->GetComponent<SDirectionalLight>();
         if (dirLight) break;  // Use first DirectionalLight found
     }
 
@@ -336,12 +336,12 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     if (dirLight) {
         cf.lightDirWS = dirLight->GetDirection();
         cf.lightColor = XMFLOAT3(
-            dirLight->Color.x * dirLight->Intensity,
-            dirLight->Color.y * dirLight->Intensity,
-            dirLight->Color.z * dirLight->Intensity
+            dirLight->color.x * dirLight->intensity,
+            dirLight->color.y * dirLight->intensity,
+            dirLight->color.z * dirLight->intensity
         );
-        cf.shadowBias = dirLight->ShadowBias;
-        cf.iblIntensity = dirLight->IblIntensity;  // Read from DirectionalLight component
+        cf.shadowBias = dirLight->shadow_bias;
+        cf.iblIntensity = dirLight->ibl_intensity;  // Read from DirectionalLight component
     } else {
         // Default light if no DirectionalLight component exists
         cf.lightDirWS = XMFLOAT3(0.4f, -1.0f, 0.2f);
@@ -361,7 +361,7 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     }
 
     // Bind IBL textures (t3, t4, t5)
-    IBLGenerator& iblGen = Scene::Instance().GetIBLGenerator();
+    CIBLGenerator& iblGen = CScene::Instance().GetIBLGenerator();
     ID3D11ShaderResourceView* iblSRVs[3] = {
         iblGen.GetIrradianceMapSRV(),    // t3: Irradiance cubemap
         iblGen.GetPreFilteredMapSRV(),   // t4: Pre-filtered environment cubemap
@@ -372,8 +372,8 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
     // 遍历场景中的所有对象并渲染
     for (auto& objPtr : scene.GetWorld().Objects()) {
         auto* obj = objPtr.get();
-        auto* meshRenderer = obj->GetComponent<MeshRenderer>();
-        auto* transform = obj->GetComponent<Transform>();
+        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+        auto* transform = obj->GetComponent<STransform>();
 
         if (!meshRenderer || !transform) {
             continue;
@@ -388,10 +388,10 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
         XMMATRIX worldMatrix = transform->WorldMatrix();
 
         // 获取材质组件（如果没有则使用默认值）
-        auto* material = obj->GetComponent<Material>();
-        XMFLOAT3 albedo = material ? material->Albedo : XMFLOAT3(1.0f, 1.0f, 1.0f);
-        float metallic = material ? material->Metallic : 0.0f;
-        float roughness = material ? material->Roughness : 0.5f;
+        auto* material = obj->GetComponent<SMaterial>();
+        XMFLOAT3 albedo = material ? material->albedo : XMFLOAT3(1.0f, 1.0f, 1.0f);
+        float metallic = material ? material->metallic : 0.0f;
+        float roughness = material ? material->roughness : 0.5f;
 
         // 绘制所有子网格（glTF 可能有多个）
         for (auto& gpuMesh : meshRenderer->meshes) {
@@ -411,7 +411,7 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
             context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
 
             // 绑定顶点和索引缓冲
-            UINT stride = sizeof(VertexPNT), offset = 0;
+            UINT stride = sizeof(SVertexPNT), offset = 0;
             ID3D11Buffer* vbo = gpuMesh->vbo.Get();
             context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
             context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
@@ -436,12 +436,12 @@ void MainPass::renderScene(Scene& scene, float dt, const ShadowPass::Output* sha
 
     // 渲染 Skybox（最后渲染，使用深度测试但不写入）
     // Skybox is now managed by Scene singleton
-    Scene::Instance().GetSkybox().Render(view, proj);
+    CScene::Instance().GetSkybox().Render(view, proj);
 }
 
-void MainPass::ensureOffscreen(UINT w, UINT h)
+void CMainPass::ensureOffscreen(UINT w, UINT h)
 {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     if (w == 0 || h == 0) return;
@@ -497,10 +497,10 @@ void MainPass::ensureOffscreen(UINT w, UINT h)
     device->CreateShaderResourceView(m_offLDR.color.Get(), &ldrSRVDesc, m_offLDR.srv.GetAddressOf());
 }
 
-void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
-                      const ShadowPass::Output* shadowData)
+void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
+                      const CShadowPass::Output* shadowData)
 {
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context) return;
 
     // Unbind ALL resources from ALL stages BEFORE ensureOffscreen to avoid hazards
@@ -534,7 +534,7 @@ void MainPass::Render(Scene& scene, UINT w, UINT h, float dt,
     m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h, 1.0f);
 }
 
-void MainPass::Shutdown()
+void CMainPass::Shutdown()
 {
     // Skybox is now managed by Scene singleton - no need to shut down here
     m_postProcess.Shutdown();

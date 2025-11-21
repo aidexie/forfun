@@ -10,9 +10,9 @@
 #include "Component.h"
 #include "ComponentRegistry.h"
 #include "PropertyVisitor.h"
-#include "Components/Transform.h"
-#include "Components/MeshRenderer.h"
-#include "Components/DirectionalLight.h"
+#include "Components/Transform.h"  // STransform
+#include "Components/MeshRenderer.h"  // SMeshRenderer
+#include "Components/DirectionalLight.h"  // SDirectionalLight
 
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -23,9 +23,9 @@ using json = nlohmann::json;
 // ===========================
 // JSON Write Visitor
 // ===========================
-class JsonWriteVisitor : public PropertyVisitor {
+class CJsonWriteVisitor : public CPropertyVisitor {
 public:
-    JsonWriteVisitor(json& j) : m_json(j) {}
+    CJsonWriteVisitor(json& j) : m_json(j) {}
 
     void VisitFloat(const char* name, float& value) override {
         m_json[name] = value;
@@ -58,9 +58,9 @@ private:
 // ===========================
 // JSON Read Visitor
 // ===========================
-class JsonReadVisitor : public PropertyVisitor {
+class CJsonReadVisitor : public CPropertyVisitor {
 public:
-    JsonReadVisitor(const json& j) : m_json(j) {}
+    CJsonReadVisitor(const json& j) : m_json(j) {}
 
     void VisitFloat(const char* name, float& value) override {
         if (m_json.contains(name)) {
@@ -105,46 +105,48 @@ private:
 };
 
 // ===========================
-// Serialize Component
+// Serialize CComponent
 // ===========================
-static void SerializeComponent(const Component* comp, json& j) {
+static void SerializeComponent(const CComponent* comp, json& j) {
     j["type"] = comp->GetTypeName();
-    JsonWriteVisitor visitor(j);
-    // const_cast is safe here: JsonWriteVisitor only reads values, doesn't modify component
-    const_cast<Component*>(comp)->VisitProperties(visitor);
+    CJsonWriteVisitor visitor(j);
+    // const_cast is safe here: CJsonWriteVisitor only reads values, doesn't modify CComponent
+    const_cast<CComponent*>(comp)->VisitProperties(visitor);
 }
 
 // ===========================
-// Centralized Component Factory
+// Centralized CComponent Factory
 // ===========================
-// Automatically uses ComponentRegistry (no manual code needed!)
+// Automatically uses CComponentRegistry (no manual code needed!)
 // Components auto-register via REGISTER_COMPONENT macro in their header files
-static Component* CreateComponentByType(GameObject* go, const std::string& typeName) {
-    return ComponentRegistry::Instance().Create(go, typeName);
+static CComponent* CreateComponentByType(CGameObject* go, const std::string& typeName) {
+    return CComponentRegistry::Instance().Create(go, typeName);
 }
 
 // ===========================
-// Deserialize Component
+// Deserialize CComponent
 // ===========================
-static Component* DeserializeComponent(GameObject* go, const json& j) {
+static CComponent* DeserializeComponent(CGameObject* go, const json& j) {
     if (!j.contains("type")) return nullptr;
 
     std::string type = j["type"].get<std::string>();
-    Component* comp = CreateComponentByType(go, type);
+    CComponent* comp = CreateComponentByType(go, type);
 
     if (comp) {
         // Load properties using reflection
-        JsonReadVisitor visitor(j);
+        CJsonReadVisitor visitor(j);
         comp->VisitProperties(visitor);
+    } else {
+        std::cerr << "ERROR: Failed to create component of type: " << type << std::endl;
     }
 
     return comp;
 }
 
 // ===========================
-// Save Scene
+// Save CScene
 // ===========================
-bool SceneSerializer::SaveScene(const Scene& scene, const std::string& filepath) {
+bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepath) {
     try {
         json j;
         j["version"] = "1.0";
@@ -160,7 +162,7 @@ bool SceneSerializer::SaveScene(const Scene& scene, const std::string& filepath)
             goJson["components"] = json::array();
 
             // Serialize all components automatically using ForEachComponent
-            go->ForEachComponent([&](const Component* comp) {
+            go->ForEachComponent([&](const CComponent* comp) {
                 json compJson;
                 SerializeComponent(comp, compJson);
                 goJson["components"].push_back(compJson);
@@ -183,20 +185,20 @@ bool SceneSerializer::SaveScene(const Scene& scene, const std::string& filepath)
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "Error saving scene: " << e.what() << std::endl;
+        std::cerr << "ERROR: Failed to save scene: " << e.what() << std::endl;
         return false;
     }
 }
 
 // ===========================
-// Load Scene
+// Load CScene
 // ===========================
-bool SceneSerializer::LoadScene(Scene& scene, const std::string& filepath) {
+bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
     try {
         // Read file
         std::ifstream file(filepath);
         if (!file.is_open()) {
-            std::cerr << "Failed to open file for reading: " << filepath << std::endl;
+            std::cerr << "ERROR: Failed to open scene file: " << filepath << std::endl;
             return false;
         }
 
@@ -204,7 +206,7 @@ bool SceneSerializer::LoadScene(Scene& scene, const std::string& filepath) {
         file >> j;
         file.close();
 
-        // Clear existing scene
+        // Clear existing CScene
         while (scene.GetWorld().Count() > 0) {
             scene.GetWorld().Destroy(0);
         }
@@ -229,7 +231,13 @@ bool SceneSerializer::LoadScene(Scene& scene, const std::string& filepath) {
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "Error loading scene: " << e.what() << std::endl;
+        std::cerr << "ERROR: Failed to load scene: " << e.what() << std::endl;
         return false;
     }
 }
+
+
+
+
+
+

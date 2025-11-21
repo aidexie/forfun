@@ -9,13 +9,13 @@ struct GltfTextures {
     std::string metallicRoughnessPath;  // Linear (G=Roughness, B=Metallic, glTF 2.0 standard)
 };
 
-struct GltfMeshCPU {
-    MeshCPU_PNT mesh;     // 我们现有的 P/N/UV + tangent.w
+struct SGltfMeshCPU {
+    SMeshCPU_PNT mesh;     // 我们现有的 P/N/UV + tangent.w
     GltfTextures textures;
     // 可扩展 metallic-roughness、ao 等
 };
 
 // 返回多个实例化后的 mesh（已应用节点变换合并到 world 中的话，可扩展）
 bool LoadGLTF_PNT(const std::string& gltfPath,
-                  std::vector<GltfMeshCPU>& outMeshes,
+                  std::vector<SGltfMeshCPU>& outMeshes,
                   bool flipZ_to_LH = true, bool flipWinding = true);

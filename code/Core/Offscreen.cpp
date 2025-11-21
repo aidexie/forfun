@@ -1,6 +1,6 @@
 #include "Offscreen.h"
 
-bool OffscreenRT::Create(ID3D11Device* dev, UINT w, UINT h, DXGI_FORMAT fmt) {
+bool SOffscreenRT::Create(ID3D11Device* dev, UINT w, UINT h, DXGI_FORMAT fmt) {
     width=w; height=h; format=fmt;
     D3D11_TEXTURE2D_DESC td{};
     td.Width=w; td.Height=h; td.MipLevels=1; td.ArraySize=1;
@@ -17,12 +17,12 @@ bool OffscreenRT::Create(ID3D11Device* dev, UINT w, UINT h, DXGI_FORMAT fmt) {
     return true;
 }
 
-void OffscreenRT::Release() {
+void SOffscreenRT::Release() {
     srv.Reset(); rtv.Reset(); tex.Reset();
     width=height=0;
 }
 
-bool OffscreenRT::Resize(ID3D11Device* dev, UINT w, UINT h) {
+bool SOffscreenRT::Resize(ID3D11Device* dev, UINT w, UINT h) {
     if (w==width && h==height && tex) return true;
     Release();
     return Create(dev, w, h, format);

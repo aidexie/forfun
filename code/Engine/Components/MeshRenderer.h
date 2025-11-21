@@ -10,7 +10,7 @@
 class Renderer;
 class GpuMeshResource;
 
-struct MeshRenderer : public Component {
+struct SMeshRenderer : public CComponent {
     std::string path; // Path to mesh file (.obj, .gltf, .glb)
     std::vector<std::shared_ptr<GpuMeshResource>> meshes; // GPU resources (glTF may have multiple sub-meshes)
 
@@ -19,7 +19,7 @@ struct MeshRenderer : public Component {
 
     const char* GetTypeName() const override { return "MeshRenderer"; }
 
-    void VisitProperties(PropertyVisitor& visitor) override {
+    void VisitProperties(CPropertyVisitor& visitor) override {
         // Save old value to detect changes
         std::string oldPath = path;
 
@@ -34,4 +34,4 @@ struct MeshRenderer : public Component {
 };
 
 // Auto-register component
-REGISTER_COMPONENT(MeshRenderer)
+REGISTER_COMPONENT(SMeshRenderer)

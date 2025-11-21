@@ -1,18 +1,18 @@
 #pragma once
-class Scene;
+class CScene;
 struct EditorCamera;
 struct ImVec2;
 struct ID3D11ShaderResourceView;
-class MainPass;
+class CMainPass;
 
 namespace Panels {
     ImVec2 GetViewportLastSize();
 
-    void DrawDockspace(bool* pOpen, Scene& scene, MainPass* mainPass);
-    void DrawHierarchy(Scene& scene);
-    void DrawInspector(Scene& scene);
-    void DrawViewport(Scene& scene, EditorCamera& editorCam,
+    void DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass);
+    void DrawHierarchy(CScene& scene);
+    void DrawInspector(CScene& scene);
+    void DrawViewport(CScene& scene, EditorCamera& editorCam,
         ID3D11ShaderResourceView* srv,
         size_t srcWidth, size_t srcHeight);
-    void DrawIrradianceDebug();  // Uses Scene::Instance() internally
+    void DrawIrradianceDebug();  // Uses CScene::Instance() internally
 }

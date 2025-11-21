@@ -5,13 +5,13 @@
 #include "ShadowPass.h"
 #include "PostProcessPass.h"
 // Forward declarations
-class Scene;
-class ShadowPass;
+class CScene;
+class CShadowPass;
 
-// MainPass: 主渲染流程
+// CMainPass: 主渲染流程
 // 在 Engine 层，可以直接访问 Scene/GameObject/Components
 // 使用 DX11Context::Instance() 访问 D3D11 设备和上下文
-class MainPass
+class CMainPass
 {
 public:
     struct OffscreenTarget {
@@ -29,8 +29,8 @@ public:
         }
     };
 
-    MainPass() = default;
-    ~MainPass() = default;
+    CMainPass() = default;
+    ~CMainPass() = default;
 
     // 初始化渲染管线资源
     bool Initialize();
@@ -44,9 +44,9 @@ public:
     void UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt);
 
     // 渲染场景到离屏目标
-    // shadowData: shadow resources from ShadowPass (nullptr = no shadows)
-    void Render(Scene& scene, UINT w, UINT h, float dt,
-                const ShadowPass::Output* shadowData);
+    // shadowData: shadow resources from CShadowPass (nullptr = no shadows)
+    void Render(CScene& scene, UINT w, UINT h, float dt,
+                const CShadowPass::Output* shadowData);
 
     // 访问离屏目标（返回最终的 LDR sRGB 纹理用于显示）
     ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_offLDR.srv.Get(); }
@@ -59,7 +59,7 @@ public:
 
 private:
     void ensureOffscreen(UINT w, UINT h);
-    void renderScene(Scene& scene, float dt, const ShadowPass::Output* shadowData);
+    void renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData);
 
 private:
     OffscreenTarget m_off;     // HDR linear space (R16G16B16A16_FLOAT)
@@ -92,7 +92,7 @@ private:
 
     // Skybox is now managed by Scene singleton
     // Post-process (tone mapping + gamma correction)
-    PostProcessPass m_postProcess;
+    CPostProcessPass m_postProcess;
 
 private:
     // 内部工具

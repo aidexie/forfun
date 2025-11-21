@@ -2,12 +2,12 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 
-// PostProcessPass: Handles tone mapping and gamma correction
+// CPostProcessPass: Handles tone mapping and gamma correction
 // Converts HDR linear space to LDR sRGB space
-class PostProcessPass {
+class CPostProcessPass {
 public:
-    PostProcessPass() = default;
-    ~PostProcessPass() = default;
+    CPostProcessPass() = default;
+    ~CPostProcessPass() = default;
 
     // Initialize post-process resources
     bool Initialize();

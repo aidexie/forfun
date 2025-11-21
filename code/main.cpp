@@ -34,13 +34,13 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // -----------------------------------------------------------------------------
 static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
 static const wchar_t* kWndTitle = L"ForFunEditor";
-static MainPass gMainPass;
-static ShadowPass gShadowPass;
-static bool gMinimized = false;
-static POINT gLastMouse = { 0, 0 };
+static CMainPass g_main_pass;
+static CShadowPass g_shadow_pass;
+static bool g_minimized = false;
+static POINT g_last_mouse = { 0, 0 };
 
-// Scene is now a singleton - access via Scene::Instance()
-static EditorCamera gEditorCam;
+// Scene is now a singleton - access via CCScene::Instance()
+static EditorCamera g_editor_cam;
 
 // -----------------------------------------------------------------------------
 // WndProc
@@ -54,34 +54,34 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
     case WM_SIZE:
     {
-        if (wParam == SIZE_MINIMIZED) { gMinimized = true; return 0; }
-        gMinimized = false;
+        if (wParam == SIZE_MINIMIZED) { g_minimized = true; return 0; }
+        g_minimized = false;
         const UINT newW = LOWORD(lParam);
         const UINT newH = HIWORD(lParam);
-        if (DX11Context::Instance().GetSwapChain()) {
-            DX11Context::Instance().OnResize(newW, newH);
+        if (CDX11Context::Instance().GetSwapChain()) {
+            CDX11Context::Instance().OnResize(newW, newH);
         }
         return 0;
     }
     case WM_RBUTTONDOWN:
-        gMainPass.OnRButton(true);
+        g_main_pass.OnRButton(true);
         SetCapture(hWnd);
         return 0;
     case WM_RBUTTONUP:
-        gMainPass.OnRButton(false);
+        g_main_pass.OnRButton(false);
         ReleaseCapture();
         return 0;
     case WM_MOUSEMOVE:
         if (wParam & MK_RBUTTON) {
             POINT p{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-            int dx = p.x - gLastMouse.x;
-            int dy = p.y - gLastMouse.y;
-            gMainPass.OnMouseDelta(dx, dy);
-            gLastMouse = p;
+            int dx = p.x - g_last_mouse.x;
+            int dy = p.y - g_last_mouse.y;
+            g_main_pass.OnMouseDelta(dx, dy);
+            g_last_mouse = p;
         }
         else {
-            gLastMouse.x = GET_X_LPARAM(lParam);
-            gLastMouse.y = GET_Y_LPARAM(lParam);
+            g_last_mouse.x = GET_X_LPARAM(lParam);
+            g_last_mouse.y = GET_Y_LPARAM(lParam);
         }
         return 0;
     case WM_DESTROY:
@@ -178,7 +178,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UpdateWindow(hwnd);
 
     // 2) DX11 初始化（仅DX）
-    if (!DX11Context::Instance().Initialize(hwnd, initW, initH)) {
+    if (!CDX11Context::Instance().Initialize(hwnd, initW, initH)) {
         std::cerr << "ERROR: Failed to initialize DX11 context!" << std::endl;
         exitCode = -2;
         goto cleanup;
@@ -192,17 +192,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(
-        DX11Context::Instance().GetDevice(),
-        DX11Context::Instance().GetContext()
+        CDX11Context::Instance().GetDevice(),
+        CDX11Context::Instance().GetContext()
     );
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // 如不需要可去掉
     imguiInitialized = true;
 
-    gEditorCam.aspect = (float)initW / (float)initH;     // 初始宽高比
+    g_editor_cam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
     // 4) Scene initialization (includes Skybox and IBL auto-generation)
     std::cout << "Initializing Scene (loading skybox and generating IBL)..." << std::endl;
-    if (!Scene::Instance().Initialize("skybox/afrikaans_church_exterior_1k.hdr", 512))
+    if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k.hdr", 512))
     {
         std::cerr << "ERROR: Failed to initialize Scene!" << std::endl;
         exitCode = -3;
@@ -211,7 +211,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     sceneInitialized = true;
 
     // 5) MainPass and ShadowPass initialization
-    if (!gMainPass.Initialize())
+    if (!g_main_pass.Initialize())
     {
         std::cerr << "ERROR: Failed to initialize MainPass!" << std::endl;
         exitCode = -4;
@@ -219,7 +219,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
     mainPassInitialized = true;
 
-    if (!gShadowPass.Initialize())
+    if (!g_shadow_pass.Initialize())
     {
         std::cerr << "ERROR: Failed to initialize ShadowPass!" << std::endl;
         exitCode = -5;
@@ -232,29 +232,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     //     // ensure Assets cwd (already attempted earlier)
     //     // Create ground plane
     //     auto* g0 = gScene.world.Create("Ground");
-    //     auto* t0 = g0->AddComponent<Transform>();
+    //     auto* t0 = g0->AddComponent<STransform>();
     //     t0->scale = { 10,0.1,10 };
-    //     auto* m0 = g0->AddComponent<MeshRenderer>();
+    //     auto* m0 = g0->AddComponent<SMeshRenderer>();
     //     m0->path = "mesh/cube.obj";
 
     //     // Create cube
     //     auto* g1 = gScene.world.Create("Cube");
-    //     auto* t1 = g1->AddComponent<Transform>();
+    //     auto* t1 = g1->AddComponent<STransform>();
     //     t1->position = { 0,2.5f,0 };
-    //     auto* m1 = g1->AddComponent<MeshRenderer>();
+    //     auto* m1 = g1->AddComponent<SMeshRenderer>();
     //     m1->path = "mesh/sphere.obj";
 
     //     // Create bunny (glTF)
     //     auto* g2 = gScene.world.Create("Bunny");
-    //     auto* t2 = g2->AddComponent<Transform>();
+    //     auto* t2 = g2->AddComponent<STransform>();
     //     t2->position = { 1.5f,0,0 };
     //     t2->scale = { 0.8f,0.8f,0.8f };
-    //     auto* m2 = g2->AddComponent<MeshRenderer>();
+    //     auto* m2 = g2->AddComponent<SMeshRenderer>();
     //     m2->path = "bunny-pbr-gltf/scene_small.gltf";
-    //     Scene::Instance().SetSelected(1); // select cube by default
+    //     CScene::Instance().SetSelected(1); // select cube by default
     // }
     {
-        SceneSerializer::LoadScene(Scene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
+        CSceneSerializer::LoadScene(CScene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
     }
     // 6) 主循环
     QueryPerformanceFrequency(&freq);
@@ -267,7 +267,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             DispatchMessage(&msg);
             continue;
         }
-        if (gMinimized) { Sleep(16); continue; }
+        if (g_minimized) { Sleep(16); continue; }
 
         // delta time
         QueryPerformanceCounter(&curr);
@@ -280,35 +280,35 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         ImGui::NewFrame();
 
         // 5.2 绑定 backbuffer + 清屏
-        auto& ctx = DX11Context::Instance();
+        auto& ctx = CDX11Context::Instance();
 
         // 深度清除交给 Renderer::Render 内部处理（避免与 UI 冲突）
 
         // 5.3 渲染 3D 场景
         ImVec2 vpSize = Panels::GetViewportLastSize();
-        UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : DX11Context::Instance().GetWidth();
-        UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : DX11Context::Instance().GetHeight();
+        UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : CDX11Context::Instance().GetWidth();
+        UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : CDX11Context::Instance().GetHeight();
 
         // Update camera matrices first (needed for tight frustum fitting)
-        gMainPass.UpdateCamera(vpW, vpH, dt);
+        g_main_pass.UpdateCamera(vpW, vpH, dt);
 
         // Collect DirectionalLight from scene
-        DirectionalLight* dirLight = nullptr;
-        for (auto& objPtr : Scene::Instance().GetWorld().Objects()) {
-            dirLight = objPtr->GetComponent<DirectionalLight>();
+        SDirectionalLight* dirLight = nullptr;
+        for (auto& objPtr : CScene::Instance().GetWorld().Objects()) {
+            dirLight = objPtr->GetComponent<SDirectionalLight>();
             if (dirLight) break;
         }
 
         // Shadow Pass (render shadow map if DirectionalLight exists)
         // Uses tight frustum fitting based on camera frustum
         if (dirLight) {
-            gShadowPass.Render(Scene::Instance(), dirLight,
-                              gMainPass.GetCameraViewMatrix(),
-                              gMainPass.GetCameraProjMatrix());
+            g_shadow_pass.Render(CScene::Instance(), dirLight,
+                              g_main_pass.GetCameraViewMatrix(),
+                              g_main_pass.GetCameraProjMatrix());
         }
 
         // Main Pass (use shadow output bundle)
-        gMainPass.Render(Scene::Instance(), vpW, vpH, dt, &gShadowPass.GetOutput());
+        g_main_pass.Render(CScene::Instance(), vpW, vpH, dt, &g_shadow_pass.GetOutput());
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
         ID3D11DepthStencilView* dsv = ctx.GetDSV();
@@ -325,13 +325,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // main.cpp  —— 每帧渲染里，渲染完 3D 场景之后，提交 ImGui 之前
         {
             bool dockOpen = true;
-            Panels::DrawDockspace(&dockOpen, Scene::Instance(), &gMainPass); // DockSpace 容器
-            Panels::DrawHierarchy(Scene::Instance());            // 层级面板
-            Panels::DrawInspector(Scene::Instance());            // 检视面板
-            Panels::DrawViewport(Scene::Instance(), gEditorCam,
-                gMainPass.GetOffscreenSRV(),
-                gMainPass.GetOffscreenWidth(),
-                gMainPass.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
+            Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_main_pass); // DockSpace 容器
+            Panels::DrawHierarchy(CScene::Instance());            // 层级面板
+            Panels::DrawInspector(CScene::Instance());            // 检视面板
+            Panels::DrawViewport(CScene::Instance(), g_editor_cam,
+                g_main_pass.GetOffscreenSRV(),
+                g_main_pass.GetOffscreenWidth(),
+                g_main_pass.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
             Panels::DrawIrradianceDebug();   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment/BRDF LUT 四个 Tab）
         }
 
@@ -352,17 +352,17 @@ cleanup:
 
     if (shadowPassInitialized) {
         std::cout << "Shutting down ShadowPass..." << std::endl;
-        gShadowPass.Shutdown();
+        g_shadow_pass.Shutdown();
     }
 
     if (mainPassInitialized) {
         std::cout << "Shutting down MainPass..." << std::endl;
-        gMainPass.Shutdown();
+        g_main_pass.Shutdown();
     }
 
     if (sceneInitialized) {
         std::cout << "Shutting down Scene..." << std::endl;
-        Scene::Instance().Shutdown();
+        CScene::Instance().Shutdown();
     }
 
     if (imguiInitialized) {
@@ -374,7 +374,7 @@ cleanup:
 
     if (dx11Initialized) {
         std::cout << "Shutting down DX11..." << std::endl;
-        DX11Context::Instance().Shutdown();
+        CDX11Context::Instance().Shutdown();
     }
 
     std::cout << "Shutdown complete." << std::endl;

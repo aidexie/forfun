@@ -20,7 +20,7 @@ static inline VIdx parseVIdx(const std::string& s) {
 static inline void trim(std::string& s){ size_t a=0; while (a<s.size() && isspace((unsigned char)s[a])) ++a; size_t b=s.size(); while (b>a && isspace((unsigned char)s[b-1])) --b; s=s.substr(a,b-a); }
 static inline int fix(int idx, int n){ return idx>0? idx-1 : (idx<0? n+idx : -1); }
 
-bool LoadOBJ_PNT(const std::string& path, MeshCPU_PNT& out, bool flipZ, bool flipWinding)
+bool LoadOBJ_PNT(const std::string& path, SMeshCPU_PNT& out, bool flipZ, bool flipWinding)
 {
     std::ifstream in(path); if (!in) return false;
     std::vector<float> P; std::vector<float> N; std::vector<float> T;
@@ -47,7 +47,7 @@ bool LoadOBJ_PNT(const std::string& path, MeshCPU_PNT& out, bool flipZ, bool fli
                     int iv=fix(tri[t].v,nv), it=fix(tri[t].vt,nt), in=fix(tri[t].vn,nn);
                     Key key{iv,it,in}; auto itK=map.find(key); uint32_t oi;
                     if (itK==map.end()){
-                        VertexPNT v{};
+                        SVertexPNT v{};
                         v.px=P[iv*3+0]; v.py=P[iv*3+1]; v.pz=P[iv*3+2];
                         if (in>=0){ v.nx=N[in*3+0]; v.ny=N[in*3+1]; v.nz=N[in*3+2]; }
                         else { v.nx=0; v.ny=1; v.nz=0; }
@@ -87,7 +87,7 @@ bool LoadOBJ_PNT(const std::string& path, MeshCPU_PNT& out, bool flipZ, bool fli
     return !out.vertices.empty() && !out.indices.empty();
 }
 
-static void ComputeBBox(const MeshCPU_PNT& m, float mn[3], float mx[3]){
+static void ComputeBBox(const SMeshCPU_PNT& m, float mn[3], float mx[3]){
     mn[0]=mn[1]=mn[2]= std::numeric_limits<float>::infinity();
     mx[0]=mx[1]=mx[2]=-std::numeric_limits<float>::infinity();
     for (auto& v: m.vertices){
@@ -95,7 +95,7 @@ static void ComputeBBox(const MeshCPU_PNT& m, float mn[3], float mx[3]){
         mx[0]=std::max(mx[0],v.px); mx[1]=std::max(mx[1],v.py); mx[2]=std::max(mx[2],v.pz);
     }
 }
-void RecenterAndScale(MeshCPU_PNT& m, float targetDiag){
+void RecenterAndScale(SMeshCPU_PNT& m, float targetDiag){
     float mn[3],mx[3]; ComputeBBox(m,mn,mx);
     float cx=0.5f*(mn[0]+mx[0]), cy=0.5f*(mn[1]+mx[1]), cz=0.5f*(mn[2]+mx[2]);
     float dx=mx[0]-mn[0], dy=mx[1]-mn[1], dz=mx[2]-mn[2];

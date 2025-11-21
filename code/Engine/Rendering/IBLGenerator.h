@@ -6,10 +6,10 @@
 
 // IBL (Image-Based Lighting) Generator
 // Generates diffuse irradiance map and specular prefiltered environment map
-class IBLGenerator {
+class CIBLGenerator {
 public:
-    IBLGenerator() = default;
-    ~IBLGenerator() = default;
+    CIBLGenerator() = default;
+    ~CIBLGenerator() = default;
 
     // Initialize generator resources
     bool Initialize();

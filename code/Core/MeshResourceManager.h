@@ -6,16 +6,16 @@
 #include <vector>
 
 // Forward declarations
-struct MeshCPU_PNT;
-struct GltfMeshCPU;
+struct SMeshCPU_PNT;
+struct SGltfMeshCPU;
 struct ID3D11Device;
 struct ID3D11ShaderResourceView;
 
 // Manages GPU mesh resources with path-based caching and automatic deduplication
-class MeshResourceManager {
+class CMeshResourceManager {
 public:
     // Get singleton instance
-    static MeshResourceManager& Instance();
+    static CMeshResourceManager& Instance();
 
     // Load or retrieve cached mesh resource by path
     // Returns nullptr on failure
@@ -32,21 +32,21 @@ public:
     void ClearCache();
 
 private:
-    MeshResourceManager() = default;
-    ~MeshResourceManager() = default;
+    CMeshResourceManager() = default;
+    ~CMeshResourceManager() = default;
 
     // Non-copyable, non-movable (singleton)
-    MeshResourceManager(const MeshResourceManager&) = delete;
-    MeshResourceManager& operator=(const MeshResourceManager&) = delete;
+    CMeshResourceManager(const CMeshResourceManager&) = delete;
+    CMeshResourceManager& operator=(const CMeshResourceManager&) = delete;
 
     // Upload CPU mesh to GPU
     std::shared_ptr<GpuMeshResource> UploadMesh(
-        const MeshCPU_PNT& cpu
+        const SMeshCPU_PNT& cpu
     );
 
     // Upload glTF mesh to GPU (with textures)
     std::shared_ptr<GpuMeshResource> UploadGltfMesh(
-        const GltfMeshCPU& gltfMesh
+        const SGltfMeshCPU& gltfMesh
     );
 
 private:

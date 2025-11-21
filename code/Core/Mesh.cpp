@@ -3,7 +3,7 @@
 #include <DirectXMath.h>
 using namespace DirectX;
 
-void ComputeTangents(std::vector<VertexPNT>& vtx, const std::vector<uint32_t>& idx)
+void ComputeTangents(std::vector<SVertexPNT>& vtx, const std::vector<uint32_t>& idx)
 {
     std::vector<XMFLOAT3> tan(vtx.size(), {0,0,0});
     std::vector<XMFLOAT3> bit(vtx.size(), {0,0,0});

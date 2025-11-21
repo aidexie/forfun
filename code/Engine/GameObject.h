@@ -5,15 +5,15 @@
 #include <type_traits>
 #include "Component.h"
 
-class GameObject {
+class CGameObject {
 public:
-    explicit GameObject(std::string name): m_name(std::move(name)) {}
+    explicit CGameObject(std::string name): m_name(std::move(name)) {}
     const std::string& GetName() const { return m_name; }
     void SetName(const std::string& n){ m_name = n; }
 
     template<class T, class...Args>
     T* AddComponent(Args&&...args){
-        static_assert(std::is_base_of<Component,T>::value, "T must be Component");
+        static_assert(std::is_base_of<CComponent,T>::value, "T must be CComponent");
         auto up = std::make_unique<T>(std::forward<Args>(args)...);
         T* raw = up.get();
         raw->SetOwner(this);
@@ -47,5 +47,7 @@ public:
 
 private:
     std::string m_name;
-    std::vector<std::unique_ptr<Component>> m_components;
+    std::vector<std::unique_ptr<CComponent>> m_components;
 };
+
+

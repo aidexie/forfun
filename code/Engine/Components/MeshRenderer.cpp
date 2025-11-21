@@ -3,15 +3,20 @@
 #include "Core/MeshResourceManager.h"
 #include "Core/GpuMeshResource.h"
 #include <d3d11.h>
+#include <iostream>
 
-bool MeshRenderer::EnsureUploaded() {
+bool SMeshRenderer::EnsureUploaded() {
     if (!meshes.empty()) return true;
 
     // Empty path means no mesh
     if (path.empty()) return false;
 
     // Load or retrieve cached resources via MeshResourceManager
-    meshes = MeshResourceManager::Instance().GetOrLoad(path);
+    meshes = CMeshResourceManager::Instance().GetOrLoad(path);
+
+    if (meshes.empty()) {
+        std::cerr << "ERROR: Failed to load mesh from: " << path << std::endl;
+    }
 
     return !meshes.empty();
 }

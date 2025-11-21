@@ -11,8 +11,8 @@ struct FullscreenVertex {
     float u, v;       // UV
 };
 
-bool PostProcessPass::Initialize() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+bool CPostProcessPass::Initialize() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return false;
 
     createFullscreenQuad();
@@ -51,7 +51,7 @@ bool PostProcessPass::Initialize() {
     return true;
 }
 
-void PostProcessPass::Shutdown() {
+void CPostProcessPass::Shutdown() {
     m_vs.Reset();
     m_ps.Reset();
     m_inputLayout.Reset();
@@ -61,11 +61,11 @@ void PostProcessPass::Shutdown() {
     m_depthState.Reset();
 }
 
-void PostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
+void CPostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
                              ID3D11RenderTargetView* ldrOutput,
                              UINT width, UINT height,
                              float exposure) {
-    ID3D11DeviceContext* context = DX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context || !hdrInput || !ldrOutput) return;
 
     // Update constant buffer with exposure
@@ -114,8 +114,8 @@ void PostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
     context->OMSetRenderTargets(0, nullptr, nullptr);
 }
 
-void PostProcessPass::createFullscreenQuad() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CPostProcessPass::createFullscreenQuad() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     // Fullscreen quad in NDC space (triangle strip)
@@ -134,8 +134,8 @@ void PostProcessPass::createFullscreenQuad() {
     device->CreateBuffer(&bd, &initData, m_vertexBuffer.GetAddressOf());
 }
 
-void PostProcessPass::createShaders() {
-    ID3D11Device* device = DX11Context::Instance().GetDevice();
+void CPostProcessPass::createShaders() {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
     // Vertex shader: Pass-through with UV
