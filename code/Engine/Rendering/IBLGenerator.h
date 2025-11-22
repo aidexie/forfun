@@ -15,6 +15,11 @@ public:
     bool Initialize();
     void Shutdown();
 
+    // Load pre-baked IBL textures from KTX2 files
+    bool LoadIrradianceFromKTX2(const std::string& ktx2Path);
+    bool LoadPreFilteredFromKTX2(const std::string& ktx2Path);
+    bool LoadBrdfLutFromKTX2(const std::string& ktx2Path);
+
     // Generate diffuse irradiance map from environment cubemap
     // Returns the generated irradiance map SRV
     ID3D11ShaderResourceView* GenerateIrradianceMap(
@@ -47,11 +52,20 @@ public:
     // Save the generated irradiance map to DDS file
     bool SaveIrradianceMapToDDS(const std::string& filepath);
 
+    // Save the generated irradiance map to HDR files (Radiance RGBE format)
+    // Creates 6 files: filepath_posX.hdr, filepath_negX.hdr, etc.
+    bool SaveIrradianceMapToHDR(const std::string& filepath);
+
     // Debug: Get individual face SRVs for visualization (creates on-demand)
     ID3D11ShaderResourceView* GetIrradianceFaceSRV(int faceIndex);
 
     // Debug: Get pre-filtered map face SRV for specific mip level
     ID3D11ShaderResourceView* GetPreFilteredFaceSRV(int faceIndex, int mipLevel);
+
+    // Get internal textures for export
+    ID3D11Texture2D* GetIrradianceTexture() const { return m_irradianceTexture.Get(); }
+    ID3D11Texture2D* GetPreFilteredTexture() const { return m_preFilteredTexture.Get(); }
+    ID3D11Texture2D* GetBrdfLutTexture() const { return m_brdfLutTexture.Get(); }
 
 private:
     void createFullscreenQuad();

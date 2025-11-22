@@ -1,72 +1,62 @@
 ﻿#include "Panels.h"
 #include "imgui.h"
+#include "ImGuizmo.h"
 #include "Camera.h"
 #include "Offscreen.h"
 #include "DX11Context.h"
+#include "Scene.h"
+#include "GameObject.h"
+#include "Components/Transform.h"
+#include "Rendering/MainPass.h"
+#include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <wrl.h>
 
 using Microsoft::WRL::ComPtr;
-
-namespace {
-    struct Pipeline {
-        bool inited=false;
-        ComPtr<ID3D11VertexShader> vs;
-        ComPtr<ID3D11PixelShader>  ps;
-        ComPtr<ID3D11InputLayout>  il;
-        ComPtr<ID3D11Buffer>       vb;
-        ComPtr<ID3D11Buffer>       cb; // time
-    } g;
-
-    const char* kVS = R"(
-cbuffer CB : register(b0) { float t; float3 pad; };
-struct VSIn { float2 pos:POSITION; float3 col:COLOR; };
-struct VSOut{ float4 pos:SV_POSITION; float3 col:COLOR; };
-VSOut main(VSIn v){
-    float c = cos(t), s = sin(t);
-    float2 p = float2( v.pos.x*c - v.pos.y*s, v.pos.x*s + v.pos.y*c );
-    VSOut o; o.pos=float4(p,0,1); o.col=v.col; return o;
-}
-)";
-
-    const char* kPS = R"(
-struct PSIn{ float4 pos:SV_POSITION; float3 col:COLOR; };
-float4 main(PSIn i):SV_Target{ return float4(i.col,1); }
-)";
-
-    void EnsurePipeline(ID3D11Device* dev) {
-        if (g.inited) return;
-        ComPtr<ID3DBlob> vsb, psb, err;
-        D3DCompile(kVS, strlen(kVS), nullptr, nullptr, nullptr, "main", "vs_5_0", 0, 0, vsb.GetAddressOf(), err.GetAddressOf());
-        D3DCompile(kPS, strlen(kPS), nullptr, nullptr, nullptr, "main", "ps_5_0", 0, 0, psb.GetAddressOf(), err.GetAddressOf());
-        dev->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, g.vs.GetAddressOf());
-        dev->CreatePixelShader (psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, g.ps.GetAddressOf());
-
-        D3D11_INPUT_ELEMENT_DESC il[] = {
-            {"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,   0, 0,  D3D11_INPUT_PER_VERTEX_DATA,0},
-            {"COLOR",   0,DXGI_FORMAT_R32G32B32_FLOAT,0, 8,  D3D11_INPUT_PER_VERTEX_DATA,0},
-        };
-        dev->CreateInputLayout(il, 2, vsb->GetBufferPointer(), vsb->GetBufferSize(), g.il.GetAddressOf());
-
-        struct V { float x,y; float r,g,b; };
-        V verts[3] = {
-            { 0.0f,  0.6f, 1,0,0},
-            {-0.6f, -0.6f, 0,1,0},
-            { 0.6f, -0.6f, 0,0,1},
-        };
-        D3D11_BUFFER_DESC bd{}; bd.BindFlags=D3D11_BIND_VERTEX_BUFFER; bd.ByteWidth=sizeof(verts); bd.Usage=D3D11_USAGE_DEFAULT;
-        D3D11_SUBRESOURCE_DATA sd{verts};
-        dev->CreateBuffer(&bd, &sd, g.vb.GetAddressOf());
-
-        bd = {}; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.ByteWidth = 16; bd.Usage=D3D11_USAGE_DEFAULT;
-        dev->CreateBuffer(&bd, nullptr, g.cb.GetAddressOf());
-
-        g.inited = true;
-    }
-}
+using namespace DirectX;
 
 // ViewportPanel.cpp  —— file-scope statics
 static ImVec2 s_lastAvail = ImVec2(0, 0);
+
+// Transform Gizmo state
+static ImGuizmo::OPERATION s_gizmoOperation = ImGuizmo::TRANSLATE;
+static ImGuizmo::MODE s_gizmoMode = ImGuizmo::WORLD;
+static bool s_useSnap = false;
+static float s_snapTranslate[3] = {1.0f, 1.0f, 1.0f};
+static float s_snapRotate = 15.0f;  // degrees
+static float s_snapScale = 0.5f;
+
+// Helper: Ray-AABB intersection test
+static bool RayIntersectsAABB(
+    const XMFLOAT3& rayOrigin,
+    const XMFLOAT3& rayDir,
+    const XMFLOAT3& aabbMin,
+    const XMFLOAT3& aabbMax,
+    float& outDistance)
+{
+    XMVECTOR origin = XMLoadFloat3(&rayOrigin);
+    XMVECTOR dir = XMLoadFloat3(&rayDir);
+    XMVECTOR boxMin = XMLoadFloat3(&aabbMin);
+    XMVECTOR boxMax = XMLoadFloat3(&aabbMax);
+
+    // Compute intersection intervals
+    XMVECTOR invDir = XMVectorReciprocal(dir);
+    XMVECTOR t1 = XMVectorMultiply(XMVectorSubtract(boxMin, origin), invDir);
+    XMVECTOR t2 = XMVectorMultiply(XMVectorSubtract(boxMax, origin), invDir);
+
+    XMVECTOR tMin = XMVectorMin(t1, t2);
+    XMVECTOR tMax = XMVectorMax(t1, t2);
+
+    float tNear = XMVectorGetX(XMVectorMax(XMVectorMax(tMin, XMVectorSplatY(tMin)), XMVectorSplatZ(tMin)));
+    float tFar = XMVectorGetX(XMVectorMin(XMVectorMin(tMax, XMVectorSplatY(tMax)), XMVectorSplatZ(tMax)));
+
+    if (tNear > tFar || tFar < 0.0f) {
+        return false;  // No intersection
+    }
+
+    outDistance = (tNear < 0.0f) ? tFar : tNear;
+    return true;
+}
 
 ImVec2 Panels::GetViewportLastSize() {
     return s_lastAvail;
@@ -74,26 +64,317 @@ ImVec2 Panels::GetViewportLastSize() {
 
 void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
     ID3D11ShaderResourceView* srv,
-    size_t srcWidth, size_t srcHeight)
+    size_t srcWidth, size_t srcHeight,
+    CMainPass* mainPass)
 {
     ImGui::Begin("Viewport");
 
-    // Measure current available size and remember it for the next frame’s render pass
+    // ============================================
+    // Keyboard Shortcuts for Gizmo Modes
+    // ============================================
+    if (ImGui::IsWindowFocused() || ImGui::IsWindowHovered()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) {
+            s_gizmoOperation = ImGuizmo::TRANSLATE;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) {
+            s_gizmoOperation = ImGuizmo::ROTATE;
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+            s_gizmoOperation = ImGuizmo::SCALE;
+        }
+    }
+
+    // ============================================
+    // Gizmo Toolbar
+    // ============================================
+
+    // Gizmo operation buttons (with highlight for active mode)
+    bool isTranslate = (s_gizmoOperation == ImGuizmo::TRANSLATE);
+    bool isRotate = (s_gizmoOperation == ImGuizmo::ROTATE);
+    bool isScale = (s_gizmoOperation == ImGuizmo::SCALE);
+
+    if (isTranslate) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.4f, 0.6f, 0.4f, 1.0f));
+    if (ImGui::Button("Translate (W)", ImVec2(100, 0))) {
+        s_gizmoOperation = ImGuizmo::TRANSLATE;
+    }
+    if (isTranslate) ImGui::PopStyleColor();
+    ImGui::SameLine();
+
+    if (isRotate) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.4f, 0.6f, 0.4f, 1.0f));
+    if (ImGui::Button("Rotate (E)", ImVec2(100, 0))) {
+        s_gizmoOperation = ImGuizmo::ROTATE;
+    }
+    if (isRotate) ImGui::PopStyleColor();
+    ImGui::SameLine();
+
+    if (isScale) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.4f, 0.6f, 0.4f, 1.0f));
+    if (ImGui::Button("Scale (R)", ImVec2(100, 0))) {
+        s_gizmoOperation = ImGuizmo::SCALE;
+    }
+    if (isScale) ImGui::PopStyleColor();
+    ImGui::SameLine();
+
+    ImGui::Separator();
+    ImGui::SameLine();
+
+    // Local/World toggle
+    const char* modeText = (s_gizmoMode == ImGuizmo::WORLD) ? "World" : "Local";
+    if (ImGui::Button(modeText, ImVec2(60, 0))) {
+        s_gizmoMode = (s_gizmoMode == ImGuizmo::WORLD) ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
+    }
+    ImGui::SameLine();
+
+    // Snapping toggle
+    ImGui::Checkbox("Snap", &s_useSnap);
+
+    // Snap settings (when enabled)
+    if (s_useSnap) {
+        ImGui::SameLine();
+        ImGui::PushItemWidth(60);
+
+        if (s_gizmoOperation == ImGuizmo::TRANSLATE) {
+            // For translate, show unified snap value
+            if (ImGui::DragFloat("##snapTrans", &s_snapTranslate[0], 0.1f, 0.01f, 10.0f, "%.2f")) {
+                // Apply to all axes
+                s_snapTranslate[1] = s_snapTranslate[0];
+                s_snapTranslate[2] = s_snapTranslate[0];
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Translate snap (meters)");
+        }
+        else if (s_gizmoOperation == ImGuizmo::ROTATE) {
+            // For rotate, show angle snap
+            ImGui::DragFloat("##snapRot", &s_snapRotate, 1.0f, 1.0f, 90.0f, "%.0f°");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Rotation snap (degrees)");
+        }
+        else if (s_gizmoOperation == ImGuizmo::SCALE) {
+            // For scale, show scale snap
+            ImGui::DragFloat("##snapScale", &s_snapScale, 0.05f, 0.01f, 2.0f, "%.2f");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Scale snap");
+        }
+
+        ImGui::PopItemWidth();
+    }
+
+    ImGui::Separator();
+
+    // Measure current available size and remember it for the next frame's render pass
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.x < 1.f) avail.x = 1.f;
     if (avail.y < 1.f) avail.y = 1.f;
     s_lastAvail = avail;
 
-    // Keep editor camera’s aspect in sync with the panel (optional)
+    // Keep editor camera's aspect in sync with the panel (optional)
     editorCam.aspect = (avail.y > 0.f) ? (avail.x / avail.y) : editorCam.aspect;
 
     // Draw the provided texture (no ownership). If null, show placeholder.
+    ImVec2 imagePos = ImGui::GetCursorScreenPos();
+
     if (srv && srcWidth > 0 && srcHeight > 0) {
-        // (Optional) Fit preserving aspect; simplest is to just fill 'avail':
         ImGui::Image((ImTextureID)srv, avail, ImVec2(0, 0), ImVec2(1, 1));
     }
     else {
         ImGui::TextUnformatted("No viewport image.");
+    }
+
+    // ============================================
+    // Custom View Orientation Gizmo (Top-Right Corner)
+    // ============================================
+    if (mainPass) {
+        // Gizmo properties
+        const float gizmoSize = 120.0f;
+        const ImVec2 gizmoPos(imagePos.x + avail.x - gizmoSize - 15, imagePos.y + 15);
+        const ImVec2 center(gizmoPos.x + gizmoSize * 0.5f, gizmoPos.y + gizmoSize * 0.5f);
+        const float axisLength = gizmoSize * 0.35f;
+
+        // Get camera view matrix and extract rotation
+        XMMATRIX viewMat = mainPass->GetCameraViewMatrix();
+        XMFLOAT4X4 view;
+        XMStoreFloat4x4(&view, viewMat);
+
+        // Extract world axes in camera space from view matrix
+        // View matrix rotates world to camera, so columns give us world axes directions
+        XMFLOAT3 worldX(view._11, view._21, view._31);  // World X axis in camera space
+        XMFLOAT3 worldY(view._12, view._22, view._32);  // World Y axis in camera space
+        // In DirectX left-handed system, camera looks down +Z, so we need to flip the Z axis
+        XMFLOAT3 worldZ(-view._13, -view._23, -view._33);  // World Z axis in camera space (flipped)
+
+        // Get draw list
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        // Draw background circle
+        drawList->AddCircleFilled(center, gizmoSize * 0.5f, IM_COL32(40, 40, 40, 200), 32);
+        drawList->AddCircle(center, gizmoSize * 0.5f, IM_COL32(80, 80, 80, 255), 32, 2.0f);
+
+        // Helper lambda to draw axis line with label
+        auto DrawAxis = [&](const XMFLOAT3& dir, const char* label, ImU32 colorPos, ImU32 colorNeg) {
+            // Project 3D direction to 2D screen space
+            ImVec2 endPos(center.x + dir.x * axisLength, center.y - dir.y * axisLength);
+            ImVec2 endNeg(center.x - dir.x * axisLength, center.y + dir.y * axisLength);
+
+            // Determine if axis is facing camera (for label visibility only)
+            // In camera space, forward is (0,0,1), so just use dir.z
+            float dotPos = dir.z;
+
+            // Always draw negative direction (thinner, gray)
+            drawList->AddLine(center, endNeg, colorNeg, 3.0f);
+
+            // Always draw positive direction (thicker, colored)
+            drawList->AddLine(center, endPos, colorPos, 5.0f);
+
+            // Draw arrowhead for positive direction
+            XMFLOAT2 arrowDir(dir.x, -dir.y);
+            float len = sqrtf(arrowDir.x * arrowDir.x + arrowDir.y * arrowDir.y);
+            if (len > 0.001f) {
+                arrowDir.x /= len;
+                arrowDir.y /= len;
+            }
+            XMFLOAT2 arrowPerp(-arrowDir.y, arrowDir.x);
+
+            ImVec2 tip = endPos;
+            ImVec2 base1(endPos.x - arrowDir.x * 8 + arrowPerp.x * 4,
+                         endPos.y - arrowDir.y * 8 + arrowPerp.y * 4);
+            ImVec2 base2(endPos.x - arrowDir.x * 8 - arrowPerp.x * 4,
+                         endPos.y - arrowDir.y * 8 - arrowPerp.y * 4);
+            drawList->AddTriangleFilled(tip, base1, base2, colorPos);
+
+            // Draw label at the end (only if facing camera)
+            if (dotPos > 0.3f) {
+                ImVec2 labelPos(endPos.x + 8, endPos.y - 8);
+                drawList->AddText(labelPos, colorPos, label);
+            }
+        };
+
+        // Draw axes (draw order: farthest to nearest for proper occlusion)
+        // Calculate depth for each axis (use Z component in camera space as depth)
+        float depthX = worldX.z;
+        float depthY = worldY.z;
+        float depthZ = worldZ.z;
+
+        // Sort and draw (simple bubble sort for 3 items)
+        struct AxisData { float depth; int index; };
+        AxisData axes[3] = {{depthX, 0}, {depthY, 1}, {depthZ, 2}};
+
+        for (int i = 0; i < 2; i++) {
+            for (int j = 0; j < 2 - i; j++) {
+                if (axes[j].depth > axes[j + 1].depth) {
+                    AxisData temp = axes[j];
+                    axes[j] = axes[j + 1];
+                    axes[j + 1] = temp;
+                }
+            }
+        }
+
+        // Draw in depth order (back to front)
+        // Negative directions all use same gray color for clarity
+        const ImU32 negativeColor = IM_COL32(120, 120, 120, 180);
+
+        for (int i = 0; i < 3; i++) {
+            if (axes[i].index == 0) {
+                // X axis (Red)
+                DrawAxis(worldX, "X", IM_COL32(255, 60, 60, 255), negativeColor);
+            } else if (axes[i].index == 1) {
+                // Y axis (Green)
+                DrawAxis(worldY, "Y", IM_COL32(100, 255, 100, 255), negativeColor);
+            } else {
+                // Z axis (Blue)
+                DrawAxis(worldZ, "Z", IM_COL32(80, 150, 255, 255), negativeColor);
+            }
+        }
+
+        // Draw center dot
+        drawList->AddCircleFilled(center, 4.0f, IM_COL32(255, 255, 255, 255));
+    }
+
+    // ============================================
+    // Transform Gizmo (ImGuizmo)
+    // ============================================
+    if (mainPass) {
+        CGameObject* selectedObj = scene.GetSelectedObject();
+
+        // Enable/disable gizmo based on selection
+        ImGuizmo::Enable(selectedObj != nullptr);
+
+        if (selectedObj) {
+            STransform* transform = selectedObj->GetComponent<STransform>();
+            if (transform) {
+                // Set ImGuizmo to draw in the viewport window
+                ImGuizmo::SetOrthographic(false);
+                ImGuizmo::SetDrawlist();
+
+                // Get viewport rect
+                ImGuizmo::SetRect(imagePos.x, imagePos.y, avail.x, avail.y);
+
+                // Get camera matrices
+                XMMATRIX view = mainPass->GetCameraViewMatrix();
+                XMMATRIX proj = mainPass->GetCameraProjMatrix();
+
+                // Convert to float arrays (ImGuizmo expects row-major float[16])
+                XMFLOAT4X4 viewF, projF;
+                XMStoreFloat4x4(&viewF, view);
+                XMStoreFloat4x4(&projF, proj);
+
+                // Get object world matrix
+                XMMATRIX worldMat = transform->WorldMatrix();
+                XMFLOAT4X4 worldF;
+                XMStoreFloat4x4(&worldF, worldMat);
+
+                // Prepare snap values
+                float* snapValues = nullptr;
+                if (s_useSnap) {
+                    if (s_gizmoOperation == ImGuizmo::TRANSLATE) {
+                        snapValues = s_snapTranslate;
+                    } else if (s_gizmoOperation == ImGuizmo::ROTATE) {
+                        snapValues = &s_snapRotate;
+                    } else if (s_gizmoOperation == ImGuizmo::SCALE) {
+                        snapValues = &s_snapScale;
+                    }
+                }
+
+                // Get delta matrix for incremental updates
+                XMFLOAT4X4 deltaMatF;
+                bool manipulated = ImGuizmo::Manipulate(
+                    &viewF._11, &projF._11,
+                    s_gizmoOperation, s_gizmoMode,
+                    &worldF._11,
+                    &deltaMatF._11,  // Get delta matrix
+                    snapValues);
+
+                if (manipulated) {
+                    // Decompose ImGuizmo's world matrix to extract T, R, S
+                    XMMATRIX newWorld = XMLoadFloat4x4(&worldF);
+                    XMVECTOR scaleVec, rotationQuat, translationVec;
+
+                    if (XMMatrixDecompose(&scaleVec, &rotationQuat, &translationVec, newWorld)) {
+                        // Update position and scale
+                        XMStoreFloat3(&transform->position, translationVec);
+                        XMStoreFloat3(&transform->scale, scaleVec);
+
+                        // Convert quaternion to rotation matrix
+                        XMMATRIX rotMat = XMMatrixRotationQuaternion(rotationQuat);
+                        XMFLOAT4X4 m;
+                        XMStoreFloat4x4(&m, rotMat);
+
+                        // Extract Euler angles from rotation matrix
+                        // For XMMatrixRotationRollPitchYaw(pitch, yaw, roll) order
+                        float pitch, yaw, roll;
+                        float sinPitch = -m._31;
+
+                        if (fabsf(sinPitch) >= 0.9999f) {
+                            // Gimbal lock case
+                            pitch = copysignf(XM_PIDIV2, sinPitch);
+                            yaw = atan2f(-m._13, m._33);
+                            roll = 0.0f;
+                        } else {
+                            pitch = asinf(sinPitch);
+                            yaw = atan2f(m._32, m._33);
+                            roll = atan2f(m._12, m._11);  // Use m._12 (sin) not m._21
+                        }
+
+                        transform->rotationEuler = XMFLOAT3(pitch, yaw, roll);
+                    }
+                }
+            }
+        }
     }
 
     ImGui::End();

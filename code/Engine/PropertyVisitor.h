@@ -25,6 +25,13 @@ public:
     // Math types
     virtual void VisitFloat3(const char* name, DirectX::XMFLOAT3& value) = 0;
 
+    // Float3 as angles (UI shows degrees, storage/serialization uses radians)
+    // Default: treat as regular Float3 (radians) - for JSON serialization
+    // ImGui visitor overrides to convert rad<->deg
+    virtual void VisitFloat3AsAngles(const char* name, DirectX::XMFLOAT3& valueRadians) {
+        VisitFloat3(name, valueRadians);  // Default: no conversion
+    }
+
     // Enum type (with options)
     virtual void VisitEnum(const char* name, int& value, const std::vector<const char*>& options) = 0;
 

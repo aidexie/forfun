@@ -68,9 +68,10 @@ struct SDirectionalLight : public CComponent {
         }
 
         // Calculate forward vector from rotation (DirectX uses -Z as forward)
+        // XMMatrixRotationRollPitchYaw parameter order: (Pitch, Yaw, Roll)
         XMMATRIX R = XMMatrixRotationRollPitchYaw(
-            transform->rotationEuler.y,  // yaw
             transform->rotationEuler.x,  // pitch
+            transform->rotationEuler.y,  // yaw
             transform->rotationEuler.z   // roll
         );
 

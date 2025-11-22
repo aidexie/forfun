@@ -1,275 +1,124 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Claude Code guidance for this repository.
 
-## Project Vision
-
-This is a mid-sized game engine and editor project, targeting functionality similar to Unity/Unreal but at a smaller scale. The goal is to create a complete game editor that can support development of several fixed game types (e.g., 3D action, puzzle, platformer).
-
-**Current Status**: Early development with basic foundation in place
-- Entity-Component-System architecture established
-- Editor UI with Hierarchy, Inspector, Viewport, and Debug panels
-- Basic 3D rendering with OBJ/glTF model loading
-- PBR rendering with Cook-Torrance BRDF (direct lighting)
-- CSM shadow mapping with bounding sphere stabilization and texel snapping
-- IBL diffuse irradiance map generation (Lambert cosine-weighted hemisphere convolution)
-- IBL specular pre-filtered map generation (GGX importance sampling with Split Sum Approximation)
-- Scene serialization with auto-registration
-
-**Development Philosophy**:
-- Keep the architecture clean and maintainable
-- Focus on practical game development workflows
-- Prioritize editor usability and iteration speed
-- Build incrementally with working features at each step
+**Related Documents**:
+- `CODING_STYLE.md` - 命名约定和代码风格
+- `ROADMAP.md` - 开发路线图
+- `.clang-format` - 代码格式化配置
 
 ---
 
-## Coding Standards
+## Project Overview
 
-### Naming Conventions
+中型游戏引擎+编辑器项目，目标类似 Unity/Unreal 但规模较小。
 
-**CRITICAL RULE**: All code must follow these naming conventions consistently.
-
-#### Type Names
-
-**Classes**:
-- Prefix with `C`, followed by PascalCase
-- Examples: `CDX11Context`, `CMeshResourceManager`, `CGameObject`
-
-**Structs**:
-- Prefix with `S`, followed by PascalCase
-- Examples: `STransform`, `SMaterial`, `SVertexPNT`
-
-**Rationale**:
-- Clear visual distinction between classes (encapsulation) and structs (data-oriented)
-- Easier to identify type category in code
-
-#### Variable Names
-
-**Class Member Variables**:
-- Prefix with `m_`, followed by snake_case
-- Examples: `m_device`, `m_vertex_buffer`, `m_shadow_map_size`
-
-**Struct Member Variables**:
-- Use snake_case (no prefix)
-- Examples: `position`, `rotation_euler`, `albedo_color`
-
-**Local Variables**:
-- Use snake_case (no prefix)
-- Examples: `mesh_path`, `vertex_count`, `light_direction`
-
-**Global Variables**:
-- Prefix with `g_`, followed by snake_case
-- Examples: `g_main_pass`, `g_shadow_pass`, `g_scene`
-
-**Rationale**:
-- Prefixes prevent naming collisions and improve readability
-- snake_case provides consistent word separation
-- Immediate visual identification of variable scope
-
-#### Functions and Methods
-
-**Public Methods**:
-- Use PascalCase for class methods
-- Examples: `Initialize()`, `GetDevice()`, `CreateBuffer()`
-
-**Private/Protected Methods**:
-- Use camelCase for internal methods
-- Examples: `createDeviceAndSwapchain()`, `ensureOffscreen()`
-
-**Free Functions**:
-- Use PascalCase for public API functions
-- Use camelCase for internal/helper functions
-
-#### Constants and Enumerations
-
-**Constants**:
-- Prefix with `k_`, followed by snake_case
-- Examples: `k_window_width`, `k_max_cascades`, `k_assets_path`
-
-**Enum Values**:
-- Use UPPER_SNAKE_CASE
-- Examples: `RENDER_PASS_MAIN`, `SHADOW_MAP_SIZE_2048`
-
-#### File Names
-
-**Header Files**:
-- Match primary class/struct name
-- Examples: `CDX11Context.h`, `SMaterial.h`
-
-**Implementation Files**:
-- Match header name with `.cpp` extension
-- Examples: `CDX11Context.cpp`, `CMainPass.cpp`
-
-**Special Cases**:
-- Panel implementations: `Panels_Hierarchy.cpp`, `Panels_Inspector.cpp`
-- Shader files: `MainPass.vs.hlsl`, `MainPass.ps.hlsl`
-
-#### Include Guards
-
-**All headers must use**:
-```cpp
-#pragma once
-```
-
-Do NOT use traditional include guards (`#ifndef`/`#define`/`#endif`).
+**当前状态**:
+- ECS 架构
+- Editor UI (Hierarchy, Inspector, Viewport, Debug panels)
+- 3D 渲染 (OBJ/glTF)
+- PBR (Cook-Torrance BRDF)
+- CSM 阴影 (bounding sphere stabilization + texel snapping)
+- IBL (diffuse irradiance + specular pre-filtered map)
+- 场景序列化 + 组件自动注册
+- Transform Gizmo (ImGuizmo: 平移/旋转/缩放, Local/World, Grid snapping)
+- HDR Export 工具 (HDR → KTX2 + .ffasset)
+- KTX2 资源加载 (.ffasset → env/irr/prefilter)
 
 ---
 
-### Coordinate System Convention
+## Graphics Rendering Standards
 
-**CRITICAL RULE**: This engine uses **DirectX left-handed coordinate system** throughout the entire codebase.
+### **CRITICAL: Physics-Based Rendering**
 
-**World Space Coordinate Axes**:
-- **+X**: Right
-- **+Y**: Up
-- **+Z**: Forward (into the screen)
+所有图形特性必须**物理正确**。这是最高优先级要求。
 
-**Texture Coordinate (UV) Convention**:
-- **Origin**: Top-left corner (0, 0)
-- **U-axis**: Left-to-right (0 → 1)
-- **V-axis**: Top-to-bottom (0 → 1)
-- This is DirectX's native convention (differs from OpenGL which uses bottom-left origin)
+**禁止的非物理 Hack**:
+- 让阴影影响 ambient/IBL（阴影仅影响直接光）
+- 无物理依据的乘数（如 `color *= 1.5` 为了"更好看"）
+- Clamp 应该是 HDR 的值
 
-**Key Implications**:
-- All matrix operations use left-handed conventions (e.g., `XMMatrixLookAtLH`, `XMMatrixPerspectiveFovLH`)
-- Cross product order: `Right = Cross(Up, Forward)` (not `Cross(Forward, Up)`)
-- Rotation conventions follow left-hand rule (thumb points along axis, fingers curl in positive rotation direction)
-- Cubemap face directions and texture coordinate mappings follow DirectX conventions
-- When sampling textures in shaders, V=0 corresponds to the top of the image
+**允许的物理参数**:
+- 曝光控制、Tone mapping、Bloom
+- 用户可调强度滑块（如 `gIblIntensity`）
+- 预计算顶点色 AO
 
-**Consistency Requirements**:
-- ALL spatial calculations, transforms, and vector operations must respect this convention
-- When interfacing with external tools (Blender, Maya), ensure asset export uses left-handed Y-up convention
-- Shader code (`HLSL`) must use consistent coordinate system for normals, tangents, and lighting calculations
+### Energy Conservation
+
+```hlsl
+// BRDF 能量守恒: kS + kD ≤ 1.0
+float3 kS = F;
+float3 kD = (1.0 - kS) * (1.0 - metallic);
+
+// 直接光: Lambert = albedo/π
+float3 diffuse = kD * albedo / PI;
+
+// IBL: 必须除以 π 以匹配直接光
+float3 diffuseIBL = irradiance * albedo;
+float3 ambient = kD_IBL * (diffuseIBL / PI) + specularIBL;
+```
+
+**References**: pbrt, UE4 Real Shading (Karis), Disney BRDF (Burley)
 
 ---
 
-### Logging and Debug Output
+## Coordinate System
 
-**CRITICAL RULE**: All debug output and logging must go to the **console window** (`std::cout`, `std::cerr`), NOT to Visual Studio's output window.
+**DirectX 左手坐标系**:
+- **+X**: Right, **+Y**: Up, **+Z**: Forward (into screen)
 
-**Correct**:
-```cpp
-std::cout << "IBL: Starting generation..." << std::endl;
-std::cerr << "ERROR: Failed to load shader!" << std::endl;
-```
+**UV Convention**:
+- 原点: 左上角 (0,0)
+- U: 左→右, V: 上→下
 
-**Incorrect** (DO NOT USE):
-```cpp
-OutputDebugStringA("Debug message");  // ❌ Only visible in VS debugger
-printf("Message");                     // ❌ May not show in console
-```
-
-**Rationale**:
-- Console output is visible to end users running the executable
-- VS output window is only available during debugging in Visual Studio
-- Consistent logging location simplifies troubleshooting
-- Console output can be redirected to log files
-
-**Exception**: Shader compilation errors use `OutputDebugStringA` for detailed HLSL errors in VS output during development, but critical errors should also log to console.
-
-### Component Auto-Registration
-
-Components automatically register using the `REGISTER_COMPONENT(ComponentType)` macro:
-
-```cpp
-// Engine/Components/MyComponent.h
-#include "ComponentRegistry.h"
-
-struct MyComponent : public Component {
-    float value = 0.0f;
-    const char* GetTypeName() const override { return "MyComponent"; }
-    void VisitProperties(PropertyVisitor& visitor) override {
-        visitor.VisitFloat("Value", value);
-    }
-};
-
-REGISTER_COMPONENT(MyComponent)  // ← Auto-registers for serialization
-```
-
-**Benefits**:
-- No manual updates to serialization code needed
-- Automatic Inspector UI generation via reflection
-- Automatic JSON save/load support
+所有矩阵操作使用 `LH` 后缀函数 (`XMMatrixLookAtLH`, `XMMatrixPerspectiveFovLH`)。
 
 ---
 
-## Build Commands & Paths
+## Build
 
-This is a Windows-only DX11 project using CMake with Ninja generator.
+Windows DX11 + CMake + Ninja:
 
 ```bash
-# Configure (from repository root)
 cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
-
-# Build
 cmake --build build --target forfun
-
-# Run
 ./build/forfun.exe
 ```
 
-### Important Path Assumptions
+**Paths**:
+- Source: `E:/forfun/source/code`
+- Third-party: `E:/forfun/thirdparty`
+- Assets: `E:/forfun/assets`
 
-- **Source code**: `E:/forfun/source/code`
-- **Third-party**: `E:/forfun/thirdparty`
-- **Assets**: `E:/forfun/assets` (hardcoded in `main.cpp::ForceWorkDir()`)
-
-All asset paths (OBJ, glTF, textures) are relative to the assets directory.
-
-### Third-Party Dependencies
-
-- **imgui_docking**: Static library (`${THIRD_PARTY_PATH}/imgui`, docking branch)
-- **cgltf**: Header-only glTF loader (`${THIRD_PARTY_PATH}/cgltf-master`)
-- **nlohmann/json**: Header-only JSON library (`${THIRD_PARTY_PATH}/nlohmann/json.hpp`)
-  - Download: https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
-- **DirectX 11, d3dcompiler** (Windows SDK)
+**Dependencies**: imgui_docking, cgltf, nlohmann/json, DirectX 11, KTX-Software (libktx)
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ### Three-Layer Separation
 
-1. **Core/** - Low-level device management and resource loading
-   - `DX11Context`: Singleton managing D3D11 device, context, swapchain
-   - `MeshResourceManager`: Singleton for loading/caching mesh resources (OBJ/glTF)
-   - `GpuMeshResource`: RAII wrapper for GPU mesh data (VBO, IBO, textures)
-   - **Does NOT depend on Engine or Editor layers**
+1. **Core/** - 底层设备管理、资源加载
+   - `DX11Context`: D3D11 device/context/swapchain 单例
+   - `MeshResourceManager`: Mesh 加载/缓存
+   - `GpuMeshResource`: GPU mesh RAII 封装
 
-2. **Engine/** - Entity-component-system, scene management, rendering
-   - `World`: Container managing all GameObjects
-   - `GameObject`: Named entities that own Components
-   - `Component`: Base class for all components
-   - `Scene`: Combines World with selection state for editor
-   - `Rendering/MainPass`: Main rendering pass (PBR shaders, scene traversal)
-   - `Rendering/ShadowPass`: CSM shadow map generation
-   - `Rendering/Skybox`: HDR skybox from equirectangular maps with mipmaps
-   - `Rendering/IBLGenerator`: Diffuse irradiance and specular pre-filtered map generation
+2. **Engine/** - ECS、场景、渲染
+   - `World`: GameObject 容器
+   - `GameObject`: 拥有 Components 的实体
+   - `Component`: 组件基类
+   - `Scene`: World + 编辑器选择状态
+   - `Rendering/`: MainPass, ShadowPass, Skybox, IBLGenerator
 
-3. **Editor/** - ImGui-based editor UI
-   - `Panels.h`: Interface for all panels
-   - Each panel in separate `.cpp` file
-   - Viewport renders offscreen RT from MainPass
+3. **Editor/** - ImGui UI
+   - `Panels.h`: Panel 接口
+   - 每个 Panel 独立 `.cpp` 文件
 
 ### Component System
 
-**Built-in Components**:
-- `Transform`: Position, rotation (euler), scale; provides `WorldMatrix()`
-- `MeshRenderer`: Mesh file path, owns `shared_ptr<GpuMeshResource>`, lazy loading via `EnsureUploaded()`
-- `Material`: PBR properties (Albedo, Metallic, Roughness)
-- `DirectionalLight`: Directional light with CSM shadow support
+**内置组件**: Transform, MeshRenderer, Material, DirectionalLight
 
-**Adding New Components**:
-
-1. Create `Engine/Components/YourComponent.h`
-2. Inherit from `Component`, implement `GetTypeName()`
-3. Add `#include "ComponentRegistry.h"` and `REGISTER_COMPONENT(YourComponent)`
-4. Add to `CMakeLists.txt` ENGINE_SOURCES
-5. Use `GameObject::AddComponent<T>()` and `GameObject::GetComponent<T>()`
-
-**Example**:
+**添加新组件**:
 ```cpp
 // Engine/Components/PointLight.h
 #pragma once
@@ -290,390 +139,183 @@ struct PointLight : public Component {
 REGISTER_COMPONENT(PointLight)
 ```
 
-### Reflection System
+然后添加到 `CMakeLists.txt` ENGINE_SOURCES。
 
-Components use **Visitor Pattern** for reflection:
-- `PropertyVisitor`: Abstract interface defining property types (Float, Int, Bool, String, Float3, Enum)
-- `Component::VisitProperties()`: Override to expose properties to editor/serialization
-- `ImGuiPropertyVisitor`: Renders properties in Inspector
-- `JsonWriteVisitor`/`JsonReadVisitor`: Serialize/deserialize to JSON
+### Reflection & Serialization
 
-### Scene Serialization
-
-Scenes save to JSON format (`.scene` files):
-- **SceneSerializer**: Handles save/load using ComponentRegistry
-- **Auto-registration**: Components auto-register via `REGISTER_COMPONENT` macro
-- **File Menu**: Save Scene (Ctrl+S), Load Scene (Ctrl+O)
-
-**JSON Structure**:
-```json
-{
-  "version": "1.0",
-  "gameObjects": [
-    {
-      "name": "Cube",
-      "components": [
-        {"type": "Transform", "Position": [0,0.5,0], "Rotation": [0,0,0], "Scale": [1,1,1]},
-        {"type": "MeshRenderer", "Path": "mesh/cube.obj"},
-        {"type": "Material", "Albedo": [1,1,1], "Metallic": 0.0, "Roughness": 0.5}
-      ]
-    }
-  ]
-}
-```
+- `PropertyVisitor`: 反射接口
+- `ImGuiPropertyVisitor`: Inspector UI
+- `JsonWriteVisitor`/`JsonReadVisitor`: JSON 序列化
+- 场景文件: `.scene` (JSON)
 
 ---
 
 ## Rendering Pipeline
 
-### Frame Rendering Flow
+### Frame Flow
 
 ```cpp
-// Each frame in main.cpp:
-// 1. Update camera
 gMainPass.UpdateCamera(vpWidth, vpHeight, dt);
-
-// 2. Render shadow map (if DirectionalLight exists)
 if (dirLight) {
-    gShadowPass.Render(gScene, dirLight,
-                      gMainPass.GetCameraViewMatrix(),
-                      gMainPass.GetCameraProjMatrix());
+    gShadowPass.Render(gScene, dirLight, gMainPass.GetCameraViewMatrix(), gMainPass.GetCameraProjMatrix());
 }
-
-// 3. Render scene with shadows
 gMainPass.Render(gScene, vpWidth, vpHeight, dt, &gShadowPass.GetOutput());
-
-// 4. Display in viewport
 DrawViewport(gMainPass.GetOffscreenSRV(), ...);
 ```
 
-### Color Space Management
+### Color Space
 
-**CRITICAL**: Strict color space separation for physically correct rendering.
-
-**Pipeline Flow**:
 ```
-Texture Input (Albedo)
-  ↓ DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
-  ↓ GPU auto-converts sRGB → Linear
-  ↓
-All Intermediate Passes (MainPass, ShadowPass, Skybox)
-  ↓ DXGI_FORMAT_R16G16B16A16_FLOAT (HDR Linear)
-  ↓ All lighting calculations in linear space
-  ↓
-PostProcessPass
-  ↓ Tone Mapping (HDR → LDR, still linear)
-  ↓ Output to DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
-  ↓ GPU auto-applies Gamma correction
-  ↓
-Final Display (LDR sRGB)
+Albedo (UNORM_SRGB) → GPU converts to Linear
+    ↓
+HDR Linear (R16G16B16A16_FLOAT)
+    ↓
+PostProcess (Tone Mapping)
+    ↓
+Final (R8G8B8A8_UNORM_SRGB) → GPU applies Gamma
 ```
 
-**Key Rules**:
-1. **Albedo/Emissive textures**: Use `UNORM_SRGB` format (GPU converts to linear on sample)
-2. **Normal/Metallic/Roughness/AO**: Use `UNORM` format (linear data, no conversion)
-3. **Intermediate RTs**: Use `R16G16B16A16_FLOAT` (HDR linear space)
-4. **Final output**: Use `R8G8B8A8_UNORM_SRGB` (GPU applies gamma on write)
-
-**Common Mistakes to Avoid**:
-- ❌ Using `UNORM` for albedo textures (causes dark colors)
-- ❌ Using `UNORM_SRGB` for normal maps (causes incorrect normals)
-- ❌ Manual gamma correction when using `UNORM_SRGB` output (double gamma)
-
-### PBR Shaders
-
-**MainPass** (`Shader/MainPass.vs.hlsl`, `MainPass.ps.hlsl`):
-- Cook-Torrance BRDF: GGX normal distribution, Schlick-GGX geometry, Fresnel-Schlick
-- Energy conservation: `kD = (1 - kS) * (1 - metallic)`
-- Constant buffers: `CB_Frame` (camera, light, CSM data), `CB_Object` (world matrix, material)
-- External shader files for easy iteration
+**规则**:
+- Albedo/Emissive: `UNORM_SRGB`
+- Normal/Metallic/Roughness/AO: `UNORM`
+- Intermediate RT: `R16G16B16A16_FLOAT`
+- Final: `R8G8B8A8_UNORM_SRGB`
 
 ---
 
 ## Shadow System (CSM)
 
-**Architecture**: Cascaded Shadow Maps with bounding sphere stabilization and texel snapping.
+- 1-4 cascades
+- Bounding sphere stabilization (消除旋转抖动)
+- Texel snapping (消除移动抖动)
+- PCF 3×3 软阴影
 
-### Key Features
-
-- **CSM Support**: 1-4 configurable cascades
-- **Bounding Sphere Stabilization**: Fixed projection bounds per cascade (eliminates rotation shimmer)
-- **Texel Snapping**: Quantizes sphere center to texel grid (eliminates movement shimmer)
-- **Configurable Resolution**: 1024/2048/4096
-- **PCF Soft Shadows**: 3×3 kernel
-
-### DirectionalLight Parameters
-
-**Shadow Map**:
-- `ShadowMapSizeIndex` (0/1/2): Resolution 1024/2048/4096
-- `ShadowDistance`: Maximum shadow visible distance from camera
-- `ShadowBias`: Depth bias to prevent shadow acne
-- `ShadowNearPlaneOffset`: Extends near plane to capture tall objects
-- `EnableSoftShadows`: Toggle PCF filtering
-
-**CSM**:
-- `CascadeCount` (1-4): Number of cascades
-- `CascadeSplitLambda` (0-1): Split scheme (0=uniform, 1=logarithmic, 0.5-0.9=balanced)
-- `CascadeBlendRange` (0-0.5): Blend distance at cascade boundaries
-- `DebugShowCascades`: Visualize cascade levels with color coding
-
-### Implementation Details
-
-**Bounding Sphere Stabilization**:
-- Traditional AABB changes size/shape with camera rotation → shimmer
-- Bounding sphere has fixed radius → stable projection bounds
-- Trade-off: ~27% wasted texels, but eliminates scale-induced shimmer
-
-**Texel Snapping**:
-1. Project sphere center onto light-perpendicular plane
-2. Quantize to texel grid: `centerAligned = floor(center / texelSize) * texelSize`
-3. Reconstruct aligned world position BEFORE building LookAt matrix
-4. Shadow map "jumps" by 1 texel increments (imperceptible) instead of continuous sliding
-
-**CSM Split Calculation** (GPU Gems 3, Ch.10):
-```cpp
-splits[i] = lambda * logSplit + (1-lambda) * uniformSplit;
-```
-
-### Shader Integration
-
-```hlsl
-// Select cascade based on pixel depth
-int cascadeIndex = SelectCascade(pixelDepth, gCascadeSplits);
-
-// Transform to light space
-float4 posLS = mul(float4(posWS, 1.0), gLightSpaceVPs[cascadeIndex]);
-
-// Sample shadow map array
-float shadow = gShadowMapArray.SampleCmpLevelZero(gShadowSampler,
-                    float3(uv, cascadeIndex), depth);
-
-// Apply PCF if enabled
-if (gEnableSoftShadows) {
-    shadow = PCF3x3(posLS, cascadeIndex);
-}
-```
+**DirectionalLight 参数**:
+- `ShadowMapSizeIndex`: 1024/2048/4096
+- `ShadowDistance`, `ShadowBias`, `ShadowNearPlaneOffset`
+- `CascadeCount`, `CascadeSplitLambda`, `CascadeBlendRange`
+- `DebugShowCascades`
 
 ---
 
-## IBL (Image-Based Lighting) System
-
-**Architecture**: Offline generation of diffuse irradiance cubemaps from HDR environment maps.
+## IBL System
 
 ### Components
 
-1. **IBLGenerator** (`Engine/Rendering/IBLGenerator.h/cpp`):
-   - `GenerateIrradianceMap(envMap, size)`: Convolves environment cubemap over hemisphere
-   - `SaveIrradianceMapToDDS(path)`: Saves to DDS file
-   - `GetIrradianceFaceSRV(faceIndex)`: Returns individual face SRV for debug (0-5)
+1. **IBLGenerator** (`Engine/Rendering/IBLGenerator.h/cpp`)
+2. **IrradianceConvolution.ps.hlsl**: Diffuse irradiance (uniform solid angle sampling)
+3. **PreFilterEnvironmentMap.ps.hlsl**: Specular (GGX importance sampling, Split Sum)
 
-2. **Irradiance Convolution Shader** (`Shader/IrradianceConvolution.ps.hlsl`):
-   - **Uniform Solid Angle Sampling**: Ensures even distribution across hemisphere
-   - **Integer Loop**: Avoids floating-point accumulation errors
-   - **Sample Quality**: Configurable (64×32=2K samples to 512×256=131K samples)
-   - **Lambert Cosine Weighting**: Physically correct diffuse integration
+### Key Implementation
 
-3. **Pre-Filtered Environment Map** (`Engine/Rendering/IBLGenerator.cpp`, `Shader/PreFilterEnvironmentMap.ps.hlsl`):
-   - Implements **Split Sum Approximation** for specular IBL (UE4 approach)
-   - `GeneratePreFilteredMap(envMap, size, numMipLevels)`: Generates pre-convolved specular map
-   - **GGX Importance Sampling**: Uses Hammersley low-discrepancy sequence
-   - **Dynamic Sample Count**: 8K-65K samples based on roughness (low roughness needs more samples)
-   - **Solid Angle Based Mip Selection**: Matches sample cone to texel cone for environment map sampling
-   - Output: 128×128 cubemap with 7 mip levels (roughness 0.0 → 1.0)
-
-4. **Debug UI** (`Editor/Panels_IrradianceDebug.cpp`):
-   - Three tabs in unified window:
-     - **Tab 1: Irradiance Map** (diffuse IBL, 32×32 single level)
-     - **Tab 2: Pre-Filtered Map** (specular IBL, 128×128 with mip 0-6 selection)
-     - **Tab 3: Environment Map** (source HDR cubemap, mip 0-9 selection)
-   - Real-time preview of all 6 cubemap faces in cross layout
-   - Adjustable display size (64-512 pixels)
-   - No file I/O needed for visualization
-
-### Key Implementation Details
-
-**Uniform Solid Angle Sampling** (Critical for smooth results):
+**Uniform Solid Angle Sampling** (irradiance):
 ```hlsl
-// Uniform solid angle distribution (NOT uniform theta/phi)
-float phi = u * 2.0 * PI;
 float cosTheta = 1.0 - v;  // Linear in cos(θ) → uniform solid angle
-float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-// Weight is just cosTheta (solid angle already uniform)
 irradiance += color * cosTheta;
 ```
 
-**Why This Matters**:
-- Uniform θ sampling causes uneven solid angle distribution
-- Results in sparse sampling at horizon → visible artifacts/banding
-- Uniform solid angle sampling ensures smooth, artifact-free results
-
-**TBN Matrix Construction**:
+**GGX Importance Sampling** (pre-filtered):
 ```hlsl
-// CRITICAL: HLSL float3x3(v1,v2,v3) creates ROW-major matrix
-// We need COLUMN-major for tangent→world transform
-// Solution: Use transpose()
-float3x3 TBN = transpose(float3x3(T, B, N));
-float3 worldDir = mul(TBN, tangentDir);
-```
-
-### Pre-Filtered Map Implementation
-
-**Split Sum Approximation Theory**:
-
-The specular IBL integral can be approximated as a product of two parts:
-```
-∫ Li(l) * BRDF(l,v) * cos(θ) dl ≈ (∫ Li(l) * D(h) * cos(θ) dl) × (∫ BRDF(l,v) * cos(θ) dl)
-                                    └─────────────────────────┘   └─────────────────────┘
-                                      Pre-filtered Environment         BRDF LUT
-                                      (depends on roughness, N)      (depends on NdotV, roughness)
-```
-
-**Key Assumptions**:
-- Environment lighting is slowly varying (low frequency)
-- Fresnel can be factored out using Schlick approximation
-- Works best for distant environment maps
-
-**Failure Cases**:
-- High-frequency environment (e.g., point lights) + low roughness → noise
-- Grazing angles (NdotV ≈ 0) → reduced accuracy
-- Anisotropic materials → not supported
-
-**GGX Importance Sampling** (`PreFilterEnvironmentMap.ps.hlsl`):
-
-```hlsl
-// 1. Generate low-discrepancy 2D samples (Hammersley sequence)
-float2 Xi = Hammersley(i, SAMPLE_COUNT);  // Van der Corput radical inverse
-
-// 2. Importance sample GGX to get half-vector H in tangent space
-float3 ImportanceSampleGGX(float2 Xi, float roughness) {
-    float a = roughness * roughness;
-    float phi = 2.0 * PI * Xi.x;
-    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-    return float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
-}
-
-// 3. Transform H to world space using TBN matrix
-float3 H = normalize(mul(TBN, H_tangent));
-
-// 4. Calculate light direction L (reflection of V around H)
+float2 Xi = Hammersley(i, SAMPLE_COUNT);
+float3 H = ImportanceSampleGGX(Xi, roughness);
 float3 L = normalize(2.0 * dot(V, H) * H - V);
 ```
 
-**Dynamic Sample Count** (Reduces noise for low roughness):
+**Dynamic Sample Count**: 8K-65K samples based on roughness.
+
+**Solid Angle Mip Selection**:
 ```hlsl
-uint GetSampleCount(float roughness) {
-    if (roughness < 0.1)  return 65536u;  // Mirror-like: maximum samples
-    if (roughness < 0.3)  return 32768u;  // Very smooth: high samples
-    if (roughness < 0.6)  return 16384u;  // Medium: moderate samples
-    return 8192u;                          // Rough: converges faster
-}
-```
-
-**Rationale**: Low roughness → narrow GGX lobe → few samples hit bright features (e.g., sun) → high variance → need more samples.
-
-**Solid Angle Based Mip Level Selection**:
-
-When sampling the environment map during pre-filtering, we calculate an adaptive mip level for each sample to avoid aliasing:
-
-```hlsl
-// Calculate GGX PDF for this sample
-float D = D_GGX(NdotH, roughness);
-float pdf = D * NdotH / (4.0 * VdotH);  // GGX PDF in 1/sr
-
-// Compare sample solid angle to texel solid angle
-float saTexel = 4.0 * PI / (6.0 * envResolution * envResolution);  // One texel's solid angle
-float saSample = 1.0 / (pdf * SAMPLE_COUNT);                        // This sample's solid angle
-
-// Derive mip level from solid angle ratio (mathematical, not empirical)
+float saSample = 1.0 / (pdf * SAMPLE_COUNT);
+float saTexel = 4.0 * PI / (6.0 * envResolution * envResolution);
 float mipLevel = 0.5 * log2(saSample / saTexel);
 ```
 
-**Mathematical Derivation**:
-1. Mipmap level k has texel solid angle: `saTexel(k) = saTexel(0) × 4^k`
-2. Match sample solid angle to texel solid angle: `saTexel(k) = saSample`
-3. Solve for k: `4^k = saSample / saTexel(0)` → `k = 0.5 × log2(saSample / saTexel(0))`
+### Debug UI
 
-**Physical Interpretation**:
-- `saSample = 1/(pdf × N)`: The solid angle (in steradians) this sample "represents" on the hemisphere
-  - High pdf (mirror-like) → small solid angle → sample from high-res mip
-  - Low pdf (rough) → large solid angle → sample from low-res mip
-- `saTexel`: The solid angle one environment map texel covers
-- **Nyquist matching**: Sample cone should match texel cone to avoid aliasing
-
-**Special Case Handling**:
-```hlsl
-if (roughness < 0.02) {
-    mipLevel = 0.0;  // Force highest resolution
-}
-```
-
-**Reason**: When roughness→0, GGX becomes Dirac delta, `pdf→∞`, `saSample→0`, formula breaks down. For perfect mirrors, directly sample mip 0.
-
-**Monte Carlo Integration**:
-```hlsl
-// Accumulate with cosine weighting
-if (dot(N, L) > 0.0) {
-    float3 color = envMap.SampleLevel(sampler, L, mipLevel).rgb;
-    prefilteredColor += color * dot(N, L);
-    totalWeight += dot(N, L);
-}
-
-// Normalize
-prefilteredColor /= totalWeight;
-```
-
-**Roughness Mapping**:
-- Linear mapping: `roughness = mipLevel / (numMipLevels - 1)` ∈ [0, 1]
-- Mip 0 = perfect mirror (roughness = 0.0)
-- Mip 6 = fully rough (roughness = 1.0)
-
-**Note**: Unity/UE use perceptual roughness (squared mapping), but current implementation uses linear for simplicity. Can add `roughness = perceptualRoughness²` if needed.
-
-### Debug Workflow
-
-**Irradiance Map (Diffuse IBL)**:
-1. Open "Irradiance Map Debug" window → Tab 1
-2. Click "Generate Irradiance Map" button
-3. View 6 cubemap faces in cross layout
-4. Verify results are smooth and artifact-free
-
-**Pre-Filtered Map (Specular IBL)**:
-1. File → Generate IBL (generates both irradiance and pre-filtered maps)
-2. Switch to Tab 2 "Pre-Filtered Map"
-3. Use "Mip Level" slider to view roughness levels 0-6
-   - Mip 0: Mirror-like reflection (should show sharp sun)
-   - Mip 3: Medium roughness (sun should be blurred)
-   - Mip 6: Fully rough (completely diffuse look)
-4. Check for noise artifacts in mip 1-3 around bright features
-
-**Environment Map Verification**:
-1. Switch to Tab 3 "Environment Map"
-2. Verify source HDR cubemap has proper mipmaps (mip 0-9)
-3. Check mip 0 shows clear details, higher mips progressively blur
-
-**Current Limitations**:
-- Generation is synchronous (blocks frame, ~1-10 seconds depending on sample count and mip levels)
-- Pre-filtered map generation with 7 mip levels takes ~30-60 seconds (65K samples for low roughness)
-- No asynchronous/progressive generation
-- Not yet integrated into MainPass PBR lighting (TODO: add specular IBL term)
+`Editor/Panels_IrradianceDebug.cpp` - 三个 Tab:
+1. Irradiance Map (32×32)
+2. Pre-Filtered Map (128×128, mip 0-6)
+3. Environment Map (source, mip 0-9)
 
 ---
 
-## Editor Panel Integration
+## Editor Panels
 
-**Current Panels**:
-- `DrawDockspace`: Main docking container with File menu (Save/Load Scene)
-- `DrawHierarchy`: GameObject tree view with selection
-- `DrawInspector`: Component property editor with reflection-based UI
-- `DrawViewport`: 3D scene view using offscreen render target
-- `DrawIrradianceDebug`: IBL generation and debug visualization
+**Current**: Dockspace, Hierarchy, Inspector, Viewport, IrradianceDebug, HDRExport
 
-**Adding New Panels**:
-1. Add function declaration to `Editor/Panels.h`
-2. Implement in `Editor/Panels_PanelName.cpp`
-3. Add cpp file to `EDITOR_SRC` in CMakeLists.txt
-4. Call from main loop after `ImGui::NewFrame()`
+**Adding new panel**:
+1. 声明到 `Editor/Panels.h`
+2. 实现 `Editor/Panels_PanelName.cpp`
+3. 添加到 `CMakeLists.txt` EDITOR_SRC
+4. 在 main loop `ImGui::NewFrame()` 后调用
 
-Panels receive `Scene&` to access World and selection state. Some panels receive specific subsystem pointers (e.g., `IBLGenerator*`, `MainPass*`).
+---
+
+## HDR Export Tool
+
+**位置**: `Editor/Panels_HDRExport.cpp`
+
+**功能**: 将 HDR 环境贴图导出为 IBL 资源包
+
+**导出流程**: Window → HDR Export
+1. 选择 HDR 源文件
+2. 输入输出目录和资源名
+3. 点击 Export
+
+**输出文件**:
+- `{name}_env.ktx2` - 环境立方体贴图 (512×512)
+- `{name}_irr.ktx2` - 漫反射辐照度图 (32×32)
+- `{name}_prefilter.ktx2` - 镜面预过滤图 (128×128, 7 mip)
+- `{name}.ffasset` - JSON 描述符
+
+**.ffasset 格式**:
+```json
+{
+  "type": "skybox",
+  "version": "1.0",
+  "source": "source.hdr",
+  "data": {
+    "env": "name_env.ktx2",
+    "irr": "name_irr.ktx2",
+    "prefilter": "name_prefilter.ktx2"
+  }
+}
+```
+
+**下一步**: 启动时缓存检测
+
+---
+
+## Transform Gizmo
+
+Viewport 工具栏提供物体变换控制。
+
+**操作模式**:
+- **Translate (W)**: 平移物体
+- **Rotate (E)**: 旋转物体
+- **Scale (R)**: 缩放物体
+
+**空间模式**:
+- **World**: 世界坐标系
+- **Local**: 局部坐标系
+
+**Grid Snapping**:
+- 勾选 "Snap" 启用网格对齐
+- 平移: 可调步进值 (0.01-10m)，默认 1m
+- 旋转: 可调角度 (1-90°)，默认 15°
+- 缩放: 可调步进值 (0.01-2)，默认 0.5
+
+---
+
+## View Orientation Gizmo
+
+Viewport 右上角的相机方向指示器 (自定义 ImGui DrawList 渲染)。
+
+**特性**:
+- X/Y/Z 轴正向: 亮色 + 箭头 + 标签
+- 负向: 灰色细线
+- 深度排序渲染
+
+---
+
+**Last Updated**: 2025-11-22

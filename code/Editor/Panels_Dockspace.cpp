@@ -85,6 +85,14 @@ void Panels::DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass) {
             }
             ImGui::EndMenu();
         }
+
+        if (ImGui::BeginMenu("Window")) {
+            if (ImGui::MenuItem("HDR Export")) {
+                Panels::ShowHDRExportWindow(true);
+            }
+            ImGui::EndMenu();
+        }
+
         ImGui::EndMenuBar();
     }
     ImGui::End();

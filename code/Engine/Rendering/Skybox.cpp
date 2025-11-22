@@ -1,6 +1,7 @@
 #include "Skybox.h"
 #include "Core/DX11Context.h"
 #include "Core/HdrLoader.h"
+#include "Core/KTXLoader.h"
 #include <d3dcompiler.h>
 #include <vector>
 #include <fstream>
@@ -75,6 +76,92 @@ bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
     dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;  // No depth write
     dsd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;  // Draw at far plane
     device->CreateDepthStencilState(&dsd, m_depthState.GetAddressOf());
+
+    return true;
+}
+
+bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    if (!device) return false;
+
+    // Load cubemap from KTX2
+    ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!texture) {
+        std::cerr << "Skybox: Failed to load KTX2 cubemap from " << ktx2Path << std::endl;
+        return false;
+    }
+
+    m_envTexture.Attach(texture);
+
+    // Create SRV
+    D3D11_TEXTURE2D_DESC texDesc;
+    m_envTexture->GetDesc(&texDesc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texDesc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+    srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
+    srvDesc.TextureCube.MostDetailedMip = 0;
+
+    HRESULT hr = device->CreateShaderResourceView(m_envTexture.Get(), &srvDesc, &m_envCubemap);
+    if (FAILED(hr)) {
+        std::cerr << "Skybox: Failed to create SRV" << std::endl;
+        return false;
+    }
+
+    // Create cube mesh
+    createCubeMesh();
+
+    // Create shaders
+    createShaders();
+
+    // Create constant buffer
+    D3D11_BUFFER_DESC cbd{};
+    cbd.ByteWidth = sizeof(CB_SkyboxTransform);
+    cbd.Usage = D3D11_USAGE_DEFAULT;
+    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    hr = device->CreateBuffer(&cbd, nullptr, &m_cbTransform);
+    if (FAILED(hr)) {
+        std::cerr << "Skybox: Failed to create constant buffer" << std::endl;
+        return false;
+    }
+
+    // Create sampler
+    D3D11_SAMPLER_DESC samplerDesc{};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+    hr = device->CreateSamplerState(&samplerDesc, &m_sampler);
+    if (FAILED(hr)) {
+        std::cerr << "Skybox: Failed to create sampler" << std::endl;
+        return false;
+    }
+
+    // Create rasterizer state (no culling for skybox)
+    D3D11_RASTERIZER_DESC rasterDesc{};
+    rasterDesc.FillMode = D3D11_FILL_SOLID;
+    rasterDesc.CullMode = D3D11_CULL_NONE;
+    hr = device->CreateRasterizerState(&rasterDesc, &m_rasterState);
+    if (FAILED(hr)) {
+        std::cerr << "Skybox: Failed to create rasterizer state" << std::endl;
+        return false;
+    }
+
+    // Create depth stencil state (skybox rendered at max depth)
+    D3D11_DEPTH_STENCIL_DESC depthDesc{};
+    depthDesc.DepthEnable = TRUE;
+    depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    depthDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+    hr = device->CreateDepthStencilState(&depthDesc, &m_depthState);
+    if (FAILED(hr)) {
+        std::cerr << "Skybox: Failed to create depth stencil state" << std::endl;
+        return false;
+    }
+
+    std::cout << "Skybox: Initialized from KTX2 (" << texDesc.Width << "x" << texDesc.Height
+              << ", " << texDesc.MipLevels << " mips)" << std::endl;
 
     return true;
 }

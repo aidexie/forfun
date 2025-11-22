@@ -12,6 +12,10 @@ public:
 
     // Load HDR environment map and convert to cubemap
     bool Initialize(const std::string& hdrPath, int cubemapSize = 512);
+
+    // Load pre-baked environment cubemap from KTX2
+    bool InitializeFromKTX2(const std::string& ktx2Path);
+
     void Shutdown();
 
     // Render skybox
@@ -19,6 +23,7 @@ public:
 
     // Get cubemap for IBL (future use)
     ID3D11ShaderResourceView* GetEnvironmentMap() const { return m_envCubemap.Get(); }
+    ID3D11Texture2D* GetEnvironmentTexture() const { return m_envTexture.Get(); }
 
 private:
     void convertEquirectToCubemap(const std::string& hdrPath, int size);

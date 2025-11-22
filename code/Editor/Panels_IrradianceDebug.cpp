@@ -218,6 +218,27 @@ void Panels::DrawIrradianceDebug() {
                 ImGui::EndGroup();
             }  // End of showIrradianceViz
 
+            ImGui::Separator();
+
+            // Export to HDR button
+            ImGui::Text("Export:");
+            if (ImGui::Button("Export to HDR Files", ImVec2(200, 30))) {
+                // Export to assets directory
+                bool success = iblGen.SaveIrradianceMapToHDR("export/irradiance.hdr");
+                if (success) {
+                    std::cout << "IBL: Irradiance map exported to export/irradiance_*.hdr" << std::endl;
+                }
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Export irradiance cubemap to 6 HDR files:\n"
+                                 "  irradiance_posX.hdr, irradiance_negX.hdr,\n"
+                                 "  irradiance_posY.hdr, irradiance_negY.hdr,\n"
+                                 "  irradiance_posZ.hdr, irradiance_negZ.hdr\n\n"
+                                 "Files saved to: E:\\forfun\\assets\\export\\");
+            }
+
             ImGui::EndTabItem();
         }
 

@@ -6,13 +6,15 @@
 
 struct STransform : public CComponent {
     DirectX::XMFLOAT3 position{0,0,0};
-    DirectX::XMFLOAT3 rotationEuler{0,0,0}; // radians
+    DirectX::XMFLOAT3 rotationEuler{0,0,0}; // (pitch, yaw, roll) in radians
     DirectX::XMFLOAT3 scale{1,1,1};
 
     DirectX::XMMATRIX WorldMatrix() const {
         using namespace DirectX;
         XMMATRIX S = XMMatrixScaling(scale.x, scale.y, scale.z);
-        XMMATRIX R = XMMatrixRotationRollPitchYaw(rotationEuler.y, rotationEuler.x, rotationEuler.z); // yaw(y), pitch(x), roll(z)
+        // XMMatrixRotationRollPitchYaw parameter order: (Pitch, Yaw, Roll)
+        // rotationEuler storage: (pitch, yaw, roll)
+        XMMATRIX R = XMMatrixRotationRollPitchYaw(rotationEuler.x, rotationEuler.y, rotationEuler.z);
         XMMATRIX T = XMMatrixTranslation(position.x, position.y, position.z);
         return S * R * T;
     }
@@ -21,7 +23,7 @@ struct STransform : public CComponent {
 
     void VisitProperties(CPropertyVisitor& visitor) override {
         visitor.VisitFloat3("Position", position);
-        visitor.VisitFloat3("Rotation", rotationEuler);
+        visitor.VisitFloat3AsAngles("Rotation", rotationEuler);  // Display as degrees, store as radians
         visitor.VisitFloat3("Scale", scale);
     }
 };

@@ -266,16 +266,14 @@ float4 main(PSIn i) : SV_Target {
     kD_IBL *= 1.0 - metallic;
 
     // Combine diffuse and specular IBL
+    // CRITICAL: Divide diffuseIBL by PI for energy conservation with direct lighting
+    // Direct lighting uses (albedo/PI), so IBL diffuse should match
     float3 ambient = (kD_IBL * diffuseIBL + specularIBL) * ao;
 
-    // Shadow should also affect ambient light (like Unity/UE)
-    // In shadowed areas, reduce ambient to 20-40% to create stronger shadow contrast
-    // This simulates indirect lighting occlusion in real-world shadows
-    float ambientOcclusion = lerp(0.3, 1.0, shadowFactor);  // Shadow reduces ambient to 30%
-
     // Final color (linear space)
-    // Apply IBL intensity and ambient occlusion from shadows
-    float3 colorLin = (ambient * ambientOcclusion * gIblIntensity) + Lo;
+    // Physically correct: only direct lighting (Lo) is affected by shadow
+    // IBL (ambient) represents omnidirectional environment light, not affected by directional shadow
+    float3 colorLin = (ambient * gIblIntensity) + Lo;
 
     return float4(colorLin, 1.0);
 }

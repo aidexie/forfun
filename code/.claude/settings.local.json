@@ -12,7 +12,17 @@
       "Bash(./build/Debug/forfun.exe:*)",
       "Bash(timeout 5 ./build/Debug/forfun.exe:*)",
       "Bash(cat:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(timeout 8 /e/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(timeout 8:*)",
+      "Bash(timeout 10 E:/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(dir \"E:\\forfun\\thirdparty\\KTX-Software\" /B 2)",
+      "Bash(nul)",
+      "Bash(dir \"E:\\forfun\\thirdparty\\KTX-Software\\include\" /B 2)",
+      "Bash(dir \"E:\\forfun\\thirdparty\\KTX-Software\\lib\" /B 2)",
+      "Bash(timeout:*)",
+      "Bash(dir:*)",
+      "Bash(where /R \"E:\\forfun\\thirdparty\\KTX-Software\" ktxinfo.exe)"
     ],
     "deny": [],
     "ask": []

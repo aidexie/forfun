@@ -18,6 +18,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx11.h"
+#include "ImGuizmo.h"
 
 #include "Panels.h"   // Panels::DrawDockspace / DrawHierarchy / DrawInspector / DrawViewport
 #include "Scene.h"    // 面板的场景数据结构
@@ -73,11 +74,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
     case WM_MOUSEMOVE:
         if (wParam & MK_RBUTTON) {
-            POINT p{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-            int dx = p.x - g_last_mouse.x;
-            int dy = p.y - g_last_mouse.y;
-            g_main_pass.OnMouseDelta(dx, dy);
-            g_last_mouse = p;
+            // Only update camera if not using ImGuizmo
+            if (!ImGuizmo::IsUsing()) {
+                POINT p{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+                int dx = p.x - g_last_mouse.x;
+                int dy = p.y - g_last_mouse.y;
+                g_main_pass.OnMouseDelta(dx, dy);
+                g_last_mouse = p;
+            }
         }
         else {
             g_last_mouse.x = GET_X_LPARAM(lParam);
@@ -200,9 +204,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     g_editor_cam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
-    // 4) Scene initialization (includes Skybox and IBL auto-generation)
-    std::cout << "Initializing Scene (loading skybox and generating IBL)..." << std::endl;
-    if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k.hdr", 512))
+    // 4) Scene initialization (load from .ffasset or HDR)
+    std::cout << "Initializing Scene (loading skybox and IBL)..." << std::endl;
+    if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset", 512))
     {
         std::cerr << "ERROR: Failed to initialize Scene!" << std::endl;
         exitCode = -3;
@@ -278,6 +282,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
 
         // 5.2 绑定 backbuffer + 清屏
         auto& ctx = CDX11Context::Instance();
@@ -331,8 +336,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             Panels::DrawViewport(CScene::Instance(), g_editor_cam,
                 g_main_pass.GetOffscreenSRV(),
                 g_main_pass.GetOffscreenWidth(),
-                g_main_pass.GetOffscreenHeight()); // 视口面板（使用你已有的离屏示例）
+                g_main_pass.GetOffscreenHeight(),
+                &g_main_pass); // 视口面板（使用你已有的离屏示例）
             Panels::DrawIrradianceDebug();   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment/BRDF LUT 四个 Tab）
+            Panels::DrawHDRExportWindow();   // HDR Export 窗口
         }
 
         // 5.5 提交 ImGui

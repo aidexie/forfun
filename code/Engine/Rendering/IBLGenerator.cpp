@@ -1,5 +1,6 @@
 #include "IBLGenerator.h"
 #include "Core/DX11Context.h"
+#include "Core/KTXLoader.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
@@ -7,6 +8,7 @@
 #include <iostream>
 #include <filesystem>
 #include <dxgiformat.h>
+#include <DirectXPackedVector.h>  // For XMHALF4, XMLoadHalf4
 
 using Microsoft::WRL::ComPtr;
 
@@ -400,6 +402,145 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     return true;
 }
 
+// Helper: Convert float RGB to RGBE (Radiance HDR format)
+static void floatToRgbe(float r, float g, float b, unsigned char rgbe[4]) {
+    float v = r;
+    if (g > v) v = g;
+    if (b > v) v = b;
+
+    if (v < 1e-32f) {
+        rgbe[0] = rgbe[1] = rgbe[2] = rgbe[3] = 0;
+        return;
+    }
+
+    int e;
+    float m = frexpf(v, &e);  // v = m * 2^e, where 0.5 <= m < 1
+    v = m * 256.0f / v;       // Scale factor
+
+    rgbe[0] = (unsigned char)(r * v);
+    rgbe[1] = (unsigned char)(g * v);
+    rgbe[2] = (unsigned char)(b * v);
+    rgbe[3] = (unsigned char)(e + 128);
+}
+
+bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
+    if (!m_irradianceTexture) {
+        std::cout << "ERROR: No irradiance map to save!" << std::endl;
+        return false;
+    }
+
+    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+
+    // Get texture description
+    D3D11_TEXTURE2D_DESC desc;
+    m_irradianceTexture->GetDesc(&desc);
+
+    std::cout << "IBL: Saving irradiance map to HDR (" << desc.Width << "x" << desc.Height << " x 6 faces)..." << std::endl;
+
+    // Create staging texture for readback
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingDesc.MiscFlags = 0;
+
+    ComPtr<ID3D11Texture2D> stagingTexture;
+    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.GetAddressOf());
+    if (FAILED(hr)) {
+        std::cout << "ERROR: Failed to create staging texture!" << std::endl;
+        return false;
+    }
+
+    // Copy to staging texture
+    context->CopyResource(stagingTexture.Get(), m_irradianceTexture.Get());
+
+    // Face names for file naming
+    const char* faceNames[6] = { "posX", "negX", "posY", "negY", "posZ", "negZ" };
+
+    // Create output directory if needed
+    std::filesystem::path basePath = filepath;
+    if (basePath.is_relative()) {
+        basePath = std::filesystem::current_path() / filepath;
+    }
+    std::filesystem::create_directories(basePath.parent_path());
+
+    // Remove extension from base path for adding face suffix
+    std::string baseStr = basePath.string();
+    size_t dotPos = baseStr.rfind('.');
+    if (dotPos != std::string::npos) {
+        baseStr = baseStr.substr(0, dotPos);
+    }
+
+    // Save each face as a separate HDR file
+    for (UINT face = 0; face < 6; ++face) {
+        std::string faceFilename = baseStr + "_" + faceNames[face] + ".hdr";
+
+        // Map staging texture for this face
+        UINT subresource = D3D11CalcSubresource(0, face, 1);
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        hr = context->Map(stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
+        if (FAILED(hr)) {
+            std::cout << "ERROR: Failed to map staging texture face " << face << std::endl;
+            continue;
+        }
+
+        // Open file
+        std::ofstream file(faceFilename, std::ios::binary);
+        if (!file) {
+            std::cout << "ERROR: Failed to create file: " << faceFilename << std::endl;
+            context->Unmap(stagingTexture.Get(), subresource);
+            continue;
+        }
+
+        // Write HDR header
+        file << "#?RADIANCE\n";
+        file << "FORMAT=32-bit_rle_rgbe\n";
+        file << "\n";
+        file << "-Y " << desc.Height << " +X " << desc.Width << "\n";
+
+        // Write pixel data (convert R16G16B16A16_FLOAT to RGBE)
+        // HDR files store from top to bottom (same as our texture)
+        std::vector<unsigned char> rgbeData(desc.Width * desc.Height * 4);
+
+        const uint16_t* srcData = reinterpret_cast<const uint16_t*>(mapped.pData);
+        size_t srcRowPitch = mapped.RowPitch / sizeof(uint16_t);
+
+        for (UINT y = 0; y < desc.Height; ++y) {
+            for (UINT x = 0; x < desc.Width; ++x) {
+                // R16G16B16A16_FLOAT: 4 half-floats per pixel
+                size_t srcOffset = y * srcRowPitch + x * 4;
+
+                // Convert half-float to float (using DirectXPackedVector)
+                DirectX::PackedVector::XMHALF4 half4;
+                half4.x = srcData[srcOffset + 0];
+                half4.y = srcData[srcOffset + 1];
+                half4.z = srcData[srcOffset + 2];
+                half4.w = srcData[srcOffset + 3];
+
+                DirectX::XMVECTOR v = DirectX::PackedVector::XMLoadHalf4(&half4);
+                DirectX::XMFLOAT4 f4;
+                DirectX::XMStoreFloat4(&f4, v);
+
+                // Convert to RGBE
+                size_t dstOffset = (y * desc.Width + x) * 4;
+                floatToRgbe(f4.x, f4.y, f4.z, &rgbeData[dstOffset]);
+            }
+        }
+
+        // Write all RGBE data
+        file.write(reinterpret_cast<const char*>(rgbeData.data()), rgbeData.size());
+
+        context->Unmap(stagingTexture.Get(), subresource);
+        file.close();
+
+        std::cout << "IBL: Saved face " << faceNames[face] << " to " << faceFilename << std::endl;
+    }
+
+    std::cout << "IBL: Successfully saved irradiance map to HDR files!" << std::endl;
+    return true;
+}
+
 ID3D11ShaderResourceView* CIBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
     if (faceIndex < 0 || faceIndex >= 6) return nullptr;
     if (!m_irradianceTexture) return nullptr;
@@ -719,4 +860,97 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
     std::cout << "IBL: BRDF LUT generated successfully!" << std::endl;
 
     return m_brdfLutSRV.Get();
+}
+
+bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
+    ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!texture) {
+        std::cerr << "IBLGenerator: Failed to load irradiance map from " << ktx2Path << std::endl;
+        return false;
+    }
+
+    m_irradianceTexture.Attach(texture);
+
+    // Create SRV
+    auto& ctx = CDX11Context::Instance();
+    D3D11_TEXTURE2D_DESC texDesc;
+    m_irradianceTexture->GetDesc(&texDesc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texDesc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+    srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
+    srvDesc.TextureCube.MostDetailedMip = 0;
+
+    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc, &m_irradianceSRV);
+    if (FAILED(hr)) {
+        std::cerr << "IBLGenerator: Failed to create irradiance SRV" << std::endl;
+        return false;
+    }
+
+    std::cout << "IBLGenerator: Loaded irradiance map from KTX2 (" << texDesc.Width << "x" << texDesc.Height << ")" << std::endl;
+    return true;
+}
+
+bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
+    ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!texture) {
+        std::cerr << "IBLGenerator: Failed to load pre-filtered map from " << ktx2Path << std::endl;
+        return false;
+    }
+
+    m_preFilteredTexture.Attach(texture);
+
+    // Create SRV
+    auto& ctx = CDX11Context::Instance();
+    D3D11_TEXTURE2D_DESC texDesc;
+    m_preFilteredTexture->GetDesc(&texDesc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texDesc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+    srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
+    srvDesc.TextureCube.MostDetailedMip = 0;
+
+    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, &m_preFilteredSRV);
+    if (FAILED(hr)) {
+        std::cerr << "IBLGenerator: Failed to create pre-filtered SRV" << std::endl;
+        return false;
+    }
+
+    m_preFilteredMipLevels = texDesc.MipLevels;
+
+    std::cout << "IBLGenerator: Loaded pre-filtered map from KTX2 (" << texDesc.Width << "x" << texDesc.Height
+              << ", " << m_preFilteredMipLevels << " mips)" << std::endl;
+    return true;
+}
+
+bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
+    ID3D11Texture2D* texture = CKTXLoader::Load2DTextureFromKTX2(ktx2Path);
+    if (!texture) {
+        std::cerr << "IBLGenerator: Failed to load BRDF LUT from " << ktx2Path << std::endl;
+        return false;
+    }
+
+    m_brdfLutTexture.Attach(texture);
+
+    // Create SRV
+    auto& ctx = CDX11Context::Instance();
+    D3D11_TEXTURE2D_DESC texDesc;
+    m_brdfLutTexture->GetDesc(&texDesc);
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = texDesc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = texDesc.MipLevels;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+
+    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, &m_brdfLutSRV);
+    if (FAILED(hr)) {
+        std::cerr << "IBLGenerator: Failed to create BRDF LUT SRV" << std::endl;
+        return false;
+    }
+
+    std::cout << "IBLGenerator: Loaded BRDF LUT from KTX2 (" << texDesc.Width << "x" << texDesc.Height << ")" << std::endl;
+    return true;
 }

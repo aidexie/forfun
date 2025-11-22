@@ -13,6 +13,8 @@ set(CODE_PATH E:/forfun/source/code)
 set(THIRD_PARTY_PATH E:/forfun/thirdparty)
 set(IMGUI_DIR ${THIRD_PARTY_PATH}/imgui)
 set(IMGUI_BACK ${IMGUI_DIR}/backends)
+set(IMGUIZMO_DIR ${THIRD_PARTY_PATH}/ImGuizmo)
+set(KTX_DIR ${THIRD_PARTY_PATH}/KTX-Software)
 
 add_library(imgui_docking STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -33,6 +35,18 @@ if (MSVC)
     target_compile_options(imgui_docking PRIVATE /utf-8)
 endif()
 
+# ImGuizmo library
+add_library(imguizmo STATIC
+    ${IMGUIZMO_DIR}/ImGuizmo.cpp
+)
+target_include_directories(imguizmo PUBLIC
+    ${IMGUIZMO_DIR}
+    ${IMGUI_DIR}
+)
+if (MSVC)
+    target_compile_options(imguizmo PRIVATE /utf-8)
+endif()
+
 file(GLOB CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
 file(GLOB ENGINE_SRC ${CODE_PATH}/Engine/*.cpp ${CODE_PATH}/Engine/*.h)
 set(EDITOR_SRC
@@ -42,6 +56,7 @@ set(EDITOR_SRC
     ${CODE_PATH}/Editor/InspectorPanel.cpp
     ${CODE_PATH}/Editor/ViewportPanel.cpp
     ${CODE_PATH}/Editor/Panels_IrradianceDebug.cpp
+    ${CODE_PATH}/Editor/Panels_HDRExport.cpp
 )
 
 add_executable(forfun WIN32
@@ -56,12 +71,22 @@ target_include_directories(forfun PRIVATE
     ${CODE_PATH}/Editor
     ${THIRD_PARTY_PATH}/cgltf-master
     ${THIRD_PARTY_PATH}/nlohmann
+    ${KTX_DIR}/include
 )
 target_compile_definitions(forfun PRIVATE UNICODE _UNICODE NOMINMAX)
 target_link_libraries(forfun
     PRIVATE
         imgui_docking
+        imguizmo
         d3d11 dxgi d3dcompiler
+        ${KTX_DIR}/lib/ktx.lib
+)
+
+# Copy KTX DLL to output directory
+add_custom_command(TARGET forfun POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${KTX_DIR}/bin/ktx.dll"
+        $<TARGET_FILE_DIR:forfun>
 )
 
 

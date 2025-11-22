@@ -46,6 +46,23 @@ public:
         }
     }
 
+    void VisitFloat3AsAngles(const char* name, DirectX::XMFLOAT3& valueRadians) override {
+        // Convert radians to degrees for UI
+        float degrees[3] = {
+            DirectX::XMConvertToDegrees(valueRadians.x),
+            DirectX::XMConvertToDegrees(valueRadians.y),
+            DirectX::XMConvertToDegrees(valueRadians.z)
+        };
+
+        // Display as degrees
+        if (ImGui::DragFloat3(name, degrees, 0.1f)) {
+            // Convert back to radians
+            valueRadians.x = DirectX::XMConvertToRadians(degrees[0]);
+            valueRadians.y = DirectX::XMConvertToRadians(degrees[1]);
+            valueRadians.z = DirectX::XMConvertToRadians(degrees[2]);
+        }
+    }
+
     void VisitEnum(const char* name, int& value, const std::vector<const char*>& options) override {
         if (ImGui::BeginCombo(name, options[value])) {
             for (int i = 0; i < (int)options.size(); ++i) {
