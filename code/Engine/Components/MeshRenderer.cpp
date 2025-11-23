@@ -20,3 +20,12 @@ bool SMeshRenderer::EnsureUploaded() {
 
     return !meshes.empty();
 }
+
+bool SMeshRenderer::GetLocalBounds(DirectX::XMFLOAT3& outMin, DirectX::XMFLOAT3& outMax) const {
+    if (meshes.empty() || !meshes[0]->hasBounds) {
+        return false;
+    }
+    outMin = meshes[0]->localBoundsMin;
+    outMax = meshes[0]->localBoundsMax;
+    return true;
+}

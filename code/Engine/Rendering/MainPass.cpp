@@ -98,6 +98,12 @@ bool CMainPass::Initialize()
     // --- Initialize Post-Process ---
     m_postProcess.Initialize();
 
+    // --- Initialize Debug Line Pass ---
+    m_debugLinePass.Initialize();
+
+    // --- Initialize Grid Pass ---
+    CGridPass::Instance().Initialize();
+
     gPrev = std::chrono::steady_clock::now();
     return true;
 }
@@ -467,12 +473,26 @@ void CMainPass::ensureOffscreen(UINT w, UINT h)
     sv.Texture2D.MipLevels = 1;
     device->CreateShaderResourceView(m_off.color.Get(), &sv, m_off.srv.GetAddressOf());
 
-    // Depth
+    // Depth (create as both depth-stencil and shader resource)
     D3D11_TEXTURE2D_DESC dd = td;
-    dd.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    dd.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    dd.Format = DXGI_FORMAT_R24G8_TYPELESS;  // Typeless to allow different view formats
+    dd.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
     device->CreateTexture2D(&dd, nullptr, m_off.depth.GetAddressOf());
-    device->CreateDepthStencilView(m_off.depth.Get(), nullptr, m_off.dsv.GetAddressOf());
+
+    // Depth Stencil View (for writing)
+    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+    dsvDesc.Texture2D.MipSlice = 0;
+    device->CreateDepthStencilView(m_off.depth.Get(), &dsvDesc, m_off.dsv.GetAddressOf());
+
+    // Shader Resource View (for reading depth in shaders)
+    D3D11_SHADER_RESOURCE_VIEW_DESC depthSRVDesc{};
+    depthSRVDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;  // Read only depth channel
+    depthSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    depthSRVDesc.Texture2D.MostDetailedMip = 0;
+    depthSRVDesc.Texture2D.MipLevels = 1;
+    device->CreateShaderResourceView(m_off.depth.Get(), &depthSRVDesc, m_off.depthSRV.GetAddressOf());
 
     // === Create LDR sRGB RT for final display ===
     m_offLDR.Reset();
@@ -530,6 +550,20 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
     // Render scene to HDR RT (linear space)
     renderScene(scene, dt, shadowData);
 
+    // UNBIND depth buffer before grid pass (to allow reading it as SRV)
+    // Grid needs to sample depth buffer, but D3D11 doesn't allow SRV read from bound DSV
+    context->OMSetRenderTargets(1, &rtv, nullptr);  // Unbind DSV
+
+    // Render infinite grid (after skybox, before debug lines)
+    CGridPass::Instance().Render(m_cameraView, m_cameraProj, m_camPos,
+                                  m_off.depthSRV.Get(), w, h);
+
+    // REBIND depth buffer for debug lines
+    context->OMSetRenderTargets(1, &rtv, dsv);
+
+    // Render debug lines on top of scene (with depth testing)
+    m_debugLinePass.Render(m_cameraView, m_cameraProj, w, h);
+
     // Apply post-processing: Tone mapping + Gamma correction (HDR → LDR sRGB)
     m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h, 1.0f);
 }
@@ -538,6 +572,8 @@ void CMainPass::Shutdown()
 {
     // Skybox is now managed by Scene singleton - no need to shut down here
     m_postProcess.Shutdown();
+    m_debugLinePass.Shutdown();
+    CGridPass::Instance().Shutdown();
     m_cbFrame.Reset();
     m_cbObj.Reset();
     m_inputLayout.Reset();

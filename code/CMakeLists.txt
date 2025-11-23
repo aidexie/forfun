@@ -116,6 +116,12 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.cpp
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.h
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
+    ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
+    ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
+    ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h
+    ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.cpp
+    ${CODE_PATH}/Engine/Rendering/GridPass.h
+    ${CODE_PATH}/Engine/Rendering/GridPass.cpp
 )
 
 # Shader files (for IDE visibility)
@@ -132,6 +138,11 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/Skybox.ps.hlsl
     ${CODE_PATH}/Shader/EquirectToCubemap.vs.hlsl
     ${CODE_PATH}/Shader/EquirectToCubemap.ps.hlsl
+    ${CODE_PATH}/Shader/DebugLine.vs.hlsl
+    ${CODE_PATH}/Shader/DebugLine.gs.hlsl
+    ${CODE_PATH}/Shader/DebugLine.ps.hlsl
+    ${CODE_PATH}/Shader/Grid.vs.hlsl
+    ${CODE_PATH}/Shader/Grid.ps.hlsl
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})
@@ -146,8 +157,19 @@ if (MSVC)
         ${CODE_PATH}/Shader/BrdfLut.vs.hlsl
         ${CODE_PATH}/Shader/Skybox.vs.hlsl
         ${CODE_PATH}/Shader/EquirectToCubemap.vs.hlsl
+        ${CODE_PATH}/Shader/DebugLine.vs.hlsl
+        ${CODE_PATH}/Shader/Grid.vs.hlsl
         PROPERTIES
         VS_SHADER_TYPE Vertex
+        VS_SHADER_MODEL 5.0
+        VS_SHADER_ENTRYPOINT main
+    )
+
+    # Geometry Shaders
+    set_source_files_properties(
+        ${CODE_PATH}/Shader/DebugLine.gs.hlsl
+        PROPERTIES
+        VS_SHADER_TYPE Geometry
         VS_SHADER_MODEL 5.0
         VS_SHADER_ENTRYPOINT main
     )
@@ -160,6 +182,8 @@ if (MSVC)
         ${CODE_PATH}/Shader/BrdfLut.ps.hlsl
         ${CODE_PATH}/Shader/Skybox.ps.hlsl
         ${CODE_PATH}/Shader/EquirectToCubemap.ps.hlsl
+        ${CODE_PATH}/Shader/DebugLine.ps.hlsl
+        ${CODE_PATH}/Shader/Grid.ps.hlsl
         PROPERTIES
         VS_SHADER_TYPE Pixel
         VS_SHADER_MODEL 5.0

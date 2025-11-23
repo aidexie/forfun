@@ -12,6 +12,7 @@
 #include "Engine/Rendering/MainPass.h"  // 主渲染流程
 #include "Engine/Rendering/ShadowPass.h"  // 阴影渲染流程
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
+#include "Engine/Rendering/DebugRenderSystem.h"  // Debug 几何渲染
 #include "Console.h"
 
 // ImGui
@@ -23,8 +24,6 @@
 #include "Panels.h"   // Panels::DrawDockspace / DrawHierarchy / DrawInspector / DrawViewport
 #include "Scene.h"    // 面板的场景数据结构
 #include "Camera.h"   // EditorCamera（Viewport 面板用）
-#include "Components/Transform.h"
-#include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
 #include "SceneSerializer.h"
 
@@ -311,6 +310,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                               g_main_pass.GetCameraViewMatrix(),
                               g_main_pass.GetCameraProjMatrix());
         }
+
+        // Clear debug line buffer at start of frame
+        g_main_pass.GetDebugLinePass().BeginFrame();
+
+        // Collect and render debug geometry (AABB, rays, gizmos, etc.)
+        CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_main_pass.GetDebugLinePass());
 
         // Main Pass (use shadow output bundle)
         g_main_pass.Render(CScene::Instance(), vpW, vpH, dt, &g_shadow_pass.GetOutput());

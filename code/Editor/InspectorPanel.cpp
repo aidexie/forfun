@@ -46,6 +46,15 @@ public:
         }
     }
 
+    void VisitFloat3ReadOnly(const char* name, const DirectX::XMFLOAT3& value) override {
+        // Display as read-only (disabled) input
+        float arr[3] = { value.x, value.y, value.z };
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+        ImGui::InputFloat3(name, arr, "%.3f", ImGuiInputTextFlags_ReadOnly);
+        ImGui::PopStyleColor(2);
+    }
+
     void VisitFloat3AsAngles(const char* name, DirectX::XMFLOAT3& valueRadians) override {
         // Convert radians to degrees for UI
         float degrees[3] = {

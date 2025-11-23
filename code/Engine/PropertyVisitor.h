@@ -25,6 +25,11 @@ public:
     // Math types
     virtual void VisitFloat3(const char* name, DirectX::XMFLOAT3& value) = 0;
 
+    // Float3 read-only (for display only, cannot be edited)
+    virtual void VisitFloat3ReadOnly(const char* name, const DirectX::XMFLOAT3& value) {
+        // Fallback: do nothing (read-only fields are optional for serialization)
+    }
+
     // Float3 as angles (UI shows degrees, storage/serialization uses radians)
     // Default: treat as regular Float3 (radians) - for JSON serialization
     // ImGui visitor overrides to convert rad<->deg

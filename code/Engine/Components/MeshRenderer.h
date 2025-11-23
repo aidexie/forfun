@@ -14,8 +14,14 @@ struct SMeshRenderer : public CComponent {
     std::string path; // Path to mesh file (.obj, .gltf, .glb)
     std::vector<std::shared_ptr<GpuMeshResource>> meshes; // GPU resources (glTF may have multiple sub-meshes)
 
+    // Debug: show bounds wireframe in viewport
+    bool showBounds = false;
+
     // Ensure GPU mesh exists, returns true if ok
     bool EnsureUploaded();
+
+    // Get local space AABB from mesh resource (read-only access)
+    bool GetLocalBounds(DirectX::XMFLOAT3& outMin, DirectX::XMFLOAT3& outMax) const;
 
     const char* GetTypeName() const override { return "MeshRenderer"; }
 
@@ -30,6 +36,16 @@ struct SMeshRenderer : public CComponent {
         if (path != oldPath) {
             meshes.clear(); // Clear to trigger reload in EnsureUploaded
         }
+
+        // Show local bounds info (read-only) from mesh resource
+        DirectX::XMFLOAT3 localMin, localMax;
+        if (GetLocalBounds(localMin, localMax)) {
+            visitor.VisitFloat3ReadOnly("Local Bounds Min", localMin);
+            visitor.VisitFloat3ReadOnly("Local Bounds Max", localMax);
+        }
+
+        // Debug option
+        visitor.VisitBool("Show Bounds", showBounds);
     }
 };
 

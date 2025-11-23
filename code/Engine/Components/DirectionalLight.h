@@ -2,6 +2,7 @@
 #include "Component.h"
 #include "PropertyVisitor.h"
 #include "ComponentRegistry.h"
+#include "Transform.h"
 #include <DirectXMath.h>
 
 // DirectionalLight: Directional light source (like the sun)

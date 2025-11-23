@@ -4,6 +4,8 @@
 #include <DirectXMath.h>
 #include "ShadowPass.h"
 #include "PostProcessPass.h"
+#include "DebugLinePass.h"
+#include "GridPass.h"
 // Forward declarations
 class CScene;
 class CShadowPass;
@@ -20,11 +22,12 @@ public:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
         Microsoft::WRL::ComPtr<ID3D11Texture2D>         depth;
         Microsoft::WRL::ComPtr<ID3D11DepthStencilView>  dsv;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> depthSRV;  // For reading depth in shaders
         UINT w = 0, h = 0;
 
         void Reset() {
             color.Reset(); rtv.Reset(); srv.Reset();
-            depth.Reset(); dsv.Reset();
+            depth.Reset(); dsv.Reset(); depthSRV.Reset();
             w = h = 0;
         }
     };
@@ -56,6 +59,9 @@ public:
     // 获取摄像机矩阵（用于 ShadowPass 视锥拟合）
     DirectX::XMMATRIX GetCameraViewMatrix() const { return m_cameraView; }
     DirectX::XMMATRIX GetCameraProjMatrix() const { return m_cameraProj; }
+
+    // 获取 DebugLinePass（用于外部添加调试线条）
+    CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
 
 private:
     void ensureOffscreen(UINT w, UINT h);
@@ -93,6 +99,9 @@ private:
     // Skybox is now managed by Scene singleton
     // Post-process (tone mapping + gamma correction)
     CPostProcessPass m_postProcess;
+
+    // Debug line rendering
+    CDebugLinePass m_debugLinePass;
 
 private:
     // 内部工具

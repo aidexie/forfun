@@ -8,6 +8,7 @@
 #include "GameObject.h"
 #include "Components/Transform.h"
 #include "Rendering/MainPass.h"
+#include "Rendering/GridPass.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <wrl.h>
@@ -153,6 +154,16 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
         }
 
         ImGui::PopItemWidth();
+    }
+
+    ImGui::SameLine();
+    ImGui::Separator();
+    ImGui::SameLine();
+
+    // Show Grid toggle
+    bool gridEnabled = CGridPass::Instance().IsEnabled();
+    if (ImGui::Checkbox("Show Grid", &gridEnabled)) {
+        CGridPass::Instance().SetEnabled(gridEnabled);
     }
 
     ImGui::Separator();

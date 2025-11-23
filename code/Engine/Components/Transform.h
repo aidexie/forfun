@@ -16,6 +16,7 @@ struct STransform : public CComponent {
         // rotationEuler storage: (pitch, yaw, roll)
         XMMATRIX R = XMMatrixRotationRollPitchYaw(rotationEuler.x, rotationEuler.y, rotationEuler.z);
         XMMATRIX T = XMMatrixTranslation(position.x, position.y, position.z);
+        // DirectX row-major: P' = P * World, apply order: Scale -> Rotate -> Translate (SRT standard)
         return S * R * T;
     }
 

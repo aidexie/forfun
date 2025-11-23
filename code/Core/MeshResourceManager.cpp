@@ -130,6 +130,27 @@ std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadMesh(
 
     resource->indexCount = (UINT)cpu.indices.size();
 
+    // Compute AABB from vertices
+    if (!cpu.vertices.empty()) {
+        using namespace DirectX;
+        XMFLOAT3 minBounds(FLT_MAX, FLT_MAX, FLT_MAX);
+        XMFLOAT3 maxBounds(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+        for (const auto& v : cpu.vertices) {
+            minBounds.x = std::min(minBounds.x, v.px);
+            minBounds.y = std::min(minBounds.y, v.py);
+            minBounds.z = std::min(minBounds.z, v.pz);
+
+            maxBounds.x = std::max(maxBounds.x, v.px);
+            maxBounds.y = std::max(maxBounds.y, v.py);
+            maxBounds.z = std::max(maxBounds.z, v.pz);
+        }
+
+        resource->localBoundsMin = minBounds;
+        resource->localBoundsMax = maxBounds;
+        resource->hasBounds = true;
+    }
+
     // Leave textures as nullptr (Renderer will use defaults during rendering)
 
     return resource;
