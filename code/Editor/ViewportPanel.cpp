@@ -7,8 +7,10 @@
 #include "Scene.h"
 #include "GameObject.h"
 #include "Components/Transform.h"
+#include "Components/MeshRenderer.h"
 #include "Rendering/MainPass.h"
 #include "Rendering/GridPass.h"
+#include "PickingUtils.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <wrl.h>
@@ -26,38 +28,6 @@ static bool s_useSnap = false;
 static float s_snapTranslate[3] = {1.0f, 1.0f, 1.0f};
 static float s_snapRotate = 15.0f;  // degrees
 static float s_snapScale = 0.5f;
-
-// Helper: Ray-AABB intersection test
-static bool RayIntersectsAABB(
-    const XMFLOAT3& rayOrigin,
-    const XMFLOAT3& rayDir,
-    const XMFLOAT3& aabbMin,
-    const XMFLOAT3& aabbMax,
-    float& outDistance)
-{
-    XMVECTOR origin = XMLoadFloat3(&rayOrigin);
-    XMVECTOR dir = XMLoadFloat3(&rayDir);
-    XMVECTOR boxMin = XMLoadFloat3(&aabbMin);
-    XMVECTOR boxMax = XMLoadFloat3(&aabbMax);
-
-    // Compute intersection intervals
-    XMVECTOR invDir = XMVectorReciprocal(dir);
-    XMVECTOR t1 = XMVectorMultiply(XMVectorSubtract(boxMin, origin), invDir);
-    XMVECTOR t2 = XMVectorMultiply(XMVectorSubtract(boxMax, origin), invDir);
-
-    XMVECTOR tMin = XMVectorMin(t1, t2);
-    XMVECTOR tMax = XMVectorMax(t1, t2);
-
-    float tNear = XMVectorGetX(XMVectorMax(XMVectorMax(tMin, XMVectorSplatY(tMin)), XMVectorSplatZ(tMin)));
-    float tFar = XMVectorGetX(XMVectorMin(XMVectorMin(tMax, XMVectorSplatY(tMax)), XMVectorSplatZ(tMax)));
-
-    if (tNear > tFar || tFar < 0.0f) {
-        return false;  // No intersection
-    }
-
-    outDistance = (tNear < 0.0f) ? tFar : tNear;
-    return true;
-}
 
 ImVec2 Panels::GetViewportLastSize() {
     return s_lastAvail;
@@ -385,6 +355,77 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
                     }
                 }
             }
+        }
+    }
+
+    // ============================================
+    // Mouse Picking (Object Selection)
+    // ============================================
+    // Only process clicks when:
+    // - Left mouse button clicked
+    // - Mouse is over viewport image
+    // - Not manipulating gizmo
+    // - Not over other ImGui UI
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        ImGui::IsItemHovered() &&
+        !ImGuizmo::IsUsing() &&
+        !ImGui::IsAnyItemActive() &&
+        mainPass)
+    {
+        // Get mouse position relative to viewport image
+        ImVec2 mousePos = ImGui::GetMousePos();
+        float mouseX = mousePos.x - imagePos.x;
+        float mouseY = mousePos.y - imagePos.y;
+
+        // Check if mouse is within viewport bounds
+        if (mouseX >= 0 && mouseX < avail.x && mouseY >= 0 && mouseY < avail.y) {
+            // Generate ray from screen coordinates
+            XMMATRIX view = mainPass->GetCameraViewMatrix();
+            XMMATRIX proj = mainPass->GetCameraProjMatrix();
+
+            PickingUtils::Ray ray = PickingUtils::GenerateRayFromScreen(
+                mouseX, mouseY, avail.x, avail.y, view, proj);
+
+            // Find closest intersected object
+            float closestDistance = FLT_MAX;
+            int closestObjectIndex = -1;
+
+            const auto& objects = scene.GetWorld().Objects();
+            for (size_t i = 0; i < objects.size(); ++i) {
+                CGameObject* obj = objects[i].get();
+                if (!obj) continue;
+
+                // Get transform and mesh renderer
+                STransform* transform = obj->GetComponent<STransform>();
+                SMeshRenderer* meshRenderer = obj->GetComponent<SMeshRenderer>();
+
+                if (!transform || !meshRenderer) continue;
+
+                // Get local-space AABB from mesh
+                XMFLOAT3 localMin, localMax;
+                if (!meshRenderer->GetLocalBounds(localMin, localMax)) {
+                    continue;  // No bounds available
+                }
+
+                // Transform AABB to world space
+                XMMATRIX worldMat = transform->WorldMatrix();
+                XMFLOAT3 worldMin, worldMax;
+                PickingUtils::TransformAABB(localMin, localMax, worldMat, worldMin, worldMax);
+
+                // Test ray intersection with world-space AABB
+                std::optional<float> hitDistance = PickingUtils::RayAABBIntersect(ray, worldMin, worldMax);
+
+                if (hitDistance.has_value() && hitDistance.value() < closestDistance) {
+                    closestDistance = hitDistance.value();
+                    closestObjectIndex = static_cast<int>(i);
+                }
+            }
+
+            // Update selection (only if we hit something)
+            if (closestObjectIndex >= 0) {
+                scene.SetSelected(closestObjectIndex);
+            }
+            // Note: User requested NOT to deselect when clicking empty space
         }
     }
 

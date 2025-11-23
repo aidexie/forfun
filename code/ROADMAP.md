@@ -4,7 +4,7 @@
 
 ---
 
-## 当前进度 (2025-11-22)
+## 当前进度 (2025-11-23)
 
 ### ✅ 已完成
 - **Transform Gizmo**: 平移/旋转/缩放，Local/World 切换，Grid snapping
@@ -12,6 +12,9 @@
 - **KTX2 集成**: libktx 库，跨平台纹理格式
 - **.ffasset 格式**: JSON 资源描述符
 - **FFAsset Loader**: 加载 .ffasset 和 KTX2 纹理
+- **鼠标拾取**: CPU射线投射选择物体（Ray-AABB相交测试）
+- **地面参考网格**: Shader-based无限网格，Unity风格，双层级（1m+10m）
+- **Debug渲染系统**: GPU几何着色器渲染AABB线框，深度测试
 
 ### 🔜 下一步
 - **启动时缓存检测**: 检查 KTX2 是否比 HDR 源文件新
@@ -31,9 +34,10 @@
 - 多选支持 (待实现)
 
 ### 1.2 Viewport Interaction
-- 鼠标拾取（射线投射选择物体）
-- 地面参考网格
-- 灯光范围/探针边界可视化
+- ~~鼠标拾取（射线投射选择物体）~~ ✅
+- ~~地面参考网格~~ ✅
+- ~~AABB Debug可视化~~ ✅
+- 灯光范围/探针边界可视化 (待实现)
 
 ### 1.3 Asset Browser Panel
 - 浏览 `E:/forfun/assets` 目录

@@ -57,6 +57,8 @@ set(EDITOR_SRC
     ${CODE_PATH}/Editor/ViewportPanel.cpp
     ${CODE_PATH}/Editor/Panels_IrradianceDebug.cpp
     ${CODE_PATH}/Editor/Panels_HDRExport.cpp
+    ${CODE_PATH}/Editor/PickingUtils.h
+    ${CODE_PATH}/Editor/PickingUtils.cpp
 )
 
 add_executable(forfun WIN32
