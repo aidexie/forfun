@@ -90,6 +90,9 @@ void Panels::DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass) {
             if (ImGui::MenuItem("HDR Export")) {
                 Panels::ShowHDRExportWindow(true);
             }
+            if (ImGui::MenuItem("Scene Light Settings")) {
+                Panels::ShowSceneLightSettings(true);
+            }
             ImGui::EndMenu();
         }
 

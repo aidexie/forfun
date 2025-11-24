@@ -20,4 +20,9 @@ namespace Panels {
     // HDR Export Window
     void ShowHDRExportWindow(bool show);
     void DrawHDRExportWindow();
+
+    // Scene Light Settings Window
+    void ShowSceneLightSettings(bool show);
+    void DrawSceneLightSettings();
+    bool IsSceneLightSettingsVisible();
 }

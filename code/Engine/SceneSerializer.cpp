@@ -172,6 +172,11 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
             j["gameObjects"].push_back(goJson);
         }
 
+        // Serialize light settings
+        json settingsJson;
+        settingsJson["skyboxAssetPath"] = scene.GetLightSettings().skyboxAssetPath;
+        j["lightSettings"] = settingsJson;
+
         // Write to file
         std::ofstream file(filepath);
         if (!file.is_open()) {
@@ -212,6 +217,16 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
             scene.GetWorld().Destroy(0);
         }
         scene.SetSelected(-1);
+
+        // Load light settings
+        if (j.contains("lightSettings")) {
+            const auto& settingsJson = j["lightSettings"];
+            if (settingsJson.contains("skyboxAssetPath")) {
+                scene.GetLightSettings().skyboxAssetPath = settingsJson["skyboxAssetPath"].get<std::string>();
+                // Apply settings immediately: reload skybox
+                scene.Initialize(scene.GetLightSettings().skyboxAssetPath);
+            }
+        }
 
         // Load GameObjects
         if (j.contains("gameObjects") && j["gameObjects"].is_array()) {

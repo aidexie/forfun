@@ -4,6 +4,7 @@
 #include "World.h"
 #include "Rendering/Skybox.h"
 #include "Rendering/IBLGenerator.h"
+#include "SceneLightSettings.h"
 
 // CScene singleton - manages CWorld, skybox, and IBL resources
 class CScene {
@@ -45,6 +46,10 @@ public:
     CIBLGenerator& GetIBLGenerator() { return m_iblGen; }
     const CIBLGenerator& GetIBLGenerator() const { return m_iblGen; }
 
+    // Light settings access
+    CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
+    const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
+
 private:
     // Private constructor for singleton
     CScene() = default;
@@ -55,6 +60,7 @@ private:
     int m_selected = -1;
     CSkybox m_skybox;
     CIBLGenerator m_iblGen;
+    CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
 };
 

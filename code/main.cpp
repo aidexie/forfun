@@ -405,6 +405,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 &g_main_pass); // 视口面板（使用你已有的离屏示例）
             Panels::DrawIrradianceDebug();   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment/BRDF LUT 四个 Tab）
             Panels::DrawHDRExportWindow();   // HDR Export 窗口
+            Panels::DrawSceneLightSettings();  // Scene Light Settings 窗口
         }
 
         // 5.5 提交 ImGui
