@@ -30,7 +30,7 @@ public:
             // Create a cube in front of the camera
             auto* cube = scene.GetWorld().Create("TestCube");
 
-            auto* transform = cube->GetComponent<STransform>();
+            auto* transform = cube->AddComponent<STransform>();
             transform->position = {0.0f, 0.0f, 5.0f};  // 5 units in front
             transform->scale = {1.0f, 1.0f, 1.0f};
 

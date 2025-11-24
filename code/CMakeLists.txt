@@ -47,7 +47,7 @@ if (MSVC)
     target_compile_options(imguizmo PRIVATE /utf-8)
 endif()
 
-file(GLOB CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
+file(GLOB_RECURSE CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
 file(GLOB ENGINE_SRC ${CODE_PATH}/Engine/*.cpp ${CODE_PATH}/Engine/*.h)
 set(EDITOR_SRC
     ${CODE_PATH}/Editor/Panels.h

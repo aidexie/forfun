@@ -10,7 +10,7 @@
 #include <ktx.h>
 #include "Engine/Rendering/Skybox.h"
 #include "Engine/Rendering/IBLGenerator.h"
-#include "Core/KTXExporter.h"
+#include "Core/Exporter/KTXExporter.h"
 
 using json = nlohmann::json;
 

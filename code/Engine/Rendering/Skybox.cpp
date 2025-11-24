@@ -1,7 +1,7 @@
 #include "Skybox.h"
 #include "Core/DX11Context.h"
-#include "Core/HdrLoader.h"
-#include "Core/KTXLoader.h"
+#include "Core/Loader/HdrLoader.h"
+#include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
 #include <d3dcompiler.h>
 #include <vector>

@@ -1,9 +1,9 @@
 #include "MeshResourceManager.h"
 #include "DX11Context.h"
 #include "Mesh.h"
-#include "ObjLoader.h"
-#include "GltfLoader.h"
-#include "TextureLoader.h"
+#include "Loader/ObjLoader.h"
+#include "Loader/GltfLoader.h"
+#include "Loader/TextureLoader.h"
 #include <d3d11.h>
 #include <algorithm>
 
