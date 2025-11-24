@@ -12,6 +12,9 @@
 
 using Microsoft::WRL::ComPtr;
 
+// Window visibility state
+static bool s_showWindow = false;
+
 // Cache for environment face SRVs (key = mipLevel * 6 + faceIndex)
 static std::unordered_map<int, ComPtr<ID3D11ShaderResourceView>> g_envFaceSRVCache;
 static ID3D11Texture2D* g_lastEnvTexture = nullptr;
@@ -81,7 +84,9 @@ static ID3D11ShaderResourceView* GetEnvironmentFaceSRV(
 }
 
 void Panels::DrawIrradianceDebug() {
-    ImGui::Begin("IBL Debug");
+    if (!s_showWindow) return;
+
+    if (ImGui::Begin("IBL Debug", &s_showWindow)) {
 
     ImGui::Text("Image-Based Lighting Debug Visualization");
     ImGui::TextColored(ImVec4(0.7f, 1.0f, 0.7f, 1.0f), "IBL resources auto-generated for rendering on startup");
@@ -565,5 +570,14 @@ void Panels::DrawIrradianceDebug() {
     ImGui::TextWrapped("Note: This displays HDR values tonemapped by ImGui. "
         "For accurate inspection, check individual pixel values with a color picker tool.");
 
+    }
     ImGui::End();
+}
+
+void Panels::ShowIrradianceDebug(bool show) {
+    s_showWindow = show;
+}
+
+bool Panels::IsIrradianceDebugVisible() {
+    return s_showWindow;
 }

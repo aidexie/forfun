@@ -30,6 +30,7 @@ void Panels::DrawSceneLightSettings() {
         ImGui::PopItemWidth();
 
         ImGui::SameLine();
+
         if (ImGui::Button("Browse...##Skybox")) {
             // Open file dialog
             OPENFILENAMEA ofn{};
@@ -41,8 +42,7 @@ void Panels::DrawSceneLightSettings() {
             ofn.lpstrFile = fileName;
             ofn.nMaxFile = MAX_PATH;
             ofn.lpstrTitle = "Select Skybox Asset";
-            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
             if (GetOpenFileNameA(&ofn)) {
                 // Convert absolute path to relative path if possible
                 std::string selectedPath = fileName;

@@ -16,6 +16,8 @@ namespace Panels {
         size_t srcWidth, size_t srcHeight,
         CMainPass* mainPass = nullptr);
     void DrawIrradianceDebug();  // Uses CScene::Instance() internally
+    void ShowIrradianceDebug(bool show);
+    bool IsIrradianceDebugVisible();
 
     // HDR Export Window
     void ShowHDRExportWindow(bool show);

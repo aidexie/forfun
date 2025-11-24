@@ -4,7 +4,7 @@
 // Scene-level lighting settings
 class CSceneLightSettings {
 public:
-    std::string skyboxAssetPath = "skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset";
+    std::string skyboxAssetPath = "";
 
     // Future additions:
     // float iblIntensity = 1.0f;

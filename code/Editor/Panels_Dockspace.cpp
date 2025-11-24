@@ -93,6 +93,9 @@ void Panels::DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass) {
             if (ImGui::MenuItem("Scene Light Settings")) {
                 Panels::ShowSceneLightSettings(true);
             }
+            if (ImGui::MenuItem("IBL Debug")) {
+                Panels::ShowIrradianceDebug(true);
+            }
             ImGui::EndMenu();
         }
 
