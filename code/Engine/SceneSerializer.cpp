@@ -1,4 +1,5 @@
 // SceneSerializer.cpp
+#include "Editor/DiagnosticLog.h"
 // NOTE: Requires nlohmann/json library
 // Download json.hpp from: https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
 // Place at: E:\forfun\thirdparty\nlohmann\json.hpp
@@ -137,7 +138,7 @@ static CComponent* DeserializeComponent(CGameObject* go, const json& j) {
         CJsonReadVisitor visitor(j);
         comp->VisitProperties(visitor);
     } else {
-        std::cerr << "ERROR: Failed to create component of type: " << type << std::endl;
+        CDiagnosticLog::Error("ERROR: Failed to create component of type: " << type);
     }
 
     return comp;
@@ -174,7 +175,7 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
         // Write to file
         std::ofstream file(filepath);
         if (!file.is_open()) {
-            std::cerr << "Failed to open file for writing: " << filepath << std::endl;
+            CDiagnosticLog::Error("Failed to open file for writing: " << filepath);
             return false;
         }
 
@@ -185,7 +186,7 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "ERROR: Failed to save scene: " << e.what() << std::endl;
+        CDiagnosticLog::Error("ERROR: Failed to save scene: " << e.what());
         return false;
     }
 }
@@ -198,7 +199,7 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
         // Read file
         std::ifstream file(filepath);
         if (!file.is_open()) {
-            std::cerr << "ERROR: Failed to open scene file: " << filepath << std::endl;
+            CDiagnosticLog::Error("ERROR: Failed to open scene file: " << filepath);
             return false;
         }
 
@@ -231,7 +232,7 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "ERROR: Failed to load scene: " << e.what() << std::endl;
+        CDiagnosticLog::Error("ERROR: Failed to load scene: " << e.what());
         return false;
     }
 }

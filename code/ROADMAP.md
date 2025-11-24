@@ -4,7 +4,7 @@
 
 ---
 
-## 当前进度 (2025-11-23)
+## 当前进度 (2025-11-24)
 
 ### ✅ 已完成
 - **Transform Gizmo**: 平移/旋转/缩放，Local/World 切换，Grid snapping
@@ -15,8 +15,11 @@
 - **鼠标拾取**: CPU射线投射选择物体（Ray-AABB相交测试）
 - **地面参考网格**: Shader-based无限网格，Unity风格，双层级（1m+10m）
 - **Debug渲染系统**: GPU几何着色器渲染AABB线框，深度测试
+- **统一日志系统**: CDiagnosticLog 替代所有 std::cout/cerr，支持 runtime.log 和 session logging
 
 ### 🔜 下一步
+- **自动化测试框架**: 命令行驱动测试 (--task, --auto-test, --exit-after)
+- **截图功能**: F12 快捷键捕获 Viewport
 - **启动时缓存检测**: 检查 KTX2 是否比 HDR 源文件新
 - **Asset Browser**: 浏览资源文件夹
 

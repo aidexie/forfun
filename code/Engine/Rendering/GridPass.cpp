@@ -1,6 +1,7 @@
 // Engine/Rendering/GridPass.cpp
 #include "GridPass.h"
 #include "Core/DX11Context.h"
+#include "Editor/DiagnosticLog.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
@@ -14,7 +15,7 @@ using namespace DirectX;
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        OutputDebugStringA(("Failed to open shader file: " + filepath + "\n").c_str());
+        CDiagnosticLog::Error("Failed to open shader file: %s", filepath.c_str());
         return "";
     }
     std::stringstream buffer;
@@ -56,7 +57,7 @@ void CGridPass::CreateShaders() {
     std::string psSource = LoadShaderSource("../source/code/Shader/Grid.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        OutputDebugStringA("ERROR: Failed to load Grid shader files!\n");
+        CDiagnosticLog::Error("Failed to load Grid shader files!");
         return;
     }
 
@@ -72,9 +73,8 @@ void CGridPass::CreateShaders() {
                            nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== GRID VERTEX SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n============================================\n");
+            CDiagnosticLog::Error("=== GRID VERTEX SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -84,9 +84,8 @@ void CGridPass::CreateShaders() {
                    nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== GRID PIXEL SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n===========================================\n");
+            CDiagnosticLog::Error("=== GRID PIXEL SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }

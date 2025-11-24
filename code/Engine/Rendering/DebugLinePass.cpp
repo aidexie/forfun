@@ -1,6 +1,7 @@
 // Engine/Rendering/DebugLinePass.cpp
 #include "DebugLinePass.h"
 #include "Core/DX11Context.h"
+#include "Editor/DiagnosticLog.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
@@ -14,7 +15,7 @@ using namespace DirectX;
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        OutputDebugStringA(("Failed to open shader file: " + filepath + "\n").c_str());
+        CDiagnosticLog::Error("Failed to open shader file: %s", filepath.c_str());
         return "";
     }
     std::stringstream buffer;
@@ -53,7 +54,7 @@ void CDebugLinePass::CreateShaders() {
     std::string psSource = LoadShaderSource("../source/code/Shader/DebugLine.ps.hlsl");
 
     if (vsSource.empty() || gsSource.empty() || psSource.empty()) {
-        OutputDebugStringA("ERROR: Failed to load DebugLine shader files!\n");
+        CDiagnosticLog::Error("Failed to load DebugLine shader files!");
         return;
     }
 
@@ -69,9 +70,8 @@ void CDebugLinePass::CreateShaders() {
                            nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== DEBUGLINE VERTEX SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n==================================================\n");
+            CDiagnosticLog::Error("=== DEBUGLINE VERTEX SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -81,9 +81,8 @@ void CDebugLinePass::CreateShaders() {
                    nullptr, nullptr, "main", "gs_5_0", compileFlags, 0, &gsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== DEBUGLINE GEOMETRY SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n====================================================\n");
+            CDiagnosticLog::Error("=== DEBUGLINE GEOMETRY SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -93,9 +92,8 @@ void CDebugLinePass::CreateShaders() {
                    nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== DEBUGLINE PIXEL SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n=================================================\n");
+            CDiagnosticLog::Error("=== DEBUGLINE PIXEL SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -143,7 +141,7 @@ void CDebugLinePass::BeginFrame() {
 
 void CDebugLinePass::AddLine(XMFLOAT3 from, XMFLOAT3 to, XMFLOAT4 color) {
     if (m_dynamicLines.size() + 2 > m_maxVertices) {
-        OutputDebugStringA("WARNING: DebugLinePass vertex buffer overflow!\n");
+        CDiagnosticLog::Warning("DebugLinePass vertex buffer overflow!");
         return;
     }
 

@@ -1,7 +1,7 @@
 #include "FFAssetLoader.h"
+#include "Editor/DiagnosticLog.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
-#include <iostream>
 #include <filesystem>
 
 using json = nlohmann::json;
@@ -11,7 +11,7 @@ bool CFFAssetLoader::LoadSkyboxAsset(const std::string& ffassetPath, SkyboxAsset
     // Read JSON file
     std::ifstream file(ffassetPath);
     if (!file.is_open()) {
-        std::cerr << "FFAssetLoader: Failed to open " << ffassetPath << std::endl;
+        CDiagnosticLog::Error("FFAssetLoader: Failed to open %s", ffassetPath.c_str());
         return false;
     }
 
@@ -19,20 +19,20 @@ bool CFFAssetLoader::LoadSkyboxAsset(const std::string& ffassetPath, SkyboxAsset
     try {
         file >> j;
     } catch (const std::exception& e) {
-        std::cerr << "FFAssetLoader: Failed to parse JSON: " << e.what() << std::endl;
+        CDiagnosticLog::Error("FFAssetLoader: Failed to parse JSON: %s", e.what());
         return false;
     }
 
     // Check type
     if (!j.contains("type") || j["type"] != "skybox") {
-        std::cerr << "FFAssetLoader: ERROR - Asset type is not 'skybox' (got: "
-                  << (j.contains("type") ? j["type"].get<std::string>() : "missing") << ")" << std::endl;
+        std::string typeStr = j.contains("type") ? j["type"].get<std::string>() : "missing";
+        CDiagnosticLog::Error("FFAssetLoader: Asset type is not 'skybox' (got: %s)", typeStr.c_str());
         return false;
     }
 
     // Check version
     if (!j.contains("version")) {
-        std::cerr << "FFAssetLoader: Warning - Missing version field" << std::endl;
+        CDiagnosticLog::Warning("FFAssetLoader: Missing version field");
     }
 
     // Get base directory
@@ -40,14 +40,14 @@ bool CFFAssetLoader::LoadSkyboxAsset(const std::string& ffassetPath, SkyboxAsset
 
     // Parse data fields
     if (!j.contains("data")) {
-        std::cerr << "FFAssetLoader: Missing 'data' field" << std::endl;
+        CDiagnosticLog::Error("FFAssetLoader: Missing 'data' field");
         return false;
     }
 
     auto& data = j["data"];
 
     if (!data.contains("env") || !data.contains("irr") || !data.contains("prefilter")) {
-        std::cerr << "FFAssetLoader: Missing required texture paths (env/irr/prefilter)" << std::endl;
+        CDiagnosticLog::Error("FFAssetLoader: Missing required texture paths (env/irr/prefilter)");
         return false;
     }
 
@@ -61,10 +61,10 @@ bool CFFAssetLoader::LoadSkyboxAsset(const std::string& ffassetPath, SkyboxAsset
         outAsset.sourcePath = (basePath / j["source"].get<std::string>()).string();
     }
 
-    std::cout << "FFAssetLoader: Loaded skybox asset from " << ffassetPath << std::endl;
-    std::cout << "  - Environment: " << outAsset.envPath << std::endl;
-    std::cout << "  - Irradiance: " << outAsset.irrPath << std::endl;
-    std::cout << "  - Prefilter: " << outAsset.prefilterPath << std::endl;
+    std::CDiagnosticLog::Info("FFAssetLoader: Loaded skybox asset from %s",ffassetPath);
+    std::CDiagnosticLog::Info("  - Environment: %s",outAsset.envPath);
+    std::CDiagnosticLog::Info("  - Irradiance: %s",outAsset.irrPath);
+    std::CDiagnosticLog::Info("  - Prefilter: %s",outAsset.prefilterPath);
 
     return true;
 }

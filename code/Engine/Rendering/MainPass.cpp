@@ -1,6 +1,7 @@
 #include "MainPass.h"
 #include "ShadowPass.h"
 #include "Core/DX11Context.h"
+#include "Editor/DiagnosticLog.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Scene.h"
@@ -28,7 +29,7 @@ using namespace DirectX;
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        OutputDebugStringA(("Failed to open shader file: " + filepath + "\n").c_str());
+        CDiagnosticLog::Error("Failed to open shader file: %s", filepath.c_str());
         return "";
     }
     std::stringstream buffer;
@@ -120,7 +121,7 @@ void CMainPass::createPipeline()
     std::string psSource = LoadShaderSource("../source/code/Shader/MainPass.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        OutputDebugStringA("ERROR: Failed to load shader files!\n");
+        CDiagnosticLog::Error("Failed to load shader files!");
         return;
     }
     UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
@@ -133,9 +134,8 @@ void CMainPass::createPipeline()
     HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "MainPass.vs.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== VERTEX SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n========================================\n");
+            CDiagnosticLog::Error("=== VERTEX SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -144,9 +144,8 @@ void CMainPass::createPipeline()
     hr = D3DCompile(psSource.c_str(), psSource.size(), "MainPass.ps.hlsl", nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA("=== PIXEL SHADER COMPILATION ERROR ===\n");
-            OutputDebugStringA((const char*)err->GetBufferPointer());
-            OutputDebugStringA("\n=======================================\n");
+            CDiagnosticLog::Error("=== PIXEL SHADER COMPILATION ERROR ===");
+            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }

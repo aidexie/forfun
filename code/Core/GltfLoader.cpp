@@ -1,4 +1,5 @@
 #include "GltfLoader.h"
+#include "Editor/DiagnosticLog.h"
 #include <DirectXMath.h>
 #include <filesystem>
 #include <cassert>
@@ -46,7 +47,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
     const cgltf_accessor* acc_col = nullptr;
 
     // Debug: Print all attributes to check for vertex colors
-    std::cout << "  Primitive attributes (" << prim->attributes_count << "):" << std::endl;
+    CDiagnosticLog::Info("  Primitive attributes (" << prim->attributes_count << "):");
     for (size_t a=0;a<prim->attributes_count;++a){
         auto& att = prim->attributes[a];
         const char* typeName = "UNKNOWN";
@@ -60,7 +61,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
             case cgltf_attribute_type_weights: typeName = "WEIGHTS"; break;
             default: break;
         }
-        std::cout << "    - " << typeName << "_" << att.index << std::endl;
+        CDiagnosticLog::Info("    - " << typeName << "_" << att.index);
     }
 
     for (size_t a=0;a<prim->attributes_count;++a){

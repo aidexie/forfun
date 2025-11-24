@@ -26,6 +26,8 @@
 #include "Camera.h"   // EditorCamera（Viewport 面板用）
 #include "Components/DirectionalLight.h"
 #include "SceneSerializer.h"
+#include "DebugPaths.h"  // Debug output directories
+#include "DiagnosticLog.h"  // Logging system
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -126,25 +128,24 @@ static HWND CreateMainWindow(HINSTANCE hInst, int width, int height, WNDPROC pro
 void ForceWorkDir() {
     const char* kAssets = "E:\\forfun\\assets";
 
-    std::cout << "exists? " << std::filesystem::exists(kAssets) << "\n";
+    CDiagnosticLog::Info("Asset directory exists: %d", std::filesystem::exists(kAssets));
 
     int rc = _chdir(kAssets);
     if (rc != 0) {
-        std::cout << "_chdir rc=" << rc << " errno=" << errno << "\n";
+        CDiagnosticLog::Warning("_chdir failed: rc=%d, errno=%d", rc, errno);
         perror("_chdir");
     }
 
     char buf[512];
     _getcwd(buf, 512);
-    std::cout << "cwd after _chdir: " << buf << "\n";
+    CDiagnosticLog::Info("Current working directory after _chdir: %s", buf);
 
     // 尝试 WinAPI 的方式再改一次，看看是否成功
     if (!SetCurrentDirectoryA(kAssets)) {
-        std::cout << "SetCurrentDirectoryA failed, GetLastError="
-            << GetLastError() << "\n";
+        CDiagnosticLog::Warning("SetCurrentDirectoryA failed: GetLastError=%lu", GetLastError());
     }
     GetCurrentDirectoryA(512, buf);
-    std::cout << "cwd after SetCurrentDirectoryA: " << buf << "\n";
+    CDiagnosticLog::Info("Current working directory after SetCurrentDirectoryA: %s", buf);
 }
 
 // -----------------------------------------------------------------------------
@@ -169,24 +170,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     Core::Console::InitUTF8();
     ForceWorkDir();
 
+    // 0) Debug directories (ensure they exist for logging)
+    CDebugPaths::EnsureDirectoriesExist();
+
     // 1) 窗口
     const int initW = 1600, initH = 900;
     HWND hwnd = CreateMainWindow(hInstance, initW, initH, WndProc);
     if (!hwnd) {
-        std::cerr << "ERROR: Failed to create window!" << std::endl;
+        CDiagnosticLog::Error("Failed to create window!");
         exitCode = -1;
         goto cleanup;
     }
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
+    CDiagnosticLog::Info("Window created: %dx%d", initW, initH);
 
     // 2) DX11 初始化（仅DX）
     if (!CDX11Context::Instance().Initialize(hwnd, initW, initH)) {
-        std::cerr << "ERROR: Failed to initialize DX11 context!" << std::endl;
+        CDiagnosticLog::Error("Failed to initialize DX11 context!");
         exitCode = -2;
         goto cleanup;
     }
     dx11Initialized = true;
+    CDiagnosticLog::Info("DX11 context initialized");
 
     // 3) ImGui 初始化（在 main.cpp 内）
     IMGUI_CHECKVERSION();
@@ -200,35 +206,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     );
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // 如不需要可去掉
     imguiInitialized = true;
+    CDiagnosticLog::Info("ImGui initialized");
 
     g_editor_cam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
     // 4) Scene initialization (load from .ffasset or HDR)
-    std::cout << "Initializing Scene (loading skybox and IBL)..." << std::endl;
+    CDiagnosticLog::Info("Initializing Scene (loading skybox and IBL)...");
     if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset", 512))
     {
-        std::cerr << "ERROR: Failed to initialize Scene!" << std::endl;
+        CDiagnosticLog::Error("Failed to initialize Scene!");
         exitCode = -3;
         goto cleanup;
     }
     sceneInitialized = true;
+    CDiagnosticLog::Info("Scene initialized");
 
     // 5) MainPass and ShadowPass initialization
     if (!g_main_pass.Initialize())
     {
-        std::cerr << "ERROR: Failed to initialize MainPass!" << std::endl;
+        CDiagnosticLog::Error("Failed to initialize MainPass!");
         exitCode = -4;
         goto cleanup;
     }
     mainPassInitialized = true;
+    CDiagnosticLog::Info("MainPass initialized");
 
     if (!g_shadow_pass.Initialize())
     {
-        std::cerr << "ERROR: Failed to initialize ShadowPass!" << std::endl;
+        CDiagnosticLog::Error("Failed to initialize ShadowPass!");
         exitCode = -5;
         goto cleanup;
     }
     shadowPassInitialized = true;
+    CDiagnosticLog::Info("ShadowPass initialized");
 
     // // --- Setup World/GameObjects ---
     // {
@@ -360,35 +370,35 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 cleanup:
     // 7) 统一清理出口（按初始化相反顺序清理）
-    std::cout << "\n=== Shutting down (exit code: " << exitCode << ") ===" << std::endl;
+    CDiagnosticLog::Info("=== Shutting down (exit code: %d) ===", exitCode);
 
     if (shadowPassInitialized) {
-        std::cout << "Shutting down ShadowPass..." << std::endl;
+        CDiagnosticLog::Info("Shutting down ShadowPass...");
         g_shadow_pass.Shutdown();
     }
 
     if (mainPassInitialized) {
-        std::cout << "Shutting down MainPass..." << std::endl;
+        CDiagnosticLog::Info("Shutting down MainPass...");
         g_main_pass.Shutdown();
     }
 
     if (sceneInitialized) {
-        std::cout << "Shutting down Scene..." << std::endl;
+        CDiagnosticLog::Info("Shutting down Scene...");
         CScene::Instance().Shutdown();
     }
 
     if (imguiInitialized) {
-        std::cout << "Shutting down ImGui..." << std::endl;
+        CDiagnosticLog::Info("Shutting down ImGui...");
         ImGui_ImplDX11_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
     }
 
     if (dx11Initialized) {
-        std::cout << "Shutting down DX11..." << std::endl;
+        CDiagnosticLog::Info("Shutting down DX11...");
         CDX11Context::Instance().Shutdown();
     }
 
-    std::cout << "Shutdown complete." << std::endl;
+    CDiagnosticLog::Info("Shutdown complete.");
     return exitCode;
 }

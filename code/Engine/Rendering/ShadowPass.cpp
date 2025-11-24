@@ -1,5 +1,6 @@
 #include "ShadowPass.h"
 #include "Core/DX11Context.h"
+#include "Editor/DiagnosticLog.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Scene.h"
@@ -61,7 +62,7 @@ bool CShadowPass::Initialize()
 
     if (FAILED(hr)) {
         if (err) {
-            OutputDebugStringA((char*)err->GetBufferPointer());
+            CDiagnosticLog::Error("Shadow depth VS compilation error: %s", (char*)err->GetBufferPointer());
         }
         return false;
     }
