@@ -27,7 +27,7 @@
 #include "Components/DirectionalLight.h"
 #include "SceneSerializer.h"
 #include "DebugPaths.h"  // Debug output directories
-#include "DiagnosticLog.h"  // Logging system
+#include "FFLog.h"  // Logging system
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -128,24 +128,24 @@ static HWND CreateMainWindow(HINSTANCE hInst, int width, int height, WNDPROC pro
 void ForceWorkDir() {
     const char* kAssets = "E:\\forfun\\assets";
 
-    CDiagnosticLog::Info("Asset directory exists: %d", std::filesystem::exists(kAssets));
+    CFFLog::Info("Asset directory exists: %d", std::filesystem::exists(kAssets));
 
     int rc = _chdir(kAssets);
     if (rc != 0) {
-        CDiagnosticLog::Warning("_chdir failed: rc=%d, errno=%d", rc, errno);
+        CFFLog::Warning("_chdir failed: rc=%d, errno=%d", rc, errno);
         perror("_chdir");
     }
 
     char buf[512];
     _getcwd(buf, 512);
-    CDiagnosticLog::Info("Current working directory after _chdir: %s", buf);
+    CFFLog::Info("Current working directory after _chdir: %s", buf);
 
     // 尝试 WinAPI 的方式再改一次，看看是否成功
     if (!SetCurrentDirectoryA(kAssets)) {
-        CDiagnosticLog::Warning("SetCurrentDirectoryA failed: GetLastError=%lu", GetLastError());
+        CFFLog::Warning("SetCurrentDirectoryA failed: GetLastError=%lu", GetLastError());
     }
     GetCurrentDirectoryA(512, buf);
-    CDiagnosticLog::Info("Current working directory after SetCurrentDirectoryA: %s", buf);
+    CFFLog::Info("Current working directory after SetCurrentDirectoryA: %s", buf);
 }
 
 // -----------------------------------------------------------------------------
@@ -177,22 +177,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     const int initW = 1600, initH = 900;
     HWND hwnd = CreateMainWindow(hInstance, initW, initH, WndProc);
     if (!hwnd) {
-        CDiagnosticLog::Error("Failed to create window!");
+        CFFLog::Error("Failed to create window!");
         exitCode = -1;
         goto cleanup;
     }
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
-    CDiagnosticLog::Info("Window created: %dx%d", initW, initH);
+    CFFLog::Info("Window created: %dx%d", initW, initH);
 
     // 2) DX11 初始化（仅DX）
     if (!CDX11Context::Instance().Initialize(hwnd, initW, initH)) {
-        CDiagnosticLog::Error("Failed to initialize DX11 context!");
+        CFFLog::Error("Failed to initialize DX11 context!");
         exitCode = -2;
         goto cleanup;
     }
     dx11Initialized = true;
-    CDiagnosticLog::Info("DX11 context initialized");
+    CFFLog::Info("DX11 context initialized");
 
     // 3) ImGui 初始化（在 main.cpp 内）
     IMGUI_CHECKVERSION();
@@ -206,39 +206,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     );
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // 如不需要可去掉
     imguiInitialized = true;
-    CDiagnosticLog::Info("ImGui initialized");
+    CFFLog::Info("ImGui initialized");
 
     g_editor_cam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
     // 4) Scene initialization (load from .ffasset or HDR)
-    CDiagnosticLog::Info("Initializing Scene (loading skybox and IBL)...");
+    CFFLog::Info("Initializing Scene (loading skybox and IBL)...");
     if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset", 512))
     {
-        CDiagnosticLog::Error("Failed to initialize Scene!");
+        CFFLog::Error("Failed to initialize Scene!");
         exitCode = -3;
         goto cleanup;
     }
     sceneInitialized = true;
-    CDiagnosticLog::Info("Scene initialized");
+    CFFLog::Info("Scene initialized");
 
     // 5) MainPass and ShadowPass initialization
     if (!g_main_pass.Initialize())
     {
-        CDiagnosticLog::Error("Failed to initialize MainPass!");
+        CFFLog::Error("Failed to initialize MainPass!");
         exitCode = -4;
         goto cleanup;
     }
     mainPassInitialized = true;
-    CDiagnosticLog::Info("MainPass initialized");
+    CFFLog::Info("MainPass initialized");
 
     if (!g_shadow_pass.Initialize())
     {
-        CDiagnosticLog::Error("Failed to initialize ShadowPass!");
+        CFFLog::Error("Failed to initialize ShadowPass!");
         exitCode = -5;
         goto cleanup;
     }
     shadowPassInitialized = true;
-    CDiagnosticLog::Info("ShadowPass initialized");
+    CFFLog::Info("ShadowPass initialized");
 
     // // --- Setup World/GameObjects ---
     // {
@@ -370,35 +370,35 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 cleanup:
     // 7) 统一清理出口（按初始化相反顺序清理）
-    CDiagnosticLog::Info("=== Shutting down (exit code: %d) ===", exitCode);
+    CFFLog::Info("=== Shutting down (exit code: %d) ===", exitCode);
 
     if (shadowPassInitialized) {
-        CDiagnosticLog::Info("Shutting down ShadowPass...");
+        CFFLog::Info("Shutting down ShadowPass...");
         g_shadow_pass.Shutdown();
     }
 
     if (mainPassInitialized) {
-        CDiagnosticLog::Info("Shutting down MainPass...");
+        CFFLog::Info("Shutting down MainPass...");
         g_main_pass.Shutdown();
     }
 
     if (sceneInitialized) {
-        CDiagnosticLog::Info("Shutting down Scene...");
+        CFFLog::Info("Shutting down Scene...");
         CScene::Instance().Shutdown();
     }
 
     if (imguiInitialized) {
-        CDiagnosticLog::Info("Shutting down ImGui...");
+        CFFLog::Info("Shutting down ImGui...");
         ImGui_ImplDX11_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
     }
 
     if (dx11Initialized) {
-        CDiagnosticLog::Info("Shutting down DX11...");
+        CFFLog::Info("Shutting down DX11...");
         CDX11Context::Instance().Shutdown();
     }
 
-    CDiagnosticLog::Info("Shutdown complete.");
+    CFFLog::Info("Shutdown complete.");
     return exitCode;
 }

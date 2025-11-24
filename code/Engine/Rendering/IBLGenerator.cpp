@@ -1,7 +1,7 @@
 #include "IBLGenerator.h"
 #include "Core/DX11Context.h"
 #include "Core/KTXLoader.h"
-#include "Editor/DiagnosticLog.h"
+#include "Core/FFLog.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
@@ -70,7 +70,7 @@ struct DDS_HEADER_DXT10 {
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        CDiagnosticLog::Error("Failed to open shader: %s", filepath.c_str());
+        CFFLog::Error("Failed to open shader: %s", filepath.c_str());
         return "";
     }
     std::stringstream buffer;
@@ -140,7 +140,7 @@ void CIBLGenerator::createIrradianceShader() {
     std::string psSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        CDiagnosticLog::Error("Failed to load irradiance shaders!");
+        CFFLog::Error("Failed to load irradiance shaders!");
         return;
     }
 
@@ -156,8 +156,8 @@ void CIBLGenerator::createIrradianceShader() {
                             nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== IRRADIANCE VS COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== IRRADIANCE VS COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -167,8 +167,8 @@ void CIBLGenerator::createIrradianceShader() {
                     nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== IRRADIANCE PS COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== IRRADIANCE PS COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -184,7 +184,7 @@ void CIBLGenerator::createPreFilterShader() {
     std::string psSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        CDiagnosticLog::Error("Failed to load pre-filter shaders!");
+        CFFLog::Error("Failed to load pre-filter shaders!");
         return;
     }
 
@@ -200,8 +200,8 @@ void CIBLGenerator::createPreFilterShader() {
                             nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== PREFILTER PS COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== PREFILTER PS COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -289,14 +289,14 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateIrradianceMap(
     ID3D11ShaderResourceView* nullSRV = nullptr;
     context->PSSetShaderResources(0, 1, &nullSRV);
 
-    CDiagnosticLog::Info("IBL: Irradiance map generated successfully!");
+    CFFLog::Info("IBL: Irradiance map generated successfully!");
 
     return m_irradianceSRV.Get();
 }
 
 bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     if (!m_irradianceTexture) {
-        CDiagnosticLog::Error("No irradiance map to save!");
+        CFFLog::Error("No irradiance map to save!");
         return false;
     }
 
@@ -307,7 +307,7 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     D3D11_TEXTURE2D_DESC desc;
     m_irradianceTexture->GetDesc(&desc);
 
-    CDiagnosticLog::Info("IBL: Saving irradiance map (%dx%d x 6 faces)...", desc.Width, desc.Height);
+    CFFLog::Info("IBL: Saving irradiance map (%dx%d x 6 faces)...", desc.Width, desc.Height);
 
     // Create staging texture for readback
     D3D11_TEXTURE2D_DESC stagingDesc = desc;
@@ -319,7 +319,7 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     ComPtr<ID3D11Texture2D> stagingTexture;
     HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.GetAddressOf());
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Failed to create staging texture!");
+        CFFLog::Error("Failed to create staging texture!");
         return false;
     }
 
@@ -363,7 +363,7 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     // Open file
     std::ofstream file(fullPath, std::ios::binary);
     if (!file) {
-        CDiagnosticLog::Error("Failed to create file: %s", fullPath.string().c_str());
+        CFFLog::Error("Failed to create file: %s", fullPath.string().c_str());
         return false;
     }
 
@@ -379,7 +379,7 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
         D3D11_MAPPED_SUBRESOURCE mapped;
         hr = context->Map(stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
         if (FAILED(hr)) {
-            CDiagnosticLog::Error("Failed to map staging texture face %d", face);
+            CFFLog::Error("Failed to map staging texture face %d", face);
             file.close();
             return false;
         }
@@ -393,12 +393,12 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
 
         context->Unmap(stagingTexture.Get(), subresource);
 
-        CDiagnosticLog::Info("IBL: Wrote face %d", face);
+        CFFLog::Info("IBL: Wrote face %d", face);
     }
 
     file.close();
 
-    CDiagnosticLog::Info("IBL: Successfully saved to %s", fullPath.string().c_str());
+    CFFLog::Info("IBL: Successfully saved to %s", fullPath.string().c_str());
     return true;
 }
 
@@ -425,7 +425,7 @@ static void floatToRgbe(float r, float g, float b, unsigned char rgbe[4]) {
 
 bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
     if (!m_irradianceTexture) {
-        CDiagnosticLog::Error("No irradiance map to save!");
+        CFFLog::Error("No irradiance map to save!");
         return false;
     }
 
@@ -436,7 +436,7 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
     D3D11_TEXTURE2D_DESC desc;
     m_irradianceTexture->GetDesc(&desc);
 
-    CDiagnosticLog::Info("IBL: Saving irradiance map to HDR (%dx%d x 6 faces)...", desc.Width, desc.Height);
+    CFFLog::Info("IBL: Saving irradiance map to HDR (%dx%d x 6 faces)...", desc.Width, desc.Height);
 
     // Create staging texture for readback
     D3D11_TEXTURE2D_DESC stagingDesc = desc;
@@ -448,7 +448,7 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
     ComPtr<ID3D11Texture2D> stagingTexture;
     HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.GetAddressOf());
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Failed to create staging texture!");
+        CFFLog::Error("Failed to create staging texture!");
         return false;
     }
 
@@ -481,14 +481,14 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
         D3D11_MAPPED_SUBRESOURCE mapped;
         hr = context->Map(stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
         if (FAILED(hr)) {
-            CDiagnosticLog::Error("Failed to map staging texture face %d", face);
+            CFFLog::Error("Failed to map staging texture face %d", face);
             continue;
         }
 
         // Open file
         std::ofstream file(faceFilename, std::ios::binary);
         if (!file) {
-            CDiagnosticLog::Error("Failed to create file: %s", faceFilename.c_str());
+            CFFLog::Error("Failed to create file: %s", faceFilename.c_str());
             context->Unmap(stagingTexture.Get(), subresource);
             continue;
         }
@@ -534,10 +534,10 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
         context->Unmap(stagingTexture.Get(), subresource);
         file.close();
 
-        CDiagnosticLog::Info("IBL: Saved face %s to %s", faceNames[face], faceFilename.c_str());
+        CFFLog::Info("IBL: Saved face %s to %s", faceNames[face], faceFilename.c_str());
     }
 
-    CDiagnosticLog::Info("IBL: Successfully saved irradiance map to HDR files!");
+    CFFLog::Info("IBL: Successfully saved irradiance map to HDR files!");
     return true;
 }
 
@@ -581,7 +581,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
     numMipLevels = std::max(1, std::min(numMipLevels, 10));
     m_preFilteredMipLevels = numMipLevels;
 
-    CDiagnosticLog::Info("IBL: Generating pre-filtered map (%dx%d, %d mip levels)...", outputSize, outputSize, numMipLevels);
+    CFFLog::Info("IBL: Generating pre-filtered map (%dx%d, %d mip levels)...", outputSize, outputSize, numMipLevels);
 
     // Get environment map description for resolution
     ID3D11Resource* envResource;
@@ -592,10 +592,10 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
     envTexture->GetDesc(&envDesc);
     float envResolution = (float)envDesc.Width;
 
-    CDiagnosticLog::Info("IBL: Environment map info: %dx%d, %d mip levels", envDesc.Width, envDesc.Height, envDesc.MipLevels);
+    CFFLog::Info("IBL: Environment map info: %dx%d, %d mip levels", envDesc.Width, envDesc.Height, envDesc.MipLevels);
 
     if (envDesc.MipLevels <= 1) {
-        CDiagnosticLog::Warning("Environment map has no mipmaps! Pre-filtering quality will be poor.");
+        CFFLog::Warning("Environment map has no mipmaps! Pre-filtering quality will be poor.");
     }
 
     envResource->Release();
@@ -642,7 +642,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
             expectedSamples = 8192;
         }
 
-        CDiagnosticLog::Info("  Mip %d: %dx%d, roughness=%.3f, samples=%d", mip, mipWidth, mipHeight, roughness, expectedSamples);
+        CFFLog::Info("  Mip %d: %dx%d, roughness=%.3f, samples=%d", mip, mipWidth, mipHeight, roughness, expectedSamples);
 
         // Render to each cubemap face at this mip level
         for (int face = 0; face < 6; ++face) {
@@ -657,7 +657,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
             ComPtr<ID3D11RenderTargetView> rtv;
             HRESULT hr = device->CreateRenderTargetView(m_preFilteredTexture.Get(), &rtvDesc, rtv.GetAddressOf());
             if (FAILED(hr)) {
-                CDiagnosticLog::Error("Failed to create RTV for face %d, mip %d", face, mip);
+                CFFLog::Error("Failed to create RTV for face %d, mip %d", face, mip);
                 continue;
             }
 
@@ -699,7 +699,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
 
             // Verify shader is valid
             if (!m_fullscreenVS || !m_prefilterPS) {
-                CDiagnosticLog::Error("Pre-filter shaders not compiled!");
+                CFFLog::Error("Pre-filter shaders not compiled!");
                 continue;
             }
 
@@ -708,7 +708,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
             context->IASetInputLayout(nullptr);
             context->Draw(3, 0);
         }
-        CDiagnosticLog::Info("    Rendered all 6 faces for mip %d", mip);
+        CFFLog::Info("    Rendered all 6 faces for mip %d", mip);
     }
 
     // Cleanup
@@ -717,7 +717,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
     ID3D11ShaderResourceView* nullSRV = nullptr;
     context->PSSetShaderResources(0, 1, &nullSRV);
 
-    CDiagnosticLog::Info("IBL: Pre-filtered map generated successfully!");
+    CFFLog::Info("IBL: Pre-filtered map generated successfully!");
 
     return m_preFilteredSRV.Get();
 }
@@ -759,7 +759,7 @@ void CIBLGenerator::createBrdfLutShader() {
     std::string psSource = LoadShaderSource("../source/code/Shader/BrdfLut.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        CDiagnosticLog::Error("Failed to load BRDF LUT shaders!");
+        CFFLog::Error("Failed to load BRDF LUT shaders!");
         return;
     }
 
@@ -775,8 +775,8 @@ void CIBLGenerator::createBrdfLutShader() {
                             nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== BRDF LUT PS COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== BRDF LUT PS COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -790,7 +790,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
 
     if (!device || !context) return nullptr;
 
-    CDiagnosticLog::Info("IBL: Generating BRDF LUT (%dx%d)...", resolution, resolution);
+    CFFLog::Info("IBL: Generating BRDF LUT (%dx%d)...", resolution, resolution);
 
     // Create 2D texture (not cubemap)
     D3D11_TEXTURE2D_DESC texDesc = {};
@@ -853,7 +853,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
     ID3D11RenderTargetView* nullRTV = nullptr;
     context->OMSetRenderTargets(1, &nullRTV, nullptr);
 
-    CDiagnosticLog::Info("IBL: BRDF LUT generated successfully!");
+    CFFLog::Info("IBL: BRDF LUT generated successfully!");
 
     return m_brdfLutSRV.Get();
 }
@@ -861,7 +861,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
 bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
     ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
     if (!texture) {
-        CDiagnosticLog::Error("IBLGenerator: Failed to load irradiance map from %s", ktx2Path.c_str());
+        CFFLog::Error("IBLGenerator: Failed to load irradiance map from %s", ktx2Path.c_str());
         return false;
     }
 
@@ -880,18 +880,18 @@ bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
 
     HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc, &m_irradianceSRV);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("IBLGenerator: Failed to create irradiance SRV");
+        CFFLog::Error("IBLGenerator: Failed to create irradiance SRV");
         return false;
     }
 
-    CDiagnosticLog::Info("IBLGenerator: Loaded irradiance map from KTX2 (%dx%d)", texDesc.Width, texDesc.Height);
+    CFFLog::Info("IBLGenerator: Loaded irradiance map from KTX2 (%dx%d)", texDesc.Width, texDesc.Height);
     return true;
 }
 
 bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
     ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
     if (!texture) {
-        CDiagnosticLog::Error("IBLGenerator: Failed to load pre-filtered map from %s", ktx2Path.c_str());
+        CFFLog::Error("IBLGenerator: Failed to load pre-filtered map from %s", ktx2Path.c_str());
         return false;
     }
 
@@ -910,20 +910,20 @@ bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
 
     HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, &m_preFilteredSRV);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("IBLGenerator: Failed to create pre-filtered SRV");
+        CFFLog::Error("IBLGenerator: Failed to create pre-filtered SRV");
         return false;
     }
 
     m_preFilteredMipLevels = texDesc.MipLevels;
 
-    CDiagnosticLog::Info("IBLGenerator: Loaded pre-filtered map from KTX2 (%dx%d, %d mips)", texDesc.Width, texDesc.Height, m_preFilteredMipLevels);
+    CFFLog::Info("IBLGenerator: Loaded pre-filtered map from KTX2 (%dx%d, %d mips)", texDesc.Width, texDesc.Height, m_preFilteredMipLevels);
     return true;
 }
 
 bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
     ID3D11Texture2D* texture = CKTXLoader::Load2DTextureFromKTX2(ktx2Path);
     if (!texture) {
-        CDiagnosticLog::Error("IBLGenerator: Failed to load BRDF LUT from %s", ktx2Path.c_str());
+        CFFLog::Error("IBLGenerator: Failed to load BRDF LUT from %s", ktx2Path.c_str());
         return false;
     }
 
@@ -942,10 +942,10 @@ bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
 
     HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, &m_brdfLutSRV);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("IBLGenerator: Failed to create BRDF LUT SRV");
+        CFFLog::Error("IBLGenerator: Failed to create BRDF LUT SRV");
         return false;
     }
 
-    CDiagnosticLog::Info("IBLGenerator: Loaded BRDF LUT from KTX2 (%dx%d)", texDesc.Width, texDesc.Height);
+    CFFLog::Info("IBLGenerator: Loaded BRDF LUT from KTX2 (%dx%d)", texDesc.Width, texDesc.Height);
     return true;
 }

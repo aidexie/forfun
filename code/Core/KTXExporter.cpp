@@ -1,5 +1,5 @@
 #include "KTXExporter.h"
-#include "Editor/DiagnosticLog.h"
+#include "Core/FFLog.h"
 #include "DX11Context.h"
 #include <iostream>
 #include <vector>
@@ -17,7 +17,7 @@ uint32_t CKTXExporter::DXGIFormatToVkFormat(DXGI_FORMAT format) {
         case DXGI_FORMAT_R16G16_FLOAT:
             return 83;  // VK_FORMAT_R16G16_SFLOAT (for BRDF LUT)
         default:
-            CDiagnosticLog::Error("Unsupported DXGI format: " << format);
+            CFFLog::Error("Unsupported DXGI format: ", format);
             return 0;
     }
 }
@@ -28,7 +28,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
     int numMipLevels)
 {
     if (!texture) {
-        CDiagnosticLog::Error("KTXExporter: Null texture");
+        CFFLog::Error("KTXExporter: Null texture");
         return false;
     }
 
@@ -40,7 +40,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
     if (desc.MiscFlags & D3D11_RESOURCE_MISC_TEXTURECUBE) {
         // OK
     } else {
-        CDiagnosticLog::Error("KTXExporter: Texture is not a cubemap");
+        CFFLog::Error("KTXExporter: Texture is not a cubemap");
         return false;
     }
 
@@ -63,7 +63,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
     ktxTexture2* ktxTex = nullptr;
     KTX_error_code result = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &ktxTex);
     if (result != KTX_SUCCESS) {
-        CDiagnosticLog::Error("KTXExporter: Failed to create KTX texture: " << result);
+        CFFLog::Error("KTXExporter: Failed to create KTX texture: " , result);
         return false;
     }
 
@@ -81,7 +81,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
     ID3D11Texture2D* stagingTexture = nullptr;
     HRESULT hr = ctx.GetDevice()->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("KTXExporter: Failed to create staging texture");
+        CFFLog::Error("KTXExporter: Failed to create staging texture");
         ktxTexture2_Destroy(ktxTex);
         return false;
     }
@@ -97,7 +97,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
             D3D11_MAPPED_SUBRESOURCE mapped;
             hr = deviceContext->Map(stagingTexture, subresource, D3D11_MAP_READ, 0, &mapped);
             if (FAILED(hr)) {
-                CDiagnosticLog::Error("KTXExporter: Failed to map staging texture");
+                CFFLog::Error("KTXExporter: Failed to map staging texture");
                 stagingTexture->Release();
                 ktxTexture2_Destroy(ktxTex);
                 return false;
@@ -156,7 +156,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
             deviceContext->Unmap(stagingTexture, subresource);
 
             if (result != KTX_SUCCESS) {
-                CDiagnosticLog::Error("KTXExporter: Failed to set image data: " << result);
+                CFFLog::Error("KTXExporter: Failed to set image data: %s" , result);
                 stagingTexture->Release();
                 ktxTexture2_Destroy(ktxTex);
                 return false;
@@ -169,13 +169,13 @@ bool CKTXExporter::ExportCubemapToKTX2(
     // Write to file
     result = ktxTexture_WriteToNamedFile(ktxTexture(ktxTex), filepath.c_str());
     if (result != KTX_SUCCESS) {
-        CDiagnosticLog::Error("KTXExporter: Failed to write KTX file: " << result);
+        CFFLog::Error("KTXExporter: Failed to write KTX file: %s" , result);
         ktxTexture2_Destroy(ktxTex);
         return false;
     }
 
     ktxTexture2_Destroy(ktxTex);
-    std::cout << "KTXExporter: Successfully exported to " << filepath << std::endl;
+    CFFLog::Info("KTXExporter: Successfully exported to %s" , filepath);
     return true;
 }
 
@@ -185,7 +185,7 @@ bool CKTXExporter::Export2DTextureToKTX2(
     int numMipLevels)
 {
     if (!texture) {
-        CDiagnosticLog::Error("KTXExporter: Null texture");
+        CFFLog::Error("KTXExporter: Null texture");
         return false;
     }
 
@@ -212,7 +212,7 @@ bool CKTXExporter::Export2DTextureToKTX2(
     ktxTexture2* ktxTex = nullptr;
     KTX_error_code result = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &ktxTex);
     if (result != KTX_SUCCESS) {
-        CDiagnosticLog::Error("KTXExporter: Failed to create KTX texture: " << result);
+        CFFLog::Error("KTXExporter: Failed to create KTX texture: %s" , result);
         return false;
     }
 
@@ -230,7 +230,7 @@ bool CKTXExporter::Export2DTextureToKTX2(
     ID3D11Texture2D* stagingTexture = nullptr;
     HRESULT hr = ctx.GetDevice()->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("KTXExporter: Failed to create staging texture");
+        CFFLog::Error("KTXExporter: Failed to create staging texture");
         ktxTexture2_Destroy(ktxTex);
         return false;
     }
@@ -242,7 +242,7 @@ bool CKTXExporter::Export2DTextureToKTX2(
         D3D11_MAPPED_SUBRESOURCE mapped;
         hr = deviceContext->Map(stagingTexture, mip, D3D11_MAP_READ, 0, &mapped);
         if (FAILED(hr)) {
-            CDiagnosticLog::Error("KTXExporter: Failed to map staging texture");
+            CFFLog::Error("KTXExporter: Failed to map staging texture");
             stagingTexture->Release();
             ktxTexture2_Destroy(ktxTex);
             return false;
@@ -293,7 +293,7 @@ bool CKTXExporter::Export2DTextureToKTX2(
         deviceContext->Unmap(stagingTexture, mip);
 
         if (result != KTX_SUCCESS) {
-            CDiagnosticLog::Error("KTXExporter: Failed to set image data: " << result);
+            CFFLog::Error("KTXExporter: Failed to set image data: %s" , result);
             stagingTexture->Release();
             ktxTexture2_Destroy(ktxTex);
             return false;
@@ -305,12 +305,12 @@ bool CKTXExporter::Export2DTextureToKTX2(
     // Write to file
     result = ktxTexture_WriteToNamedFile(ktxTexture(ktxTex), filepath.c_str());
     if (result != KTX_SUCCESS) {
-        CDiagnosticLog::Error("KTXExporter: Failed to write KTX file: " << result);
+        CFFLog::Error("KTXExporter: Failed to write KTX file: %s" , result);
         ktxTexture2_Destroy(ktxTex);
         return false;
     }
 
     ktxTexture2_Destroy(ktxTex);
-    std::cout << "KTXExporter: Successfully exported 2D texture to " << filepath << std::endl;
+    CFFLog::Info("KTXExporter: Successfully exported 2D texture to %s" , filepath);
     return true;
 }

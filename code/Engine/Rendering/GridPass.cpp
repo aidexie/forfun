@@ -1,7 +1,7 @@
 // Engine/Rendering/GridPass.cpp
 #include "GridPass.h"
 #include "Core/DX11Context.h"
-#include "Editor/DiagnosticLog.h"
+#include "Core/FFLog.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
@@ -15,7 +15,7 @@ using namespace DirectX;
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        CDiagnosticLog::Error("Failed to open shader file: %s", filepath.c_str());
+        CFFLog::Error("Failed to open shader file: %s", filepath.c_str());
         return "";
     }
     std::stringstream buffer;
@@ -57,7 +57,7 @@ void CGridPass::CreateShaders() {
     std::string psSource = LoadShaderSource("../source/code/Shader/Grid.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        CDiagnosticLog::Error("Failed to load Grid shader files!");
+        CFFLog::Error("Failed to load Grid shader files!");
         return;
     }
 
@@ -73,8 +73,8 @@ void CGridPass::CreateShaders() {
                            nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== GRID VERTEX SHADER COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== GRID VERTEX SHADER COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -84,8 +84,8 @@ void CGridPass::CreateShaders() {
                    nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== GRID PIXEL SHADER COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== GRID PIXEL SHADER COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }

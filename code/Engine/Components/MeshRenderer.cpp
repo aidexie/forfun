@@ -2,6 +2,7 @@
 #include "MeshRenderer.h"
 #include "Core/MeshResourceManager.h"
 #include "Core/GpuMeshResource.h"
+#include "Core/FFLog.h"
 #include <d3d11.h>
 #include <iostream>
 
@@ -15,7 +16,7 @@ bool SMeshRenderer::EnsureUploaded() {
     meshes = CMeshResourceManager::Instance().GetOrLoad(path);
 
     if (meshes.empty()) {
-        std::cerr << "ERROR: Failed to load mesh from: " << path << std::endl;
+        CFFLog::Error("ERROR: Failed to load mesh from: %s" , path);
     }
 
     return !meshes.empty();

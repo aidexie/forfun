@@ -1,4 +1,4 @@
-// Editor/FFLog.h
+// Core/FFLog.h
 #pragma once
 #include <string>
 #include <vector>

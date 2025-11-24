@@ -4,6 +4,7 @@
 #include "Engine/Rendering/IBLGenerator.h"
 #include "Engine/Rendering/Skybox.h"
 #include "Core/DX11Context.h"
+#include "Core/FFLog.h"
 #include <iostream>
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -71,8 +72,7 @@ static ID3D11ShaderResourceView* GetEnvironmentFaceSRV(
     ComPtr<ID3D11ShaderResourceView> srv;
     HRESULT hr = device->CreateShaderResourceView(texture.Get(), &srvDesc, srv.GetAddressOf());
     if (FAILED(hr)) {
-        std::cout << "ERROR: Failed to create environment face SRV (face=" << faceIndex
-                  << ", mip=" << mipLevel << ")" << std::endl;
+        CFFLog::Error("ERROR: Failed to create environment face SRV (face=%d, mip=%d)", faceIndex, mipLevel);
         return nullptr;
     }
 
@@ -226,7 +226,7 @@ void Panels::DrawIrradianceDebug() {
                 // Export to assets directory
                 bool success = iblGen.SaveIrradianceMapToHDR("export/irradiance.hdr");
                 if (success) {
-                    std::cout << "IBL: Irradiance map exported to export/irradiance_*.hdr" << std::endl;
+                    CFFLog::Info("IBL: Irradiance map exported to export/irradiance_*.hdr");
                 }
             }
             ImGui::SameLine();

@@ -1,5 +1,5 @@
 #include "KTXLoader.h"
-#include "Editor/DiagnosticLog.h"
+#include "Core/FFLog.h"
 #include "DX11Context.h"
 #include <ktx.h>
 #include <iostream>
@@ -14,7 +14,7 @@ static DXGI_FORMAT VkFormatToDXGIFormat(uint32_t vkFormat) {
         case 43:  return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // VK_FORMAT_R8G8B8A8_SRGB
         case 83:  return DXGI_FORMAT_R16G16_FLOAT;        // VK_FORMAT_R16G16_SFLOAT
         default:
-            CDiagnosticLog::Error("KTXLoader: Unsupported Vulkan format: " << vkFormat);
+            CFFLog::Error("KTXLoader: Unsupported Vulkan format: %d" , vkFormat);
             return DXGI_FORMAT_UNKNOWN;
     }
 }
@@ -35,13 +35,13 @@ ID3D11Texture2D* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
     ktxTexture2* ktxTex = nullptr;
     KTX_error_code result = ktxTexture2_CreateFromNamedFile(filepath.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTex);
     if (result != KTX_SUCCESS) {
-        CDiagnosticLog::Error("KTXLoader: Failed to load " << filepath << " (error " << result << ")");
+        CFFLog::Error("KTXLoader: Failed to load %s (error %d)", filepath.c_str(), result);
         return nullptr;
     }
 
     // Verify it's a cubemap
     if (ktxTex->numFaces != 6) {
-        CDiagnosticLog::Error("KTXLoader: " << filepath << " is not a cubemap (faces=" << ktxTex->numFaces << ")");
+        CFFLog::Error("KTXLoader: %s is not a cubemap (faces=%d)", filepath.c_str(), ktxTex->numFaces);
         ktxTexture2_Destroy(ktxTex);
         return nullptr;
     }
@@ -74,7 +74,7 @@ ID3D11Texture2D* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
             size_t offset;
             result = ktxTexture_GetImageOffset(ktxTexture(ktxTex), mip, 0, face, &offset);
             if (result != KTX_SUCCESS) {
-                CDiagnosticLog::Error("KTXLoader: Failed to get image offset");
+                CFFLog::Error("KTXLoader: Failed to get image offset");
                 ktxTexture2_Destroy(ktxTex);
                 return nullptr;
             }
@@ -102,11 +102,11 @@ ID3D11Texture2D* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
     ktxTexture2_Destroy(ktxTex);
 
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("KTXLoader: Failed to create D3D11 texture");
+        CFFLog::Error("KTXLoader: Failed to create D3D11 texture");
         return nullptr;
     }
 
-    std::cout << "KTXLoader: Loaded cubemap " << filepath << " (" << desc.Width << "x" << desc.Height << ", " << desc.MipLevels << " mips)" << std::endl;
+    CFFLog::Info("KTXLoader: Loaded cubemap %s (%dx%d, %d mips)", filepath.c_str(), desc.Width, desc.Height, desc.MipLevels);
     return texture;
 }
 
@@ -114,13 +114,13 @@ ID3D11Texture2D* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) 
     ktxTexture2* ktxTex = nullptr;
     KTX_error_code result = ktxTexture2_CreateFromNamedFile(filepath.c_str(), KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktxTex);
     if (result != KTX_SUCCESS) {
-        CDiagnosticLog::Error("KTXLoader: Failed to load " << filepath << " (error " << result << ")");
+        CFFLog::Error("KTXLoader: Failed to load %s (error %d)", filepath.c_str(), result);
         return nullptr;
     }
 
     // Verify it's a 2D texture
     if (ktxTex->numFaces != 1) {
-        CDiagnosticLog::Error("KTXLoader: " << filepath << " is not a 2D texture (faces=" << ktxTex->numFaces << ")");
+        CFFLog::Error("KTXLoader: %s is not a 2D texture (faces=%d)", filepath.c_str(), ktxTex->numFaces);
         ktxTexture2_Destroy(ktxTex);
         return nullptr;
     }
@@ -151,7 +151,7 @@ ID3D11Texture2D* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) 
         size_t offset;
         result = ktxTexture_GetImageOffset(ktxTexture(ktxTex), mip, 0, 0, &offset);
         if (result != KTX_SUCCESS) {
-            CDiagnosticLog::Error("KTXLoader: Failed to get image offset");
+            CFFLog::Error("KTXLoader: Failed to get image offset");
             ktxTexture2_Destroy(ktxTex);
             return nullptr;
         }
@@ -178,11 +178,11 @@ ID3D11Texture2D* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) 
     ktxTexture2_Destroy(ktxTex);
 
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("KTXLoader: Failed to create D3D11 texture");
+        CFFLog::Error("KTXLoader: Failed to create D3D11 texture");
         return nullptr;
     }
 
-    std::cout << "KTXLoader: Loaded 2D texture " << filepath << " (" << desc.Width << "x" << desc.Height << ", " << desc.MipLevels << " mips)" << std::endl;
+    CFFLog::Info("KTXLoader: Loaded 2D texture %s (%dx%d, %d mips)", filepath.c_str(), desc.Width, desc.Height, desc.MipLevels);
     return texture;
 }
 
@@ -206,7 +206,7 @@ ID3D11ShaderResourceView* CKTXLoader::LoadCubemapSRVFromKTX2(const std::string& 
     texture->Release();
 
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("KTXLoader: Failed to create SRV");
+        CFFLog::Error("KTXLoader: Failed to create SRV");
         return nullptr;
     }
 
@@ -233,7 +233,7 @@ ID3D11ShaderResourceView* CKTXLoader::Load2DTextureSRVFromKTX2(const std::string
     texture->Release();
 
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("KTXLoader: Failed to create SRV");
+        CFFLog::Error("KTXLoader: Failed to create SRV");
         return nullptr;
     }
 

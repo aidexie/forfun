@@ -2,7 +2,7 @@
 #include "Core/DX11Context.h"
 #include "Core/HdrLoader.h"
 #include "Core/KTXLoader.h"
-#include "Editor/DiagnosticLog.h"
+#include "Core/FFLog.h"
 #include <d3dcompiler.h>
 #include <vector>
 #include <fstream>
@@ -17,7 +17,7 @@ using Microsoft::WRL::ComPtr;
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        CDiagnosticLog::Error("Failed to open shader file: %s", filepath.c_str());
+        CFFLog::Error("Failed to open shader file: %s", filepath.c_str());
         return "";
     }
     std::stringstream buffer;
@@ -87,7 +87,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     // Load cubemap from KTX2
     ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
     if (!texture) {
-        CDiagnosticLog::Error("Skybox: Failed to load KTX2 cubemap from %s", ktx2Path.c_str());
+        CFFLog::Error("Skybox: Failed to load KTX2 cubemap from %s", ktx2Path.c_str());
         return false;
     }
 
@@ -105,7 +105,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
 
     HRESULT hr = device->CreateShaderResourceView(m_envTexture.Get(), &srvDesc, &m_envCubemap);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Skybox: Failed to create SRV");
+        CFFLog::Error("Skybox: Failed to create SRV");
         return false;
     }
 
@@ -122,7 +122,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     hr = device->CreateBuffer(&cbd, nullptr, &m_cbTransform);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Skybox: Failed to create constant buffer");
+        CFFLog::Error("Skybox: Failed to create constant buffer");
         return false;
     }
 
@@ -135,7 +135,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
     hr = device->CreateSamplerState(&samplerDesc, &m_sampler);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Skybox: Failed to create sampler");
+        CFFLog::Error("Skybox: Failed to create sampler");
         return false;
     }
 
@@ -145,7 +145,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     rasterDesc.CullMode = D3D11_CULL_NONE;
     hr = device->CreateRasterizerState(&rasterDesc, &m_rasterState);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Skybox: Failed to create rasterizer state");
+        CFFLog::Error("Skybox: Failed to create rasterizer state");
         return false;
     }
 
@@ -156,11 +156,11 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     depthDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
     hr = device->CreateDepthStencilState(&depthDesc, &m_depthState);
     if (FAILED(hr)) {
-        CDiagnosticLog::Error("Skybox: Failed to create depth stencil state");
+        CFFLog::Error("Skybox: Failed to create depth stencil state");
         return false;
     }
 
-    CDiagnosticLog::Info("Skybox: Initialized from KTX2 (%dx%d, %d mips)", texDesc.Width, texDesc.Height, texDesc.MipLevels);
+    CFFLog::Info("Skybox: Initialized from KTX2 (%dx%d, %d mips)", texDesc.Width, texDesc.Height, texDesc.MipLevels);
 
     return true;
 }
@@ -290,7 +290,7 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     std::string convPsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.ps.hlsl");
 
     if (convVsSource.empty() || convPsSource.empty()) {
-        CDiagnosticLog::Error("Failed to load EquirectToCubemap shader files!");
+        CFFLog::Error("Failed to load EquirectToCubemap shader files!");
         return;
     }
 
@@ -306,8 +306,8 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
                            nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== EQUIRECT CONVERSION VS COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== EQUIRECT CONVERSION VS COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -317,8 +317,8 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
                    nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== EQUIRECT CONVERSION PS COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== EQUIRECT CONVERSION PS COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -441,12 +441,12 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     m_envTexture->GetDesc(&finalDesc);
     int mipCount = finalDesc.MipLevels;
 
-    CDiagnosticLog::Info("Skybox: Generating mipmaps for %dx%d cubemap (%d levels)...", size, size, mipCount);
+    CFFLog::Info("Skybox: Generating mipmaps for %dx%d cubemap (%d levels)...", size, size, mipCount);
 
     // Generate mipmaps for the cubemap
     context->GenerateMips(m_envCubemap.Get());
 
-    CDiagnosticLog::Info("Skybox: Environment cubemap ready (%dx%d, %d mip levels)", size, size, mipCount);
+    CFFLog::Info("Skybox: Environment cubemap ready (%dx%d, %d mip levels)", size, size, mipCount);
 }
 
 void CSkybox::createCubeMesh() {
@@ -506,7 +506,7 @@ void CSkybox::createShaders() {
     std::string psSource = LoadShaderSource("../source/code/Shader/Skybox.ps.hlsl");
 
     if (vsSource.empty() || psSource.empty()) {
-        CDiagnosticLog::Error("Failed to load Skybox shader files!");
+        CFFLog::Error("Failed to load Skybox shader files!");
         return;
     }
 
@@ -522,8 +522,8 @@ void CSkybox::createShaders() {
                            "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }
@@ -533,8 +533,8 @@ void CSkybox::createShaders() {
                    "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
-            CDiagnosticLog::Error("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===");
-            CDiagnosticLog::Error("%s", (const char*)err->GetBufferPointer());
+            CFFLog::Error("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
         }
         return;
     }

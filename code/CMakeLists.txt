@@ -59,9 +59,6 @@ set(EDITOR_SRC
     ${CODE_PATH}/Editor/Panels_HDRExport.cpp
     ${CODE_PATH}/Editor/PickingUtils.h
     ${CODE_PATH}/Editor/PickingUtils.cpp
-    ${CODE_PATH}/Editor/DebugPaths.h
-    ${CODE_PATH}/Editor/DiagnosticLog.h
-    ${CODE_PATH}/Editor/DiagnosticLog.cpp
 )
 
 add_executable(forfun WIN32

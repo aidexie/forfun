@@ -1,5 +1,6 @@
 // Editor/DiagnosticLog.cpp
 #include "FFLog.h"
+#include "Console.h"
 #include <ctime>
 #include <cstdarg>
 #include <fstream>
@@ -251,8 +252,8 @@ void CFFLog::Info(const char* format, ...) {
         file.close();
     }
 
-    // Also output to debug console
-    OutputDebugStringA((logLine + "\n").c_str());
+    // Output to custom console
+    Core::Console::PrintUTF8(logLine + "\n");
 }
 
 void CFFLog::Warning(const char* format, ...) {
@@ -280,7 +281,7 @@ void CFFLog::Warning(const char* format, ...) {
         file.close();
     }
 
-    OutputDebugStringA((logLine + "\n").c_str());
+    Core::Console::PrintUTF8(logLine + "\n");
 }
 
 void CFFLog::Error(const char* format, ...) {
@@ -308,5 +309,5 @@ void CFFLog::Error(const char* format, ...) {
         file.close();
     }
 
-    OutputDebugStringA((logLine + "\n").c_str());
+    Core::Console::PrintUTF8(logLine + "\n");
 }

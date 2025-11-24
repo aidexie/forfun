@@ -373,7 +373,7 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
         !ImGui::IsAnyItemActive() &&
         mainPass)
     {
-        auto& log = CDiagnosticLog::Instance();
+        auto& log = CFFLog::Instance();
         log.BeginSession("USER_SESSION", "Mouse Picking");
 
         // Get mouse position relative to viewport image

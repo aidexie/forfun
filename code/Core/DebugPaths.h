@@ -1,4 +1,4 @@
-// Editor/DebugPaths.h
+// Core/DebugPaths.h
 #pragma once
 #include <string>
 #include <windows.h>

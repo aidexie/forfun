@@ -1,5 +1,5 @@
 // SceneSerializer.cpp
-#include "Editor/DiagnosticLog.h"
+#include "Core/FFLog.h"
 // NOTE: Requires nlohmann/json library
 // Download json.hpp from: https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
 // Place at: E:\forfun\thirdparty\nlohmann\json.hpp
@@ -138,7 +138,7 @@ static CComponent* DeserializeComponent(CGameObject* go, const json& j) {
         CJsonReadVisitor visitor(j);
         comp->VisitProperties(visitor);
     } else {
-        CDiagnosticLog::Error("ERROR: Failed to create component of type: " << type);
+        CFFLog::Error("Failed to create component of type: %s", type.c_str());
     }
 
     return comp;
@@ -175,18 +175,18 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
         // Write to file
         std::ofstream file(filepath);
         if (!file.is_open()) {
-            CDiagnosticLog::Error("Failed to open file for writing: " << filepath);
+            CFFLog::Error("Failed to open file for writing: %s", filepath.c_str());
             return false;
         }
 
         file << j.dump(2); // Pretty print with 2 spaces
         file.close();
 
-        std::cout << "Scene saved to: " << filepath << std::endl;
+        CFFLog::Info("Scene saved to: %s", filepath.c_str());
         return true;
 
     } catch (const std::exception& e) {
-        CDiagnosticLog::Error("ERROR: Failed to save scene: " << e.what());
+        CFFLog::Error("Failed to save scene: %s", e.what());
         return false;
     }
 }
@@ -199,7 +199,7 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
         // Read file
         std::ifstream file(filepath);
         if (!file.is_open()) {
-            CDiagnosticLog::Error("ERROR: Failed to open scene file: " << filepath);
+            CFFLog::Error("Failed to open scene file: %s", filepath.c_str());
             return false;
         }
 
@@ -228,11 +228,11 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
             }
         }
 
-        std::cout << "Scene loaded from: " << filepath << std::endl;
+        CFFLog::Info("Scene loaded from: %s", filepath.c_str());
         return true;
 
     } catch (const std::exception& e) {
-        CDiagnosticLog::Error("ERROR: Failed to load scene: " << e.what());
+        CFFLog::Error("Failed to load scene: %s", e.what());
         return false;
     }
 }

@@ -1,4 +1,5 @@
 #include "Panels.h"
+#include "Core/FFLog.h"
 #include "imgui.h"
 #include <string>
 #include <iostream>
@@ -146,7 +147,7 @@ void Panels::DrawHDRExportWindow() {
         s_isExporting = true;
         s_exportProgress = 0.0f;
         s_exportStatus = "Starting export...";
-        std::cout << "Exporting HDR: " << s_hdrFilePath << std::endl;
+        CFFLog::Info("Exporting HDR: %s" , s_hdrFilePath);
 
         bool success = true;
 
@@ -255,7 +256,7 @@ void Panels::DrawHDRExportWindow() {
             if (outFile.is_open()) {
                 outFile << ffasset.dump(2);  // Pretty print with 2-space indent
                 outFile.close();
-                std::cout << "Generated .ffasset: " << ffassetPath << std::endl;
+                CFFLog::Info("Generated .ffasset: %s" , ffassetPath);
             } else {
                 s_exportStatus = "ERROR: Failed to write .ffasset file";
                 success = false;
