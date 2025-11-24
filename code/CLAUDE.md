@@ -41,7 +41,7 @@ Claude Code guidance for this repository.
 
 **当前状态**:
 - ECS 架构
-- Editor UI (Hierarchy, Inspector, Viewport, Debug panels)
+- Editor UI (Hierarchy, Inspector, Viewport, Scene Light Settings, IBL Debug, HDR Export)
 - 3D 渲染 (OBJ/glTF)
 - PBR (Cook-Torrance BRDF)
 - CSM 阴影 (bounding sphere stabilization + texel snapping)
@@ -50,6 +50,7 @@ Claude Code guidance for this repository.
 - Transform Gizmo (ImGuizmo: 平移/旋转/缩放, Local/World, Grid snapping)
 - HDR Export 工具 (HDR → KTX2 + .ffasset)
 - KTX2 资源加载 (.ffasset → env/irr/prefilter)
+- 自动化测试框架 (命令行驱动，帧回调架构)
 
 ---
 
@@ -344,4 +345,148 @@ Viewport 右上角的相机方向指示器 (自定义 ImGui DrawList 渲染)。
 
 ---
 
-**Last Updated**: 2025-11-22
+## Automated Testing Framework
+
+**目标**: 让 AI 能够自主验证新功能的正确性。
+
+### Test Framework Architecture
+
+**位置**: `Core/Testing/`
+- `TestCase.h` - 测试基类和上下文
+- `TestRegistry.h` - 自动注册宏
+- `Tests/` - 测试用例
+
+**运行测试**:
+```bash
+./build/forfun.exe --test TestRayCast
+```
+
+### Writing Tests
+
+**示例测试**:
+```cpp
+// Tests/TestRayCast.cpp
+#include "Core/Testing/TestCase.h"
+#include "Core/Testing/TestRegistry.h"
+#include "Engine/Scene.h"
+
+class CTestRayCast : public ITestCase {
+public:
+    const char* GetName() const override { return "TestRayCast"; }
+
+    void Setup(CTestContext& ctx) override {
+        // Frame 1: 创建测试场景
+        ctx.OnFrame(1, [&]() {
+            auto& scene = CScene::Instance();
+            // 清空场景
+            while (scene.GetWorld().Count() > 0) {
+                scene.GetWorld().Destroy(0);
+            }
+
+            // 创建测试物体
+            auto* cube = scene.GetWorld().Create("TestCube");
+            auto* transform = cube->AddComponent<STransform>();
+            transform->position = {0.0f, 0.0f, 5.0f};
+            auto* meshRenderer = cube->AddComponent<SMeshRenderer>();
+            meshRenderer->path = "mesh/cube.obj";
+
+            CFFLog::Info("Frame 1: Creating test scene");
+        });
+
+        // Frame 20: 执行射线投射测试
+        ctx.OnFrame(20, [&]() {
+            // 执行测试逻辑
+            CFFLog::Info("Frame 20: Performing raycast test");
+
+            // 验证结果
+            ctx.testPassed = true;
+        });
+
+        // Frame 30: 结束测试
+        ctx.OnFrame(30, [&]() {
+            CFFLog::Info("Frame 30: Test finished");
+            ctx.Finish();
+        });
+    }
+};
+
+REGISTER_TEST(CTestRayCast)
+```
+
+### Frame Callback Pattern
+
+**核心概念**: 测试在正常引擎循环中执行，通过帧回调调度操作。
+
+**好处**:
+- 真实环境测试（与运行时行为一致）
+- 可以测试异步资源加载
+- 可以观察渲染结果（配合截图）
+- 自动退出（不阻塞 CI）
+
+**主循环集成**:
+```cpp
+// main.cpp
+if (activeTest) {
+    testContext.ExecuteFrame(frameCount);
+    if (testContext.IsFinished()) {
+        PostQuitMessage(testContext.testPassed ? 0 : 1);
+        break;
+    }
+}
+```
+
+### Test Context API
+
+```cpp
+class CTestContext {
+public:
+    int currentFrame = 0;
+    bool testPassed = false;
+
+    // 注册帧回调
+    void OnFrame(int frameNumber, std::function<void()> callback);
+
+    // 标记测试完成
+    void Finish();
+    bool IsFinished() const;
+
+    // 执行当前帧回调（由主循环调用）
+    void ExecuteFrame(int frame);
+};
+```
+
+### Scene Light Settings
+
+**位置**: `Engine/SceneLightSettings.h`, `Editor/Panels_SceneLightSettings.cpp`
+
+**功能**: 场景级别配置，独立于 GameObject 系统
+
+**当前支持**:
+- Skybox 资源路径（.ffasset）
+- 即时应用（修改后立即重新加载）
+
+**访问**:
+```cpp
+auto& settings = CScene::Instance().GetLightSettings();
+settings.skyboxAssetPath = "skybox/test.ffasset";
+CScene::Instance().Initialize(settings.skyboxAssetPath);  // 应用
+```
+
+**序列化**: 保存到 `.scene` 文件的 `lightSettings` 节点
+
+**UI**: Window → Scene Light Settings
+
+### Next Steps (Phase 0 - 最高优先级)
+
+详见 `ROADMAP.md` Phase 0。
+
+**立即需要**:
+1. **截图 API** - `CScreenshot::Capture(path)` / `CaptureTest(testName, frame)`
+2. **状态查询** - `CScene::GenerateReport()`
+3. **测试断言** - `CTestContext::Assert()` / `AssertEqual()`
+
+**目标**: 让 AI 能够"看到"测试结果（截图），验证逻辑状态（报告），自动判断 pass/fail（断言）。
+
+---
+
+**Last Updated**: 2025-11-24
