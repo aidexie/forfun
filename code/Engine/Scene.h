@@ -21,7 +21,7 @@ public:
     CScene& operator=(CScene&&) = delete;
 
     // Initialize CScene (load skybox and generate IBL)
-    bool Initialize(const std::string& hdrPath = "skybox/newport_loft.hdr", int cubemapSize = 512);
+    bool Initialize(const std::string& skybox_path);
     void Shutdown();
 
     // CWorld access

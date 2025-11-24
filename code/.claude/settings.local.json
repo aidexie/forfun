@@ -33,7 +33,8 @@
       "Bash(do if head -5 \"$file\")",
       "Bash(then sed -i '2s|#include \"\"\"\"Editor/FFLog.h\"\"\"\"|#include \"\"\"\"Core/FFLog.h\"\"\"\"|' \"$file\" elif ! head -5 \"$file\")",
       "Bash(then sed -i '2i#include \"\"\"\"Core/FFLog.h\"\"\"\"' \"$file\" fi done)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(./forfun.exe:*)"
     ],
     "deny": [],
     "ask": []

@@ -15,6 +15,10 @@
 #include "Engine/Rendering/DebugRenderSystem.h"  // Debug 几何渲染
 #include "Console.h"
 
+// Test framework
+#include "Core/Testing/TestCase.h"
+#include "Core/Testing/TestRegistry.h"
+
 // ImGui
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
@@ -149,17 +153,57 @@ void ForceWorkDir() {
 }
 
 // -----------------------------------------------------------------------------
+// Parse command line for test mode
+// -----------------------------------------------------------------------------
+static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
+    std::wstring cmdLine(lpCmdLine);
+    if (cmdLine.find(L"--test") == std::wstring::npos) {
+        return nullptr;  // Not in test mode
+    }
+
+    // Extract test name
+    size_t pos = cmdLine.find(L"--test");
+    size_t start = pos + 7;  // Skip "--test "
+    size_t end = cmdLine.find(L' ', start);
+    if (end == std::wstring::npos) end = cmdLine.length();
+
+    std::wstring testNameW = cmdLine.substr(start, end - start);
+    std::string testName(testNameW.begin(), testNameW.end());
+
+    // Remove leading/trailing spaces
+    testName.erase(0, testName.find_first_not_of(" \t\n\r"));
+    testName.erase(testName.find_last_not_of(" \t\n\r") + 1);
+
+    ITestCase* test = CTestRegistry::Instance().Get(testName);
+    if (test) {
+        CFFLog::Info("=== Starting Test: %s ===", test->GetName());
+        return test;
+    }
+
+    // Test not found, list available tests
+    CFFLog::Error("Test not found: %s", testName.c_str());
+    auto testNames = CTestRegistry::Instance().GetAllTestNames();
+    CFFLog::Info("Available tests:");
+    for (const auto& name : testNames) {
+        CFFLog::Info("  - %s", name.c_str());
+    }
+
+    return nullptr;
+}
+
+// -----------------------------------------------------------------------------
 // WinMain
 // -----------------------------------------------------------------------------
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_opt_ HINSTANCE,
-    _In_ LPWSTR,
+    _In_ LPWSTR lpCmdLine,
     _In_ int nCmdShow)
 {
     int exitCode = 0;
 
     MSG msg{};
     LARGE_INTEGER freq{}, prev{}, curr{};
+    int frameCount = 0;
     // Initialization status flags
     bool dx11Initialized = false;
     bool imguiInitialized = false;
@@ -169,6 +213,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     Core::Console::InitUTF8();
     ForceWorkDir();
+
+    // Parse command line for test mode
+    ITestCase* activeTest = ParseCommandLineForTest(lpCmdLine);
+    CTestContext testContext;
 
     // 0) Debug directories (ensure they exist for logging)
     CDebugPaths::EnsureDirectoriesExist();
@@ -212,7 +260,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     // 4) Scene initialization (load from .ffasset or HDR)
     CFFLog::Info("Initializing Scene (loading skybox and IBL)...");
-    if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset", 512))
+    if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset"))
     {
         CFFLog::Error("Failed to initialize Scene!");
         exitCode = -3;
@@ -240,35 +288,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     shadowPassInitialized = true;
     CFFLog::Info("ShadowPass initialized");
 
-    // // --- Setup World/GameObjects ---
-    // {
-    //     // ensure Assets cwd (already attempted earlier)
-    //     // Create ground plane
-    //     auto* g0 = gScene.world.Create("Ground");
-    //     auto* t0 = g0->AddComponent<STransform>();
-    //     t0->scale = { 10,0.1,10 };
-    //     auto* m0 = g0->AddComponent<SMeshRenderer>();
-    //     m0->path = "mesh/cube.obj";
-
-    //     // Create cube
-    //     auto* g1 = gScene.world.Create("Cube");
-    //     auto* t1 = g1->AddComponent<STransform>();
-    //     t1->position = { 0,2.5f,0 };
-    //     auto* m1 = g1->AddComponent<SMeshRenderer>();
-    //     m1->path = "mesh/sphere.obj";
-
-    //     // Create bunny (glTF)
-    //     auto* g2 = gScene.world.Create("Bunny");
-    //     auto* t2 = g2->AddComponent<STransform>();
-    //     t2->position = { 1.5f,0,0 };
-    //     t2->scale = { 0.8f,0.8f,0.8f };
-    //     auto* m2 = g2->AddComponent<SMeshRenderer>();
-    //     m2->path = "bunny-pbr-gltf/scene_small.gltf";
-    //     CScene::Instance().SetSelected(1); // select cube by default
-    // }
     {
         CSceneSerializer::LoadScene(CScene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
     }
+
+    // Setup test if in test mode
+    if (activeTest) {
+        activeTest->Setup(testContext);
+        CFFLog::Info("Test setup complete, starting main loop");
+    }
+
     // 6) 主循环
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&prev);
@@ -282,10 +311,31 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
         if (g_minimized) { Sleep(16); continue; }
 
+        frameCount++;
+
         // delta time
         QueryPerformanceCounter(&curr);
         float dt = static_cast<float>(double(curr.QuadPart - prev.QuadPart) / double(freq.QuadPart));
         prev = curr;
+
+        // Execute test frame if in test mode
+        if (activeTest) {
+            testContext.ExecuteFrame(frameCount);
+
+            // Check if test is finished
+            if (testContext.IsFinished()) {
+                CFFLog::Info("=== Test Finished ===");
+                PostQuitMessage(testContext.testPassed ? 0 : 1);
+                break;
+            }
+
+            // Timeout protection
+            if (frameCount > 1000) {
+                CFFLog::Error("Test timeout after 1000 frames");
+                PostQuitMessage(1);
+                break;
+            }
+        }
 
         // 5.1 ImGui 帧开始
         ImGui_ImplDX11_NewFrame();

@@ -1,0 +1,144 @@
+#include "Core/Testing/TestCase.h"
+#include "Core/Testing/TestRegistry.h"
+#include "Core/FFLog.h"
+#include "Engine/Scene.h"
+#include "Engine/Components/Transform.h"
+#include "Engine/Components/MeshRenderer.h"
+#include "Editor/PickingUtils.h"
+#include <DirectXMath.h>
+
+using namespace DirectX;
+
+class CTestRayCast : public ITestCase {
+public:
+    const char* GetName() const override {
+        return "TestRayCast";
+    }
+
+    void Setup(CTestContext& ctx) override {
+        // Frame 1: Create test scene with a cube
+        ctx.OnFrame(1, [&ctx]() {
+            CFFLog::Info("Frame 1: Creating test scene");
+
+            // Clear existing scene
+            auto& scene = CScene::Instance();
+            while (scene.GetWorld().Count() > 0) {
+                scene.GetWorld().Destroy(0);
+            }
+            scene.SetSelected(-1);
+
+            // Create a cube in front of the camera
+            auto* cube = scene.GetWorld().Create("TestCube");
+
+            auto* transform = cube->GetComponent<STransform>();
+            transform->position = {0.0f, 0.0f, 5.0f};  // 5 units in front
+            transform->scale = {1.0f, 1.0f, 1.0f};
+
+            auto* meshRenderer = cube->AddComponent<SMeshRenderer>();
+            meshRenderer->path = "mesh/cube.obj";
+
+            CFFLog::Info("Created cube at position (0, 0, 5)");
+        });
+
+        // Frame 10: Wait for resources to load
+        ctx.OnFrame(10, [&ctx]() {
+            CFFLog::Info("Frame 10: Waiting for resources to load...");
+
+            // Verify scene has objects
+            auto& scene = CScene::Instance();
+            int objectCount = scene.GetWorld().Count();
+            CFFLog::Info("Scene has %d object(s)", objectCount);
+        });
+
+        // Frame 20: Perform raycast test
+        ctx.OnFrame(20, [&ctx]() {
+            CFFLog::Info("Frame 20: Performing raycast test");
+
+            // Setup a simple camera looking down +Z axis
+            XMMATRIX viewMatrix = XMMatrixLookAtLH(
+                XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),   // Eye at origin
+                XMVectorSet(0.0f, 0.0f, 1.0f, 1.0f),   // Look at +Z
+                XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)    // Up is +Y
+            );
+
+            XMMATRIX projMatrix = XMMatrixPerspectiveFovLH(
+                XMConvertToRadians(60.0f),  // FOV
+                1280.0f / 720.0f,           // Aspect ratio
+                0.1f,                       // Near
+                100.0f                      // Far
+            );
+
+            // Cast ray from center of screen (should hit the cube)
+            PickingUtils::Ray ray = PickingUtils::GenerateRayFromScreen(
+                640.0f, 360.0f,      // Screen center (1280x720)
+                1280.0f, 720.0f,     // Viewport size
+                viewMatrix,
+                projMatrix
+            );
+
+            CFFLog::Info("Ray origin: (%.2f, %.2f, %.2f)",
+                ray.origin.x, ray.origin.y, ray.origin.z);
+            CFFLog::Info("Ray direction: (%.2f, %.2f, %.2f)",
+                ray.direction.x, ray.direction.y, ray.direction.z);
+
+            // Test intersection with the cube
+            auto& scene = CScene::Instance();
+            bool hitAnything = false;
+            float closestDist = FLT_MAX;
+            int hitIndex = -1;
+
+            for (int i = 0; i < scene.GetWorld().Count(); ++i) {
+                auto* obj = scene.GetWorld().Get(i);
+                auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+
+                if (!meshRenderer) continue;
+
+                // Get world transform
+                auto* transform = obj->GetComponent<STransform>();
+                XMMATRIX worldMatrix = transform->WorldMatrix();
+
+                // Get local AABB from mesh (for now, use a simple cube AABB)
+                XMFLOAT3 localMin = {-0.5f, -0.5f, -0.5f};
+                XMFLOAT3 localMax = {0.5f, 0.5f, 0.5f};
+
+                // Transform AABB to world space
+                XMFLOAT3 worldMin, worldMax;
+                PickingUtils::TransformAABB(localMin, localMax, worldMatrix, worldMin, worldMax);
+
+                // Test intersection
+                auto distance = PickingUtils::RayAABBIntersect(ray, worldMin, worldMax);
+
+                if (distance.has_value() && distance.value() < closestDist) {
+                    closestDist = distance.value();
+                    hitIndex = i;
+                    hitAnything = true;
+                }
+            }
+
+            // Verify results
+            if (hitAnything) {
+                CFFLog::Info("✓ Raycast hit object at index %d (distance: %.2f)",
+                    hitIndex, closestDist);
+                ctx.testPassed = (hitIndex == 0);  // Should hit the first (and only) object
+            } else {
+                CFFLog::Error("✗ Raycast missed all objects");
+                ctx.testPassed = false;
+            }
+
+            if (ctx.testPassed) {
+                CFFLog::Info("✓ Test PASSED: Raycast hit the expected object");
+            } else {
+                CFFLog::Error("✗ Test FAILED: Raycast did not hit the expected object");
+            }
+        });
+
+        // Frame 30: Finish test
+        ctx.OnFrame(30, [&ctx]() {
+            CFFLog::Info("Frame 30: Test finished");
+            ctx.Finish();
+        });
+    }
+};
+
+// Register the test
+REGISTER_TEST(CTestRayCast)

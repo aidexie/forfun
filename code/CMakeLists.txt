@@ -61,9 +61,13 @@ set(EDITOR_SRC
     ${CODE_PATH}/Editor/PickingUtils.cpp
 )
 
+# Test framework
+file(GLOB TEST_SRC ${CODE_PATH}/Tests/*.cpp ${CODE_PATH}/Tests/*.h)
+
 add_executable(forfun WIN32
     ${CORE_SRC} ${ENGINE_SRC}
     ${EDITOR_SRC}
+    ${TEST_SRC}
     ${CODE_PATH}/main.cpp
 )
 target_include_directories(forfun PRIVATE
