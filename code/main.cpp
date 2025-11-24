@@ -260,12 +260,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     // 4) Scene initialization (load from .ffasset or HDR)
     CFFLog::Info("Initializing Scene (loading skybox and IBL)...");
-    if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset"))
-    {
-        CFFLog::Error("Failed to initialize Scene!");
-        exitCode = -3;
-        goto cleanup;
-    }
+    // if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset"))
+    // {
+    //     CFFLog::Error("Failed to initialize Scene!");
+    //     exitCode = -3;
+    //     goto cleanup;
+    // }
     sceneInitialized = true;
     CFFLog::Info("Scene initialized");
 
@@ -288,14 +288,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     shadowPassInitialized = true;
     CFFLog::Info("ShadowPass initialized");
 
-    {
-        CSceneSerializer::LoadScene(CScene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
-    }
-
     // Setup test if in test mode
     if (activeTest) {
         activeTest->Setup(testContext);
         CFFLog::Info("Test setup complete, starting main loop");
+    }else{
+        CSceneSerializer::LoadScene(CScene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
     }
 
     // 6) 主循环
