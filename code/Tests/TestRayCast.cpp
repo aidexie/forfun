@@ -56,6 +56,9 @@ public:
 
         // Frame 20: Perform raycast test
         ctx.OnFrame(20, [&ctx]() {
+            auto& log = CFFLog::Instance();
+            log.BeginSession("TEST_SESSION", "Raycast Test");
+
             CFFLog::Info("Frame 20: Performing raycast test");
 
             // Take screenshot before raycast
@@ -68,25 +71,35 @@ public:
             // Get viewport size from MainPass
             UINT vpWidth = ctx.mainPass->GetOffscreenWidth();
             UINT vpHeight = ctx.mainPass->GetOffscreenHeight();
+            float screenX = vpWidth / 2.0f;
+            float screenY = vpHeight / 2.0f;
+
+            log.LogEvent("Ray Generation");
+            log.LogInfo("Input:");
+            log.LogInfo("  screenX=%.1f, screenY=%.1f (center)", screenX, screenY);
+            log.LogInfo("  viewportW=%u, viewportH=%u", vpWidth, vpHeight);
 
             // Cast ray from center of screen (should hit the cube)
             PickingUtils::Ray ray = PickingUtils::GenerateRayFromScreen(
-                vpWidth / 2.0f, vpHeight / 2.0f,  // Screen center
+                screenX, screenY,  // Screen center
                 (float)vpWidth, (float)vpHeight,  // Viewport size
                 viewMatrix,
                 projMatrix
             );
 
-            CFFLog::Info("Ray origin: (%.2f, %.2f, %.2f)",
-                ray.origin.x, ray.origin.y, ray.origin.z);
-            CFFLog::Info("Ray direction: (%.2f, %.2f, %.2f)",
-                ray.direction.x, ray.direction.y, ray.direction.z);
+            log.LogInfo("Ray (World Space):");
+            log.LogVector("  Origin", ray.origin);
+            log.LogVector("  Direction", ray.direction);
 
             // Test intersection with the cube
             auto& scene = CScene::Instance();
             bool hitAnything = false;
             float closestDist = FLT_MAX;
             int hitIndex = -1;
+
+            log.LogEvent("Intersection Tests");
+            log.LogInfo("Testing %d objects...", scene.GetWorld().Count());
+            log.LogInfo("");
 
             for (int i = 0; i < scene.GetWorld().Count(); ++i) {
                 auto* obj = scene.GetWorld().Get(i);
@@ -102,35 +115,67 @@ public:
                 XMFLOAT3 localMin = {-0.5f, -0.5f, -0.5f};
                 XMFLOAT3 localMax = {0.5f, 0.5f, 0.5f};
 
+                log.LogSubsectionStart((std::string("[") + std::to_string(i+1) + "/" +
+                    std::to_string(scene.GetWorld().Count()) + "] Object: \"" +
+                    obj->GetName() + "\"").c_str());
+                log.LogInfo("Transform:");
+                log.LogVector("  Position", transform->position);
+                log.LogVector("  Scale", transform->scale);
+                log.LogAABB("Local AABB", localMin, localMax);
+
                 // Transform AABB to world space
                 XMFLOAT3 worldMin, worldMax;
                 PickingUtils::TransformAABB(localMin, localMax, worldMatrix, worldMin, worldMax);
 
+                log.LogAABB("World AABB (after transform)", worldMin, worldMax);
+
                 // Test intersection
                 auto distance = PickingUtils::RayAABBIntersect(ray, worldMin, worldMax);
 
-                if (distance.has_value() && distance.value() < closestDist) {
-                    closestDist = distance.value();
-                    hitIndex = i;
-                    hitAnything = true;
+                if (distance.has_value()) {
+                    log.LogSuccess(("HIT at distance " + std::to_string(distance.value())).c_str());
+
+                    if (distance.value() < closestDist) {
+                        closestDist = distance.value();
+                        hitIndex = i;
+                        hitAnything = true;
+                    }
+                } else {
+                    log.LogFailure("NO HIT");
                 }
+
+                log.LogSubsectionEnd();
             }
 
             // Verify results
+            log.LogEvent("Test Verification");
+            log.LogInfo("Hits found: %d", (hitAnything ? 1 : 0));
+
             if (hitAnything) {
+                const char* hitName = scene.GetWorld().Get(hitIndex)->GetName().c_str();
+                log.LogInfo("Closest hit: \"%s\" at distance %.3f (index %d)",
+                    hitName, closestDist, hitIndex);
+
                 CFFLog::Info("✓ Raycast hit object at index %d (distance: %.2f)",
                     hitIndex, closestDist);
                 ctx.testPassed = (hitIndex == 0);  // Should hit the first (and only) object
+
+                if (ctx.testPassed) {
+                    log.LogSuccess("TEST PASSED: Hit expected object");
+                    CFFLog::Info("✓ Test PASSED: Raycast hit the expected object");
+                } else {
+                    log.LogFailure("TEST FAILED: Hit wrong object");
+                    CFFLog::Error("✗ Test FAILED: Raycast hit wrong object");
+                }
             } else {
+                log.LogFailure("TEST FAILED: No hits");
                 CFFLog::Error("✗ Raycast missed all objects");
+                CFFLog::Error("✗ Test FAILED: Raycast did not hit the expected object");
                 ctx.testPassed = false;
             }
 
-            if (ctx.testPassed) {
-                CFFLog::Info("✓ Test PASSED: Raycast hit the expected object");
-            } else {
-                CFFLog::Error("✗ Test FAILED: Raycast did not hit the expected object");
-            }
+            log.EndSession();
+            log.FlushToFile("E:/forfun/debug/logs/test_raycast.log");
         });
 
         // Frame 30: Finish test

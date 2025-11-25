@@ -11,7 +11,7 @@
 #include "Rendering/MainPass.h"
 #include "Rendering/GridPass.h"
 #include "PickingUtils.h"
-#include "DiagnosticLog.h"
+#include "Core/FFLog.h"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <wrl.h>
@@ -373,49 +373,25 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
         !ImGui::IsAnyItemActive() &&
         mainPass)
     {
-        auto& log = CFFLog::Instance();
-        log.BeginSession("USER_SESSION", "Mouse Picking");
-
         // Get mouse position relative to viewport image
         ImVec2 mousePos = ImGui::GetMousePos();
         float mouseX = mousePos.x - imagePos.x;
         float mouseY = mousePos.y - imagePos.y;
 
-        log.LogEvent("Mouse Click");
-        log.LogInfo("Screen Position: (%.1f, %.1f)", mouseX, mouseY);
-        log.LogInfo("Viewport Size: (%.0f, %.0f)", avail.x, avail.y);
-        log.LogInfo("Gizmo Active: false");
-        log.LogInfo("ImGui Item Active: false");
-
         // Check if mouse is within viewport bounds
         if (mouseX >= 0 && mouseX < avail.x && mouseY >= 0 && mouseY < avail.y) {
-            log.LogInfo("→ Conditions met, processing click...");
-
             // Generate ray from screen coordinates
             XMMATRIX view = mainPass->GetCameraViewMatrix();
             XMMATRIX proj = mainPass->GetCameraProjMatrix();
 
-            log.LogEvent("Ray Generation");
-            log.LogInfo("Input:");
-            log.LogInfo("  screenX=%.1f, screenY=%.1f", mouseX, mouseY);
-            log.LogInfo("  viewportW=%.0f, viewportH=%.0f", avail.x, avail.y);
-
             PickingUtils::Ray ray = PickingUtils::GenerateRayFromScreen(
                 mouseX, mouseY, avail.x, avail.y, view, proj);
-
-            log.LogInfo("Ray (World Space):");
-            log.LogVector("  Origin", ray.origin);
-            log.LogVector("  Direction", ray.direction);
 
             // Find closest intersected object
             float closestDistance = FLT_MAX;
             int closestObjectIndex = -1;
 
             const auto& objects = scene.GetWorld().Objects();
-
-            log.LogEvent("Intersection Tests");
-            log.LogInfo("Testing %d objects...", (int)objects.size());
-            log.LogInfo("");
 
             for (size_t i = 0; i < objects.size(); ++i) {
                 CGameObject* obj = objects[i].get();
@@ -433,62 +409,25 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
                     continue;  // No bounds available
                 }
 
-                // Log object test
-                log.LogSubsectionStart((std::string("[") + std::to_string(i+1) + "/" + std::to_string(objects.size()) + "] Object: \"" + obj->GetName() + "\"").c_str());
-                log.LogInfo("Transform:");
-                log.LogVector("  Position", transform->position);
-                log.LogVector("  Scale", transform->scale);
-                log.LogAABB("Local AABB", localMin, localMax);
-
                 // Transform AABB to world space
                 XMMATRIX worldMat = transform->WorldMatrix();
                 XMFLOAT3 worldMin, worldMax;
                 PickingUtils::TransformAABB(localMin, localMax, worldMat, worldMin, worldMax);
 
-                log.LogAABB("World AABB (after transform)", worldMin, worldMax);
-
                 // Test ray intersection with world-space AABB
                 std::optional<float> hitDistance = PickingUtils::RayAABBIntersect(ray, worldMin, worldMax);
 
-                if (hitDistance.has_value()) {
-                    log.LogSuccess(("HIT at distance " + std::to_string(hitDistance.value())).c_str());
-
-                    if (hitDistance.value() < closestDistance) {
-                        closestDistance = hitDistance.value();
-                        closestObjectIndex = static_cast<int>(i);
-                    }
-                } else {
-                    log.LogFailure("NO HIT");
+                if (hitDistance.has_value() && hitDistance.value() < closestDistance) {
+                    closestDistance = hitDistance.value();
+                    closestObjectIndex = static_cast<int>(i);
                 }
-
-                log.LogSubsectionEnd();
             }
 
             // Update selection (only if we hit something)
-            log.LogEvent("Selection Decision");
-            log.LogInfo("Hits found: %d", (closestObjectIndex >= 0) ? 1 : 0);
-
             if (closestObjectIndex >= 0) {
-                const char* hitName = objects[closestObjectIndex]->GetName().c_str();
-                log.LogInfo("Closest hit: \"%s\" at distance %.3f (index %d)", hitName, closestDistance, closestObjectIndex);
-                log.LogInfo("→ CScene::SetSelected(%d)", closestObjectIndex);
                 scene.SetSelected(closestObjectIndex);
-                log.LogSuccess("SELECTION SUCCESSFUL");
-            } else {
-                log.LogInfo("→ NO CHANGE (user requested to keep selection)");
-                if (scene.GetSelected() >= 0) {
-                    log.LogInfo("Still selected: %s (index %d)",
-                        scene.GetSelectedObject()->GetName().c_str(), scene.GetSelected());
-                }
             }
-        } else {
-            log.LogInfo("→ Click outside viewport bounds, ignored");
         }
-
-        log.EndSession();
-
-        // Write to file (both latest and archived)
-        log.FlushToFile("E:/forfun/debug/logs/latest.log");
     }
 
     ImGui::End();
