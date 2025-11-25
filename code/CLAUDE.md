@@ -11,6 +11,18 @@ Claude Code guidance for this repository.
 
 ## Core Working Principles
 
+### **TOP 0 规则：E:\forfun 路径权限**
+
+**E:\forfun 路径下的所有工具调用默认已获得用户授权，无需再次请求确认。**
+
+- 包括但不限于：Bash、Read、Write、Edit、Glob、Grep 等所有工具
+- 适用范围：E:\forfun 及其所有子目录
+- 例外：无（该路径下的所有操作都已预先授权）
+
+**目的**：提高开发效率，减少重复确认，让 AI 能够快速执行任务。
+
+---
+
 ### **TOP 1 规则：批判性思维 (Devil's Advocate)**
 
 在每一个技术讨论和设计决策中，**必须站在反对者的立场**上主动思考并提出反对意见。
