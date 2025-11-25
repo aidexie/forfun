@@ -50,6 +50,9 @@ public:
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
 
+    // State query for AI testing
+    std::string GenerateReport() const;
+
 private:
     // Private constructor for singleton
     CScene() = default;

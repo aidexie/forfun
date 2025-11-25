@@ -8,6 +8,7 @@
 #include "Engine/Rendering/MainPass.h"
 #include "Editor/PickingUtils.h"
 #include <DirectXMath.h>
+#include <sstream>
 
 using namespace DirectX;
 
@@ -52,6 +53,10 @@ public:
             auto& scene = CScene::Instance();
             int objectCount = scene.GetWorld().Count();
             CFFLog::Info("Scene has %d object(s)", objectCount);
+
+            // Generate and log scene report
+            std::string report = scene.GenerateReport();
+            CFFLog::Info("Scene State:\n%s", report.c_str());
         });
 
         // Frame 20: Perform raycast test
@@ -172,6 +177,16 @@ public:
                 CFFLog::Error("✗ Raycast missed all objects");
                 CFFLog::Error("✗ Test FAILED: Raycast did not hit the expected object");
                 ctx.testPassed = false;
+            }
+
+            // Add scene state report to test log
+            log.LogEvent("Scene State Report");
+            std::string sceneReport = scene.GenerateReport();
+            // Split report into lines for proper logging
+            std::istringstream iss(sceneReport);
+            std::string line;
+            while (std::getline(iss, line)) {
+                log.LogInfo("%s", line.c_str());
             }
 
             log.EndSession();

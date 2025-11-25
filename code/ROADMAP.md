@@ -4,7 +4,7 @@
 
 ---
 
-## 当前进度 (2025-11-24)
+## 当前进度 (2025-11-25)
 
 ### ✅ 已完成
 
@@ -15,6 +15,8 @@
   - `Tests/TestRayCast.cpp` - 示例测试用例
 - **统一日志系统**: CFFLog 替代所有 console 输出，支持自定义控制台重定向
 - **文件结构重组**: Core/Loader 和 Core/Exporter 分离，便于维护
+- **截图系统**: `Core/Testing/Screenshot.h` - PNG 截图保存，AI 可通过 Read tool 查看
+- **状态查询系统**: `CScene::GenerateReport()` 和 `CRenderStats` - AI 可读取场景逻辑状态
 
 #### 渲染和编辑器功能
 - **场景光照设置**: Scene Light Settings 面板，支持天空盒配置和即时应用
@@ -38,40 +40,44 @@
 
 **核心问题**: AI 无法直接观察 EXE 运行结果（视觉盲区、交互盲区、状态盲区）
 
-### 0.1 视觉验证系统 ✅ (部分完成，待实现)
+### 0.1 视觉验证系统 ✅ (已完成)
 
 #### 截图 API
 ```cpp
 // Core/Testing/Screenshot.h
 class CScreenshot {
 public:
-    // 从 MainPass 离屏 RT 读取并保存为 PNG
-    static bool Capture(const std::string& path);
+    // 从 ID3D11Texture2D 读取并保存为 PNG
+    static bool Capture(ID3D11Texture2D* texture, const std::string& path);
 
-    // 保存到测试目录: test_screenshots/{testname}_{frame}.png
-    static bool CaptureTest(const std::string& testName, int frame);
+    // 从 MainPass 获取纹理并保存
+    static bool CaptureFromMainPass(CMainPass* mainPass, const std::string& path);
+
+    // 保存到测试目录: E:/forfun/debug/screenshots/{testname}_frame{frame}.png
+    static bool CaptureTest(CMainPass* mainPass, const std::string& testName, int frame);
 };
 ```
 
-**需求**:
-- API 驱动（不依赖快捷键）
-- 保存 tonemapped LDR 图像（与 Viewport 显示一致）
-- 自动创建目录
-- 日志输出保存路径
-- 使用 stb_image_write（避免额外依赖）
+**已实现功能**:
+- ✅ API 驱动（通过 `CTestContext::mainPass` 访问）
+- ✅ 保存 tonemapped LDR 图像（R8G8B8A8_UNORM SRGB）
+- ✅ 自动创建目录（E:/forfun/debug/screenshots）
+- ✅ 日志输出保存路径
+- ✅ 使用 stb_image_write（零依赖）
+- ✅ 支持 TYPELESS 纹理格式（通过 UNORM staging texture）
 
-**验收标准**:
+**使用示例**:
 ```cpp
+// Tests/TestRayCast.cpp
 ctx.OnFrame(20, [&]() {
-    scene.LoadSkybox("skybox/test.ffasset");
-    CScreenshot::CaptureTest("TestSkybox", 20);
-    // 输出: test_screenshots/TestSkybox_frame20.png
+    CScreenshot::CaptureTest(ctx.mainPass, "TestRayCast", 20);
+    // 输出: E:/forfun/debug/screenshots/TestRayCast_frame20.png (1116x803)
 });
 ```
 
 ---
 
-### 0.2 状态查询系统 (待实现)
+### 0.2 状态查询系统 ✅ (已完成)
 
 #### Scene Report
 ```cpp
@@ -84,37 +90,59 @@ public:
     // - 当前选中对象索引
     // - 天空盒资源路径
     // - 光源信息
+    // - 每个物体的组件详情（Transform, MeshRenderer, DirectionalLight）
 };
 ```
 
 #### Rendering Statistics
 ```cpp
-// Engine/Rendering/RenderStats.h
-struct CRenderStats {
-    int drawCalls = 0;
-    int triangles = 0;
-    float frameTimeMs = 0.0f;
+// Core/Testing/RenderStats.h
+class CRenderStats {
+public:
+    static CRenderStats& Instance();
 
+    void RecordFrameTime(float deltaTime);
+    void RecordDrawCall(int vertexCount = 0, int indexCount = 0);
+    void RecordShadowPass(int cascadeIndex, int drawCalls);
+    void BeginFrame();
     void Reset();
-    std::string ToString() const;
-};
 
-// MainPass 中累加统计
-CRenderStats::Instance().drawCalls++;
+    std::string GenerateReport() const;
+
+    // Accessors for assertions
+    int GetFrameCount() const;
+    float GetLastFrameTime() const;
+    int GetDrawCallCount() const;
+};
 ```
 
-**验收标准**:
-```cpp
-ctx.OnFrame(30, [&]() {
-    std::string report = CScene::Instance().GenerateReport();
-    CFFLog::Info("Scene State:\n%s", report.c_str());
-    // 输出:
-    // GameObjects: 3
-    // - [0] TestCube (selected)
-    // - [1] Ground
-    // - [2] DirectionalLight
-    // Skybox: skybox/test.ffasset
-});
+**已实现功能**:
+- ✅ `CScene::GenerateReport()` - 完整场景状态报告
+- ✅ `CRenderStats` singleton - 帧时间、绘制调用、顶点/索引统计
+- ✅ 集成到 TestRayCast - Frame 10 和 Frame 20 输出报告
+- ✅ 输出到日志文件 (E:/forfun/debug/logs/test_raycast.log)
+
+**实际输出示例**:
+```
+[SCENE STATE REPORT]
+================================
+
+[GameObjects]
+  Total Count: 1
+
+  [0] "TestCube"
+      Transform: pos(5.00, 0.80, 0.00) scale(1.00, 1.00, 1.00)
+      MeshRenderer: "mesh/cube.obj"
+
+[Selection]
+  Selected Object: None
+
+[Environment]
+  Skybox Asset: (none)
+  Initialized: No
+
+[Lights]
+  Directional Lights: 0
 ```
 
 ---
