@@ -47,7 +47,6 @@ static void AppendPrimitive(const cgltf_primitive* prim,
     const cgltf_accessor* acc_col = nullptr;
 
     // Debug: Print all attributes to check for vertex colors
-    CFFLog::Info("  Primitive attributes (  %d ):",prim->attributes_count);
     for (size_t a=0;a<prim->attributes_count;++a){
         auto& att = prim->attributes[a];
         const char* typeName = "UNKNOWN";
@@ -61,7 +60,6 @@ static void AppendPrimitive(const cgltf_primitive* prim,
             case cgltf_attribute_type_weights: typeName = "WEIGHTS"; break;
             default: break;
         }
-        CFFLog::Info("    -  %s _ %d", typeName, att.index);
     }
 
     for (size_t a=0;a<prim->attributes_count;++a){

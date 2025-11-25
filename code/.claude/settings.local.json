@@ -35,7 +35,8 @@
       "Bash(then sed -i '2i#include \"\"\"\"Core/FFLog.h\"\"\"\"' \"$file\" fi done)",
       "Bash(git rm:*)",
       "Bash(./forfun.exe:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []
