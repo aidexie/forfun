@@ -47,6 +47,123 @@ Claude Code guidance for this repository.
 
 ---
 
+## 功能开发 + 自动测试工作流
+
+### 步骤 1：实现功能
+
+当用户请求"实现 XXX 功能"时：
+1. 实现核心功能代码
+2. **必须主动编写自动化测试**（不等用户要求）
+3. 测试命名：`CTest{FeatureName}`
+
+### 步骤 2：编写测试
+
+测试必须包含：
+- **场景设置**（Frame 1-10）：创建测试场景、加载资源
+- **截图**（Frame 20）：捕获关键帧的视觉效果
+- **断言验证**（Frame 20）：使用 `ASSERT_*` 宏验证逻辑正确性
+- **视觉预期描述**（Frame 20）：使用 `VISUAL_EXPECTATION` 标记
+- **最终总结**（Frame 30）：检查 `ctx.failures` 并设置 `ctx.testPassed`
+
+**视觉预期示例**：
+```cpp
+CFFLog::Info("VISUAL_EXPECTATION: Sky should be blue with visible clouds");
+CFFLog::Info("VISUAL_EXPECTATION: No black/pink missing texture colors");
+CFFLog::Info("VISUAL_EXPECTATION: Environment lighting visible on test cube");
+```
+
+### 步骤 3：运行测试
+
+使用 Bash tool 运行：
+```bash
+timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test CTestXXX
+```
+
+### 步骤 4：AI 自动分析
+
+测试运行完成后，**必须自动执行**以下步骤：
+
+1. **读取测试日志**：
+   ```
+   E:/forfun/debug/{TestName}/test.log
+   ```
+   - 检查断言状态（查找 "✓ ALL ASSERTIONS PASSED" 或 "✗ TEST FAILED"）
+   - 提取 VISUAL_EXPECTATION 描述
+   - 记录任何失败的断言
+
+2. **读取截图**：
+   ```
+   E:/forfun/debug/{TestName}/screenshot_frame*.png
+   ```
+   - 使用 Read tool 查看截图（AI 的多模态能力）
+   - 对比截图与 VISUAL_EXPECTATION 描述
+   - 检查明显的渲染错误（黑屏、缺失纹理、错误颜色）
+
+3. **读取运行时日志**（如有必要）：
+   ```
+   E:/forfun/debug/{TestName}/runtime.log
+   ```
+   - 如果测试失败，查找错误信息
+   - 检查资源加载问题
+
+### 步骤 5：生成测试分析报告
+
+**报告格式**：
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+测试分析报告：{TestName}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ 断言状态：所有断言通过 (0 failures)
+   或
+✗ 断言状态：3 个断言失败
+   - [TestName:Frame10] Object count: expected 1, got 2
+   - [TestName:Frame20] Hit distance: expected 10.400, got 11.200
+
+✅ 视觉验证：截图符合预期
+   - ✓ Sky shows blue color with clouds
+   - ✓ No missing textures
+   - ✓ Environment lighting visible
+   或
+✗ 视觉验证：发现问题
+   - ✗ Screenshot shows black screen (expected: blue sky)
+
+📊 日志摘要：
+   - Frame 1: Scene setup complete
+   - Frame 10: All setup assertions passed
+   - Frame 20: Raycast test passed
+
+📸 截图：
+   - screenshot_frame20.png (1116x803)
+   - 显示：[简要描述截图内容]
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ 总结：功能实现正确，测试通过
+   或
+✗ 总结：测试失败，需要修复以下问题：
+   1. [具体问题描述]
+   2. [具体问题描述]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 步骤 6：失败时的处理
+
+如果测试失败：
+1. 分析失败原因（从日志和截图）
+2. 修复代码
+3. 重新构建
+4. 返回步骤 3（重新运行测试）
+5. 重复直到测试通过
+
+### 重要提醒
+
+- ⚠️ **不要跳过测试**：每个新功能都必须有自动化测试
+- ⚠️ **不要等待用户要求**：主动编写并运行测试
+- ⚠️ **不要忘记分析**：测试运行后必须读取并分析结果
+- ⚠️ **不要只看断言**：视觉验证同样重要
+
+---
+
 ## Project Overview
 
 中型游戏引擎+编辑器项目，目标类似 Unity/Unreal 但规模较小。
