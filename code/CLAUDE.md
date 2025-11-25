@@ -6,6 +6,8 @@ Claude Code guidance for this repository.
 - `CODING_STYLE.md` - 命名约定和代码风格
 - `ROADMAP.md` - 开发路线图
 - `.clang-format` - 代码格式化配置
+- `docs/RENDERING.md` - 渲染系统详细文档
+- `docs/EDITOR.md` - 编辑器系统详细文档
 
 ---
 
@@ -27,21 +29,21 @@ Claude Code guidance for this repository.
 
 在每一个技术讨论和设计决策中，**必须站在反对者的立场**上主动思考并提出反对意见。
 
-**要求**：
+**要求**:
 - 不要只是同意用户的方案并执行
 - 主动指出潜在问题、边界情况、性能隐患
 - 提出替代方案和权衡 (trade-offs)
 - 质疑设计选择的合理性和必要性
 - 即使用户的方案看起来合理，也要寻找可能的缺陷
 
-**示例场景**：
+**示例场景**:
 - 用户："我想用 ImGui 渲染 AABB"
   - ❌ 错误回应："好的，我来实现"
   - ✅ 正确回应："ImGui 2D overlay 没有深度测试，大量包围盒会有 CPU 开销。考虑 GPU-based line rendering 吗？"
 
 - 用户："把这个数据存到组件里"
-  - ❌ 错误回应："好的，添加字段"
-  - ✅ 正确回应："如果多个实例共享同一个 mesh，是否应该存在共享的资源中而不是组件？"
+  - ❌ 错误回应:"好的，添加字段"
+  - ✅ 正确回应:"如果多个实例共享同一个 mesh，是否应该存在共享的资源中而不是组件？"
 
 **目标**：确保每个决策都经过充分思考，避免短视的设计。
 
@@ -169,52 +171,17 @@ timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test CTestXXX
 中型游戏引擎+编辑器项目，目标类似 Unity/Unreal 但规模较小。
 
 **当前状态**:
-- ECS 架构
+- ECS 架构 (Component-based GameObject system)
 - Editor UI (Hierarchy, Inspector, Viewport, Scene Light Settings, IBL Debug, HDR Export)
-- 3D 渲染 (OBJ/glTF)
-- PBR (Cook-Torrance BRDF)
+- 3D 渲染 (OBJ/glTF loader)
+- PBR (Cook-Torrance BRDF, physically-based)
 - CSM 阴影 (bounding sphere stabilization + texel snapping)
 - IBL (diffuse irradiance + specular pre-filtered map)
 - 场景序列化 + 组件自动注册
-- Transform Gizmo (ImGuizmo: 平移/旋转/缩放, Local/World, Grid snapping)
+- Transform Gizmo (ImGuizmo: Translate/Rotate/Scale, Local/World, Grid snapping)
 - HDR Export 工具 (HDR → KTX2 + .ffasset)
 - KTX2 资源加载 (.ffasset → env/irr/prefilter)
 - 自动化测试框架 (命令行驱动，帧回调架构)
-
----
-
-## Graphics Rendering Standards
-
-### **CRITICAL: Physics-Based Rendering**
-
-所有图形特性必须**物理正确**。这是最高优先级要求。
-
-**禁止的非物理 Hack**:
-- 让阴影影响 ambient/IBL（阴影仅影响直接光）
-- 无物理依据的乘数（如 `color *= 1.5` 为了"更好看"）
-- Clamp 应该是 HDR 的值
-
-**允许的物理参数**:
-- 曝光控制、Tone mapping、Bloom
-- 用户可调强度滑块（如 `gIblIntensity`）
-- 预计算顶点色 AO
-
-### Energy Conservation
-
-```hlsl
-// BRDF 能量守恒: kS + kD ≤ 1.0
-float3 kS = F;
-float3 kD = (1.0 - kS) * (1.0 - metallic);
-
-// 直接光: Lambert = albedo/π
-float3 diffuse = kD * albedo / PI;
-
-// IBL: 必须除以 π 以匹配直接光
-float3 diffuseIBL = irradiance * albedo;
-float3 ambient = kD_IBL * (diffuseIBL / PI) + specularIBL;
-```
-
-**References**: pbrt, UE4 Real Shading (Karis), Disney BRDF (Burley)
 
 ---
 
@@ -231,20 +198,27 @@ float3 ambient = kD_IBL * (diffuseIBL / PI) + specularIBL;
 
 ---
 
-## Build
+## Build & Run
 
 Windows DX11 + CMake + Ninja:
 
 ```bash
+# Build
 cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --target forfun
-./build/forfun.exe
+
+# Run editor
+./build/Debug/forfun.exe
+
+# Run test
+./build/Debug/forfun.exe --test TestRayCast
 ```
 
 **Paths**:
 - Source: `E:/forfun/source/code`
 - Third-party: `E:/forfun/thirdparty`
 - Assets: `E:/forfun/assets`
+- Debug output: `E:/forfun/debug/{TestName}/`
 
 **Dependencies**: imgui_docking, cgltf, nlohmann/json, DirectX 11, KTX-Software (libktx)
 
@@ -258,12 +232,13 @@ cmake --build build --target forfun
    - `DX11Context`: D3D11 device/context/swapchain 单例
    - `MeshResourceManager`: Mesh 加载/缓存
    - `GpuMeshResource`: GPU mesh RAII 封装
+   - `Testing/`: 测试框架（TestCase, TestRegistry, Screenshot, Assertions）
 
 2. **Engine/** - ECS、场景、渲染
    - `World`: GameObject 容器
    - `GameObject`: 拥有 Components 的实体
    - `Component`: 组件基类
-   - `Scene`: World + 编辑器选择状态
+   - `Scene`: World + 编辑器选择状态 + SceneLightSettings
    - `Rendering/`: MainPass, ShadowPass, Skybox, IBLGenerator
 
 3. **Editor/** - ImGui UI
@@ -281,341 +256,171 @@ cmake --build build --target forfun
 #include "Component.h"
 #include "ComponentRegistry.h"
 
-struct PointLight : public Component {
+struct SPointLight : public IComponent {
     DirectX::XMFLOAT3 Color{1, 1, 1};
     float Intensity = 1.0f;
 
     const char* GetTypeName() const override { return "PointLight"; }
-    void VisitProperties(PropertyVisitor& visitor) override {
+    void VisitProperties(IPropertyVisitor& visitor) override {
         visitor.VisitFloat3("Color", Color);
         visitor.VisitFloat("Intensity", Intensity);
     }
 };
 
-REGISTER_COMPONENT(PointLight)
+REGISTER_COMPONENT(SPointLight)
 ```
 
 然后添加到 `CMakeLists.txt` ENGINE_SOURCES。
 
-### Reflection & Serialization
-
-- `PropertyVisitor`: 反射接口
-- `ImGuiPropertyVisitor`: Inspector UI
-- `JsonWriteVisitor`/`JsonReadVisitor`: JSON 序列化
+**Reflection & Serialization**:
+- `IPropertyVisitor`: 反射接口
+- `CImGuiPropertyVisitor`: Inspector UI 自动生成
+- `CJsonWriteVisitor`/`CJsonReadVisitor`: JSON 序列化
 - 场景文件: `.scene` (JSON)
 
 ---
 
-## Rendering Pipeline
+## Graphics Rendering (Quick Reference)
 
-### Frame Flow
+### Physics-Based Rendering Rule
 
-```cpp
-gMainPass.UpdateCamera(vpWidth, vpHeight, dt);
-if (dirLight) {
-    gShadowPass.Render(gScene, dirLight, gMainPass.GetCameraViewMatrix(), gMainPass.GetCameraProjMatrix());
-}
-gMainPass.Render(gScene, vpWidth, vpHeight, dt, &gShadowPass.GetOutput());
-DrawViewport(gMainPass.GetOffscreenSRV(), ...);
-```
+**所有图形特性必须物理正确**。禁止非物理 hack（无依据的乘数、让阴影影响 IBL 等）。
 
-### Color Space
+详见 **`docs/RENDERING.md`** 获取：
+- Energy Conservation 公式
+- Shadow System (CSM) 实现细节
+- IBL System (GGX importance sampling, solid angle mip selection)
+- Rendering Pipeline 架构
+- Color Space 规则
 
-```
-Albedo (UNORM_SRGB) → GPU converts to Linear
-    ↓
-HDR Linear (R16G16B16A16_FLOAT)
-    ↓
-PostProcess (Tone Mapping)
-    ↓
-Final (R8G8B8A8_UNORM_SRGB) → GPU applies Gamma
-```
+### 快速参考
 
-**规则**:
+**Color Space**:
 - Albedo/Emissive: `UNORM_SRGB`
 - Normal/Metallic/Roughness/AO: `UNORM`
 - Intermediate RT: `R16G16B16A16_FLOAT`
-- Final: `R8G8B8A8_UNORM_SRGB`
+
+**CSM Shadow**: 1-4 cascades, bounding sphere stabilization, texel snapping, PCF 3×3
+
+**IBL**: Diffuse (32×32) + Specular pre-filtered (128×128, 7 mip)
 
 ---
 
-## Shadow System (CSM)
+## Editor System (Quick Reference)
 
-- 1-4 cascades
-- Bounding sphere stabilization (消除旋转抖动)
-- Texel snapping (消除移动抖动)
-- PCF 3×3 软阴影
+详见 **`docs/EDITOR.md`** 获取：
+- Panel 系统架构
+- Transform Gizmo (W/E/R 快捷键, World/Local, Grid snapping)
+- View Orientation Gizmo (相机方向指示器)
+- HDR Export Tool (HDR → KTX2 + .ffasset 工作流)
+- Irradiance Debug Panel (IBL 纹理预览)
 
-**DirectionalLight 参数**:
-- `ShadowMapSizeIndex`: 1024/2048/4096
-- `ShadowDistance`, `ShadowBias`, `ShadowNearPlaneOffset`
-- `CascadeCount`, `CascadeSplitLambda`, `CascadeBlendRange`
-- `DebugShowCascades`
+### 快速参考
 
----
-
-## IBL System
-
-### Components
-
-1. **IBLGenerator** (`Engine/Rendering/IBLGenerator.h/cpp`)
-2. **IrradianceConvolution.ps.hlsl**: Diffuse irradiance (uniform solid angle sampling)
-3. **PreFilterEnvironmentMap.ps.hlsl**: Specular (GGX importance sampling, Split Sum)
-
-### Key Implementation
-
-**Uniform Solid Angle Sampling** (irradiance):
-```hlsl
-float cosTheta = 1.0 - v;  // Linear in cos(θ) → uniform solid angle
-irradiance += color * cosTheta;
-```
-
-**GGX Importance Sampling** (pre-filtered):
-```hlsl
-float2 Xi = Hammersley(i, SAMPLE_COUNT);
-float3 H = ImportanceSampleGGX(Xi, roughness);
-float3 L = normalize(2.0 * dot(V, H) * H - V);
-```
-
-**Dynamic Sample Count**: 8K-65K samples based on roughness.
-
-**Solid Angle Mip Selection**:
-```hlsl
-float saSample = 1.0 / (pdf * SAMPLE_COUNT);
-float saTexel = 4.0 * PI / (6.0 * envResolution * envResolution);
-float mipLevel = 0.5 * log2(saSample / saTexel);
-```
-
-### Debug UI
-
-`Editor/Panels_IrradianceDebug.cpp` - 三个 Tab:
-1. Irradiance Map (32×32)
-2. Pre-Filtered Map (128×128, mip 0-6)
-3. Environment Map (source, mip 0-9)
-
----
-
-## Editor Panels
-
-**Current**: Dockspace, Hierarchy, Inspector, Viewport, IrradianceDebug, HDRExport
-
-**Adding new panel**:
+**添加新 Panel**:
 1. 声明到 `Editor/Panels.h`
 2. 实现 `Editor/Panels_PanelName.cpp`
 3. 添加到 `CMakeLists.txt` EDITOR_SRC
-4. 在 main loop `ImGui::NewFrame()` 后调用
+4. 在 main loop 中调用
+
+**当前 Panels**: Dockspace, Hierarchy, Inspector, Viewport, Scene Light Settings, Irradiance Debug, HDR Export
 
 ---
 
-## HDR Export Tool
+## Automated Testing
 
-**位置**: `Editor/Panels_HDRExport.cpp`
-
-**功能**: 将 HDR 环境贴图导出为 IBL 资源包
-
-**导出流程**: Window → HDR Export
-1. 选择 HDR 源文件
-2. 输入输出目录和资源名
-3. 点击 Export
-
-**输出文件**:
-- `{name}_env.ktx2` - 环境立方体贴图 (512×512)
-- `{name}_irr.ktx2` - 漫反射辐照度图 (32×32)
-- `{name}_prefilter.ktx2` - 镜面预过滤图 (128×128, 7 mip)
-- `{name}.ffasset` - JSON 描述符
-
-**.ffasset 格式**:
-```json
-{
-  "type": "skybox",
-  "version": "1.0",
-  "source": "source.hdr",
-  "data": {
-    "env": "name_env.ktx2",
-    "irr": "name_irr.ktx2",
-    "prefilter": "name_prefilter.ktx2"
-  }
-}
-```
-
-**下一步**: 启动时缓存检测
-
----
-
-## Transform Gizmo
-
-Viewport 工具栏提供物体变换控制。
-
-**操作模式**:
-- **Translate (W)**: 平移物体
-- **Rotate (E)**: 旋转物体
-- **Scale (R)**: 缩放物体
-
-**空间模式**:
-- **World**: 世界坐标系
-- **Local**: 局部坐标系
-
-**Grid Snapping**:
-- 勾选 "Snap" 启用网格对齐
-- 平移: 可调步进值 (0.01-10m)，默认 1m
-- 旋转: 可调角度 (1-90°)，默认 15°
-- 缩放: 可调步进值 (0.01-2)，默认 0.5
-
----
-
-## View Orientation Gizmo
-
-Viewport 右上角的相机方向指示器 (自定义 ImGui DrawList 渲染)。
-
-**特性**:
-- X/Y/Z 轴正向: 亮色 + 箭头 + 标签
-- 负向: 灰色细线
-- 深度排序渲染
-
----
-
-## Automated Testing Framework
-
-**目标**: 让 AI 能够自主验证新功能的正确性。
-
-### Test Framework Architecture
+### Test Framework
 
 **位置**: `Core/Testing/`
-- `TestCase.h` - 测试基类和上下文
-- `TestRegistry.h` - 自动注册宏
+- `TestCase.h` - `ITestCase` 接口, `CTestContext` API
+- `TestRegistry.h` - `REGISTER_TEST()` 宏
+- `Screenshot.h` - `CScreenshot::CaptureTest()`
 - `Tests/` - 测试用例
 
 **运行测试**:
 ```bash
-./build/forfun.exe --test TestRayCast
+./build/Debug/forfun.exe --test TestRayCast
 ```
 
-### Writing Tests
-
-**示例测试**:
-```cpp
-// Tests/TestRayCast.cpp
-#include "Core/Testing/TestCase.h"
-#include "Core/Testing/TestRegistry.h"
-#include "Engine/Scene.h"
-
-class CTestRayCast : public ITestCase {
-public:
-    const char* GetName() const override { return "TestRayCast"; }
-
-    void Setup(CTestContext& ctx) override {
-        // Frame 1: 创建测试场景
-        ctx.OnFrame(1, [&]() {
-            auto& scene = CScene::Instance();
-            // 清空场景
-            while (scene.GetWorld().Count() > 0) {
-                scene.GetWorld().Destroy(0);
-            }
-
-            // 创建测试物体
-            auto* cube = scene.GetWorld().Create("TestCube");
-            auto* transform = cube->AddComponent<STransform>();
-            transform->position = {0.0f, 0.0f, 5.0f};
-            auto* meshRenderer = cube->AddComponent<SMeshRenderer>();
-            meshRenderer->path = "mesh/cube.obj";
-
-            CFFLog::Info("Frame 1: Creating test scene");
-        });
-
-        // Frame 20: 执行射线投射测试
-        ctx.OnFrame(20, [&]() {
-            // 执行测试逻辑
-            CFFLog::Info("Frame 20: Performing raycast test");
-
-            // 验证结果
-            ctx.testPassed = true;
-        });
-
-        // Frame 30: 结束测试
-        ctx.OnFrame(30, [&]() {
-            CFFLog::Info("Frame 30: Test finished");
-            ctx.Finish();
-        });
-    }
-};
-
-REGISTER_TEST(CTestRayCast)
+**输出**:
+```
+E:/forfun/debug/{TestName}/
+  ├── runtime.log       (Frame-by-frame execution log)
+  ├── test.log          (Test session log with assertions)
+  └── screenshot_frame20.png
 ```
 
 ### Frame Callback Pattern
 
 **核心概念**: 测试在正常引擎循环中执行，通过帧回调调度操作。
 
-**好处**:
-- 真实环境测试（与运行时行为一致）
-- 可以测试异步资源加载
-- 可以观察渲染结果（配合截图）
-- 自动退出（不阻塞 CI）
-
-**主循环集成**:
 ```cpp
-// main.cpp
-if (activeTest) {
-    testContext.ExecuteFrame(frameCount);
-    if (testContext.IsFinished()) {
-        PostQuitMessage(testContext.testPassed ? 0 : 1);
-        break;
-    }
-}
-```
-
-### Test Context API
-
-```cpp
-class CTestContext {
+class CTestMyFeature : public ITestCase {
 public:
-    int currentFrame = 0;
-    bool testPassed = false;
+    const char* GetName() const override { return "TestMyFeature"; }
 
-    // 注册帧回调
-    void OnFrame(int frameNumber, std::function<void()> callback);
+    void Setup(CTestContext& ctx) override {
+        ctx.OnFrame(1, [&]() {
+            // 创建测试场景
+        });
 
-    // 标记测试完成
-    void Finish();
-    bool IsFinished() const;
+        ctx.OnFrame(20, [&]() {
+            // 执行测试 + 截图 + 断言
+            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            ASSERT_EQUAL(ctx, actual, expected, "Description");
+        });
 
-    // 执行当前帧回调（由主循环调用）
-    void ExecuteFrame(int frame);
+        ctx.OnFrame(30, [&]() {
+            ctx.testPassed = ctx.failures.empty();
+            ctx.Finish();
+        });
+    }
 };
+
+REGISTER_TEST(CTestMyFeature)
 ```
 
-### Scene Light Settings
+### Assertion Macros
 
-**位置**: `Engine/SceneLightSettings.h`, `Editor/Panels_SceneLightSettings.cpp`
-
-**功能**: 场景级别配置，独立于 GameObject 系统
-
-**当前支持**:
-- Skybox 资源路径（.ffasset）
-- 即时应用（修改后立即重新加载）
-
-**访问**:
 ```cpp
-auto& settings = CScene::Instance().GetLightSettings();
-settings.skyboxAssetPath = "skybox/test.ffasset";
-CScene::Instance().Initialize(settings.skyboxAssetPath);  // 应用
+ASSERT(ctx, condition, "Description");
+ASSERT_EQUAL(ctx, actual, expected, "Description");
+ASSERT_NOT_NULL(ctx, pointer, "Description");
+ASSERT_IN_RANGE(ctx, value, min, max, "Description");
+ASSERT_VEC3_EQUAL(ctx, actual, expected, epsilon, "Description");
 ```
 
-**序列化**: 保存到 `.scene` 文件的 `lightSettings` 节点
-
-**UI**: Window → Scene Light Settings
-
-### Next Steps (Phase 0 - 最高优先级)
-
-详见 `ROADMAP.md` Phase 0。
-
-**立即需要**:
-1. **截图 API** - `CScreenshot::Capture(path)` / `CaptureTest(testName, frame)`
-2. **状态查询** - `CScene::GenerateReport()`
-3. **测试断言** - `CTestContext::Assert()` / `AssertEqual()`
-
-**目标**: 让 AI 能够"看到"测试结果（截图），验证逻辑状态（报告），自动判断 pass/fail（断言）。
+**好处**: 测试失败不会崩溃，记录到 `ctx.failures`，最后统一判断 pass/fail。
 
 ---
 
-**Last Updated**: 2025-11-24
+## Documentation Index
+
+### Core Documents (Root)
+- `CLAUDE.md` (本文件) - AI 工作指南 + 快速参考
+- `CODING_STYLE.md` - 命名约定（匈牙利命名法：C/S/I/E 前缀）
+- `ROADMAP.md` - 开发路线图（Phase 0-3）
+- `.clang-format` - 代码格式化配置
+
+### Detailed References (docs/)
+- `docs/RENDERING.md` - 渲染系统完整文档
+  - Graphics Rendering Standards (Physics-based, Energy Conservation)
+  - Rendering Pipeline (Frame Flow, Color Space)
+  - Shadow System (CSM implementation details)
+  - IBL System (Diffuse/Specular algorithms, Debug UI)
+  - Scene Light Settings
+  - KTX2 Asset Loading
+
+- `docs/EDITOR.md` - 编辑器系统完整文档
+  - Editor Architecture (Panel system)
+  - Hierarchy/Inspector/Viewport Panels
+  - Transform Gizmo (操作模式, Grid Snapping)
+  - View Orientation Gizmo
+  - Scene Light Settings Panel
+  - Irradiance Debug Panel
+  - HDR Export Tool (完整导出流程)
+  - File Dialog Utilities
+
+---
+
+**Last Updated**: 2025-11-25
