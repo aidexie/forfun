@@ -1,11 +1,33 @@
 #pragma once
 #include <functional>
 #include <map>
+#include <vector>
+#include <string>
+#include <DirectXMath.h>
 
 // Forward declarations
 class CScene;
 class CTestContext;
 class CMainPass;
+
+// Assertion macros (fail-fast: return immediately on failure)
+#define ASSERT(ctx, condition, message) \
+    if (!(ctx).Assert(condition, message)) return
+
+#define ASSERT_EQUAL(ctx, actual, expected, message) \
+    if (!(ctx).AssertEqual(actual, expected, message)) return
+
+#define ASSERT_EQUAL_F(ctx, actual, expected, epsilon, message) \
+    if (!(ctx).AssertEqual(actual, expected, epsilon, message)) return
+
+#define ASSERT_NOT_NULL(ctx, ptr, message) \
+    if (!(ctx).AssertNotNull(ptr, message)) return
+
+#define ASSERT_IN_RANGE(ctx, actual, min, max, message) \
+    if (!(ctx).AssertInRange(actual, min, max, message)) return
+
+#define ASSERT_VEC3_EQUAL(ctx, actual, expected, epsilon, message) \
+    if (!(ctx).AssertVector3Equal(actual, expected, epsilon, message)) return
 
 // Test case interface
 class ITestCase {
@@ -24,7 +46,9 @@ class CTestContext {
 public:
     int currentFrame = 0;       // Current frame number
     bool testPassed = false;    // Test result
+    const char* testName = nullptr;  // Test name for detailed logging
     CMainPass* mainPass = nullptr;  // Access to rendering for screenshots
+    std::vector<std::string> failures;  // Collected failures
 
     // Register a callback for a specific frame
     void OnFrame(int frameNumber, std::function<void()> callback) {
@@ -50,7 +74,19 @@ public:
         return m_finished;
     }
 
+    // Assertion methods (return false on failure)
+    bool Assert(bool condition, const char* message);
+    bool AssertEqual(int actual, int expected, const char* message);
+    bool AssertEqual(float actual, float expected, float epsilon, const char* message);
+    bool AssertEqual(const std::string& actual, const std::string& expected, const char* message);
+    bool AssertNotNull(const void* ptr, const char* message);
+    bool AssertInRange(float actual, float min, float max, const char* message);
+    bool AssertVector3Equal(const DirectX::XMFLOAT3& actual, const DirectX::XMFLOAT3& expected, float epsilon, const char* message);
+
 private:
     std::map<int, std::function<void()>> m_frameCallbacks;
     bool m_finished = false;
+
+    // Record failure with detailed formatting
+    void RecordFailure(const char* formatted_message);
 };

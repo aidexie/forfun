@@ -291,6 +291,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // Setup test if in test mode
     if (activeTest) {
         testContext.mainPass = &g_main_pass;  // Give test access to MainPass for screenshots
+        testContext.testName = activeTest->GetName();  // Set test name for detailed logging
         activeTest->Setup(testContext);
         CFFLog::Info("Test setup complete, starting main loop");
     }else{

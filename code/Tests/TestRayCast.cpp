@@ -45,18 +45,35 @@ public:
             CFFLog::Info("Created cube at position (5, 0.8, 0) - aligned with camera height");
         });
 
-        // Frame 10: Wait for resources to load
+        // Frame 10: Wait for resources to load and verify scene setup
         ctx.OnFrame(10, [&ctx]() {
             CFFLog::Info("Frame 10: Waiting for resources to load...");
 
-            // Verify scene has objects
             auto& scene = CScene::Instance();
-            int objectCount = scene.GetWorld().Count();
-            CFFLog::Info("Scene has %d object(s)", objectCount);
+
+            // Assertions: verify scene setup
+            ASSERT_EQUAL(ctx, (int)scene.GetWorld().Count(), 1, "Scene should have 1 object");
+
+            auto* cube = scene.GetWorld().Get(0);
+            ASSERT_NOT_NULL(ctx, cube, "Test cube object");
+            ASSERT_EQUAL(ctx, cube->GetName(), std::string("TestCube"), "Object name");
+
+            auto* transform = cube->GetComponent<STransform>();
+            ASSERT_NOT_NULL(ctx, transform, "Transform component");
+            ASSERT_VEC3_EQUAL(ctx,
+                            transform->position,
+                            (DirectX::XMFLOAT3{5.0f, 0.8f, 0.0f}),
+                            0.01f,
+                            "Cube position");
+
+            auto* meshRenderer = cube->GetComponent<SMeshRenderer>();
+            ASSERT_NOT_NULL(ctx, meshRenderer, "MeshRenderer component");
 
             // Generate and log scene report
             std::string report = scene.GenerateReport();
             CFFLog::Info("Scene State:\n%s", report.c_str());
+
+            CFFLog::Info("✓ Frame 10: All setup assertions passed");
         });
 
         // Frame 20: Perform raycast test
@@ -152,7 +169,7 @@ public:
                 log.LogSubsectionEnd();
             }
 
-            // Verify results
+            // Verify results with assertions
             log.LogEvent("Test Verification");
             log.LogInfo("Hits found: %d", (hitAnything ? 1 : 0));
 
@@ -160,24 +177,15 @@ public:
                 const char* hitName = scene.GetWorld().Get(hitIndex)->GetName().c_str();
                 log.LogInfo("Closest hit: \"%s\" at distance %.3f (index %d)",
                     hitName, closestDist, hitIndex);
-
-                CFFLog::Info("✓ Raycast hit object at index %d (distance: %.2f)",
-                    hitIndex, closestDist);
-                ctx.testPassed = (hitIndex == 0);  // Should hit the first (and only) object
-
-                if (ctx.testPassed) {
-                    log.LogSuccess("TEST PASSED: Hit expected object");
-                    CFFLog::Info("✓ Test PASSED: Raycast hit the expected object");
-                } else {
-                    log.LogFailure("TEST FAILED: Hit wrong object");
-                    CFFLog::Error("✗ Test FAILED: Raycast hit wrong object");
-                }
-            } else {
-                log.LogFailure("TEST FAILED: No hits");
-                CFFLog::Error("✗ Raycast missed all objects");
-                CFFLog::Error("✗ Test FAILED: Raycast did not hit the expected object");
-                ctx.testPassed = false;
             }
+
+            // Assertions: verify raycast results
+            ASSERT(ctx, hitAnything, "Raycast should hit the cube");
+            ASSERT_EQUAL(ctx, hitIndex, 0, "Should hit the first object");
+            ASSERT_IN_RANGE(ctx, closestDist, 10.0f, 11.0f, "Hit distance should be ~10.4");
+
+            log.LogSuccess("TEST PASSED: All raycast assertions passed");
+            CFFLog::Info("✓ Test PASSED: Raycast hit the expected object at distance %.2f", closestDist);
 
             // Add scene state report to test log
             log.LogEvent("Scene State Report");
@@ -196,6 +204,19 @@ public:
         // Frame 30: Finish test
         ctx.OnFrame(30, [&ctx]() {
             CFFLog::Info("Frame 30: Test finished");
+
+            // Mark test as passed if no failures
+            if (ctx.failures.empty()) {
+                ctx.testPassed = true;
+                CFFLog::Info("✓ ALL ASSERTIONS PASSED");
+            } else {
+                ctx.testPassed = false;
+                CFFLog::Error("✗ TEST FAILED: %zu assertion(s) failed", ctx.failures.size());
+                for (const auto& failure : ctx.failures) {
+                    CFFLog::Error("  - %s", failure.c_str());
+                }
+            }
+
             ctx.Finish();
         });
     }

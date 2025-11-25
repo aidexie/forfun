@@ -17,6 +17,7 @@
 - **文件结构重组**: Core/Loader 和 Core/Exporter 分离，便于维护
 - **截图系统**: `Core/Testing/Screenshot.h` - PNG 截图保存，AI 可通过 Read tool 查看
 - **状态查询系统**: `CScene::GenerateReport()` 和 `CRenderStats` - AI 可读取场景逻辑状态
+- **断言系统**: `ASSERT_*` 宏 + 类型化断言方法 - fail-fast，详细错误信息，Vector3 支持
 
 #### 渲染和编辑器功能
 - **场景光照设置**: Scene Light Settings 面板，支持天空盒配置和即时应用
@@ -147,38 +148,102 @@ public:
 
 ---
 
-### 0.3 测试断言系统 (待实现)
+### 0.3 测试断言系统 ✅ (已完成)
 
 #### Assert API
 ```cpp
 // Core/Testing/TestCase.h
 class CTestContext {
 public:
-    void Assert(bool condition, const char* message);
-    void AssertEqual(float a, float b, float epsilon = 0.01f, const char* msg = "");
-    void AssertEqual(int a, int b, const char* msg = "");
+    // 布尔断言
+    bool Assert(bool condition, const char* message);
 
-    // 失败时记录错误，继续运行（汇总所有错误）
+    // 类型化断言（返回 false 表示失败）
+    bool AssertEqual(int actual, int expected, const char* message);
+    bool AssertEqual(float actual, float expected, float epsilon, const char* message);
+    bool AssertEqual(const std::string& actual, const std::string& expected, const char* message);
+    bool AssertNotNull(const void* ptr, const char* message);
+    bool AssertInRange(float actual, float min, float max, const char* message);
+    bool AssertVector3Equal(const DirectX::XMFLOAT3& actual,
+                           const DirectX::XMFLOAT3& expected,
+                           float epsilon,
+                           const char* message);
+
+    // 失败记录
+    const char* testName = nullptr;
     std::vector<std::string> failures;
 };
+
+// 断言宏（失败时立即 return，实现 fail-fast）
+#define ASSERT(ctx, condition, message)
+#define ASSERT_EQUAL(ctx, actual, expected, message)
+#define ASSERT_EQUAL_F(ctx, actual, expected, epsilon, message)
+#define ASSERT_NOT_NULL(ctx, ptr, message)
+#define ASSERT_IN_RANGE(ctx, actual, min, max, message)
+#define ASSERT_VEC3_EQUAL(ctx, actual, expected, epsilon, message)
 ```
 
-**验收标准**:
-```cpp
-ctx.OnFrame(50, [&]() {
-    auto& scene = CScene::Instance();
-    ctx.AssertEqual(scene.GetWorld().Count(), 3, "Expected 3 objects");
-    ctx.AssertEqual(scene.GetSelectedIndex(), 0, "Expected object 0 selected");
+**已实现功能**:
+- ✅ 方法返回 bool（失败时返回 false）
+- ✅ 宏自动 return（fail-fast 行为）
+- ✅ 详细日志格式：`[TestName:FrameN] Message: expected X, got Y`
+- ✅ 失败收集到 `ctx.failures` 向量
+- ✅ Vector3 专用断言（逐分量比较）
+- ✅ 字符串相等断言
+- ✅ 范围检查断言
+- ✅ 指针非空断言
 
+**实际使用示例**:
+```cpp
+// Tests/TestRayCast.cpp
+ctx.OnFrame(10, [&ctx]() {
+    auto& scene = CScene::Instance();
+
+    // 失败时立即 return，不继续执行
+    ASSERT_EQUAL(ctx, (int)scene.GetWorld().Count(), 1, "Scene should have 1 object");
+
+    auto* cube = scene.GetWorld().Get(0);
+    ASSERT_NOT_NULL(ctx, cube, "Test cube object");
+    ASSERT_EQUAL(ctx, cube->GetName(), std::string("TestCube"), "Object name");
+
+    auto* transform = cube->GetComponent<STransform>();
+    ASSERT_NOT_NULL(ctx, transform, "Transform component");
+    ASSERT_VEC3_EQUAL(ctx,
+                     transform->position,
+                     (DirectX::XMFLOAT3{5.0f, 0.8f, 0.0f}),
+                     0.01f,
+                     "Cube position");
+
+    CFFLog::Info("✓ All setup assertions passed");
+});
+
+ctx.OnFrame(30, [&ctx]() {
+    // 最终检查
     if (ctx.failures.empty()) {
         ctx.testPassed = true;
-        CFFLog::Info("✓ All assertions passed");
+        CFFLog::Info("✓ ALL ASSERTIONS PASSED");
     } else {
         ctx.testPassed = false;
-        CFFLog::Error("✗ %d assertions failed", ctx.failures.size());
+        CFFLog::Error("✗ TEST FAILED: %zu assertion(s) failed", ctx.failures.size());
+        for (const auto& failure : ctx.failures) {
+            CFFLog::Error("  - %s", failure.c_str());
+        }
     }
     ctx.Finish();
 });
+```
+
+**日志输出示例**:
+```
+[13:23:23] [INFO] Frame 10: Waiting for resources to load...
+[13:23:23] [INFO] ✓ Frame 10: All setup assertions passed
+[13:23:24] [INFO] ✓ ALL ASSERTIONS PASSED
+```
+
+**失败时输出** (假设断言失败):
+```
+[ERROR] ✗ [CTestRayCast:Frame10] Scene should have 1 object: expected 1, got 2
+[ERROR] ✗ [CTestRayCast:Frame20] Cube position: expected (5.000, 0.800, 0.000), got (4.950, 0.800, 0.000) (epsilon: 0.010)
 ```
 
 ---
