@@ -83,11 +83,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsWire;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateDefault;
 
-    // 默认纹理（兜底）
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultAlbedo;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultNormal;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_defaultMetallicRoughness;  // G=Roughness=1, B=Metallic=1 (all white)
-
     // 相机状态
     DirectX::XMFLOAT3 m_camPos{ -6.0f, 0.8f, 0.0f };
     float m_yaw = 0.0f, m_pitch = 0.0f;

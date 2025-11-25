@@ -12,6 +12,8 @@
 #include <commdlg.h>
 
 // Font Awesome icons
+#define ICON_FA_FILE ""           //
+#define ICON_FA_FOLDER_OPEN ""    //
 #define ICON_FA_EDIT ""           //
 
 // ImGui implementation of PropertyVisitor for reflection-based UI
@@ -90,26 +92,55 @@ public:
     }
 
     void VisitFilePath(const char* name, std::string& value, const char* filter) override {
-        // Display current value as read-only text with frame
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.2f, 0.2f, 0.2f, 0.5f));
+        // Unity-style single-line layout with unique ID to prevent dialog conflicts
+        ImGui::PushID(name);
 
-        // Negative width = reserve space from right edge (for Browse button)
-        ImGui::PushItemWidth(-80.0f);
+        // Label (left side)
+        ImGui::Text("%s", name);
+        ImGui::SameLine();
+
+        // File type icon
+        ImGui::TextDisabled(ICON_FA_FILE);
+        ImGui::SameLine();
+
+        // Determine if this is a material field and calculate button width
+        // Note: filter contains embedded \0 characters, so we can't use strstr directly
+        bool isMaterialField = false;
+        if (filter) {
+            // Search through the entire filter string (which has embedded nulls)
+            // by checking each null-terminated segment
+            const char* p = filter;
+            while (*p != '\0') {
+                if (strstr(p, "ffasset")) {
+                    isMaterialField = true;
+                    break;
+                }
+                // Move to next segment (skip current string + null terminator)
+                p += strlen(p) + 1;
+                // If we hit double-null (end of filter), stop
+                if (*p == '\0') break;
+            }
+        }
+        float buttonWidth = isMaterialField ? 80.0f : 50.0f;  // More space if Edit button present
+
+        // Path display (reserve space for buttons on right)
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.2f, 0.2f, 0.2f, 0.5f));
+        ImGui::PushItemWidth(-buttonWidth);
 
         char displayBuf[260];
         snprintf(displayBuf, sizeof(displayBuf), "%s", value.empty() ? "(None)" : value.c_str());
-        ImGui::InputText(name, displayBuf, sizeof(displayBuf), ImGuiInputTextFlags_ReadOnly);
+        ImGui::InputText("##path", displayBuf, sizeof(displayBuf), ImGuiInputTextFlags_ReadOnly);
 
         ImGui::PopItemWidth();
         ImGui::PopStyleColor();
 
+        // Browse button (small button with icon)
         ImGui::SameLine();
-        if (ImGui::Button("Browse...", ImVec2(70, 0))) {
+        if (ImGui::SmallButton(ICON_FA_FOLDER_OPEN "##browse")) {
             char filename[MAX_PATH] = "";
             OPENFILENAMEA ofn = {};
             ofn.lStructSize = sizeof(ofn);
 
-            // Build filter string
             if (filter) {
                 ofn.lpstrFilter = filter;
             } else {
@@ -122,7 +153,6 @@ public:
             ofn.lpstrInitialDir = "E:\\forfun\\assets";
 
             if (GetOpenFileNameA(&ofn)) {
-                // Convert to relative path (relative to assets folder)
                 std::string fullPath = filename;
                 std::string assetsPath = "E:\\forfun\\assets\\";
                 if (fullPath.find(assetsPath) == 0) {
@@ -132,6 +162,33 @@ public:
                 }
             }
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Browse for file");
+        }
+
+        // Edit button (only for material fields)
+        if (isMaterialField) {
+            ImGui::SameLine();
+            bool hasAsset = !value.empty();
+
+            if (!hasAsset) {
+                ImGui::BeginDisabled();
+            }
+
+            if (ImGui::SmallButton(ICON_FA_EDIT "##edit")) {
+                Panels::OpenMaterialEditor(value);
+            }
+
+            if (!hasAsset) {
+                ImGui::EndDisabled();
+            }
+
+            if (ImGui::IsItemHovered() && hasAsset) {
+                ImGui::SetTooltip("Edit material");
+            }
+        }
+
+        ImGui::PopID();
     }
 
     void VisitLabel(const char* name, const char* value) override {

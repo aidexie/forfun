@@ -80,78 +80,21 @@ void CTextureManager::CreateDefaultTextures() {
         CFFLog::Error("Failed to create default textures: D3D11 device not available");
         return;
     }
-
-    // Create default white texture (1x1 white pixel, sRGB)
-    {
-        D3D11_TEXTURE2D_DESC texDesc = {};
-        texDesc.Width = 1;
-        texDesc.Height = 1;
-        texDesc.MipLevels = 1;
-        texDesc.ArraySize = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Usage = D3D11_USAGE_IMMUTABLE;
-        texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-        UINT whitePixel = 0xFFFFFFFF;  // RGBA = (255, 255, 255, 255)
-        D3D11_SUBRESOURCE_DATA initData = {};
-        initData.pSysMem = &whitePixel;
-        initData.SysMemPitch = 4;
-
-        ComPtr<ID3D11Texture2D> tex;
-        HRESULT hr = device->CreateTexture2D(&texDesc, &initData, &tex);
-        if (SUCCEEDED(hr)) {
-            device->CreateShaderResourceView(tex.Get(), nullptr, &m_defaultWhite);
-        }
-    }
-
-    // Create default normal map (1x1 pixel: RGB=(128,128,255), Linear)
-    {
-        D3D11_TEXTURE2D_DESC texDesc = {};
-        texDesc.Width = 1;
-        texDesc.Height = 1;
-        texDesc.MipLevels = 1;
-        texDesc.ArraySize = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // Linear
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Usage = D3D11_USAGE_IMMUTABLE;
-        texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-        UINT normalPixel = 0xFF8080FF;  // RGBA = (128, 128, 255, 255) -> normal=(0,0,1)
-        D3D11_SUBRESOURCE_DATA initData = {};
-        initData.pSysMem = &normalPixel;
-        initData.SysMemPitch = 4;
-
-        ComPtr<ID3D11Texture2D> tex;
-        HRESULT hr = device->CreateTexture2D(&texDesc, &initData, &tex);
-        if (SUCCEEDED(hr)) {
-            device->CreateShaderResourceView(tex.Get(), nullptr, &m_defaultNormal);
-        }
-    }
-
-    // Create default black texture (1x1 black pixel, Linear)
-    {
-        D3D11_TEXTURE2D_DESC texDesc = {};
-        texDesc.Width = 1;
-        texDesc.Height = 1;
-        texDesc.MipLevels = 1;
-        texDesc.ArraySize = 1;
-        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // Linear
-        texDesc.SampleDesc.Count = 1;
-        texDesc.Usage = D3D11_USAGE_IMMUTABLE;
-        texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-        UINT blackPixel = 0xFF000000;  // RGBA = (0, 0, 0, 255)
-        D3D11_SUBRESOURCE_DATA initData = {};
-        initData.pSysMem = &blackPixel;
-        initData.SysMemPitch = 4;
-
-        ComPtr<ID3D11Texture2D> tex;
-        HRESULT hr = device->CreateTexture2D(&texDesc, &initData, &tex);
-        if (SUCCEEDED(hr)) {
-            device->CreateShaderResourceView(tex.Get(), nullptr, &m_defaultBlack);
-        }
-    }
+    // --- 默认兜底纹理 ---
+    auto MakeSolidSRV = [&](uint8_t r,uint8_t g,uint8_t b,uint8_t a, DXGI_FORMAT fmt){
+        D3D11_TEXTURE2D_DESC td{}; td.Width=1; td.Height=1; td.MipLevels=1; td.ArraySize=1;
+        td.Format=fmt; td.SampleDesc.Count=1; td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        uint32_t px = (uint32_t(r) | (uint32_t(g)<<8) | (uint32_t(b)<<16) | (uint32_t(a)<<24));
+        D3D11_SUBRESOURCE_DATA srd{ &px, 4, 0 };
+        ComPtr<ID3D11Texture2D> tex; device->CreateTexture2D(&td, &srd, tex.GetAddressOf());
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{}; sd.Format=fmt; sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels=1;
+        ComPtr<ID3D11ShaderResourceView> srv; device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
+        return srv;
+    };
+    m_defaultWhite = MakeSolidSRV(255,255,255,255, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB); // sRGB (white)
+    m_defaultNormal = MakeSolidSRV(128,128,255,255, DXGI_FORMAT_R8G8B8A8_UNORM);     // Linear (tangent-space up)
+    m_defaultBlack = MakeSolidSRV(0,0,0,255, DXGI_FORMAT_R8G8B8A8_UNORM);  // Linear (G=Roughness=1, B=Metallic=1)
 
     CFFLog::Info("Created default textures (white, normal, black)");
 }
