@@ -58,6 +58,10 @@ public:
     static void Warning(const char* format, ...);
     static void Error(const char* format, ...);
 
+    // Set runtime log path (for test mode)
+    static void SetRuntimeLogPath(const char* path);
+    static const char* GetRuntimeLogPath();
+
 private:
     CFFLog() = default;
     ~CFFLog() = default;

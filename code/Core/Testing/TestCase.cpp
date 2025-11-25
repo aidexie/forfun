@@ -2,6 +2,29 @@
 #include "Core/FFLog.h"
 #include <cstdio>
 #include <cmath>
+#include <filesystem>
+
+// Helper functions for test paths
+std::string GetTestDebugDir(const char* testName) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "E:/forfun/debug/%s", testName);
+
+    // Create directory if it doesn't exist
+    std::filesystem::create_directories(buf);
+
+    return buf;
+}
+
+std::string GetTestLogPath(const char* testName) {
+    return GetTestDebugDir(testName) + "/test.log";
+}
+
+std::string GetTestScreenshotPath(const char* testName, int frame) {
+    char buf[256];
+    snprintf(buf, sizeof(buf), "%s/screenshot_frame%d.png",
+             GetTestDebugDir(testName).c_str(), frame);
+    return buf;
+}
 
 void CTestContext::RecordFailure(const char* formatted_message) {
     char buf[512];

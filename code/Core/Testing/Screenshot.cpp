@@ -2,6 +2,7 @@
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
 #include "Engine/Rendering/MainPass.h"
+#include "TestCase.h"
 #include <d3d11.h>
 #include <vector>
 #include <filesystem>
@@ -123,12 +124,8 @@ bool CScreenshot::CaptureTest(CMainPass* mainPass, const std::string& testName, 
         return false;
     }
 
-    // Build path: E:/forfun/debug/screenshots/{testName}_frame{frame}.png
-    char filename[256];
-    snprintf(filename, sizeof(filename), "%s_frame%d.png", testName.c_str(), frame);
-
-    std::string path = "E:/forfun/debug/screenshots/";
-    path += filename;
+    // Build path: E:/forfun/debug/{testName}/screenshot_frame{frame}.png
+    std::string path = GetTestScreenshotPath(testName.c_str(), frame);
 
     return CaptureFromMainPass(mainPass, path);
 }

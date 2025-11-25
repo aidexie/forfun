@@ -29,6 +29,11 @@ class CMainPass;
 #define ASSERT_VEC3_EQUAL(ctx, actual, expected, epsilon, message) \
     if (!(ctx).AssertVector3Equal(actual, expected, epsilon, message)) return
 
+// Helper functions for test paths
+std::string GetTestDebugDir(const char* testName);
+std::string GetTestLogPath(const char* testName);
+std::string GetTestScreenshotPath(const char* testName, int frame);
+
 // Test case interface
 class ITestCase {
 public:

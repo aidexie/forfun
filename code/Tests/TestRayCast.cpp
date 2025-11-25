@@ -84,7 +84,7 @@ public:
             CFFLog::Info("Frame 20: Performing raycast test");
 
             // Take screenshot before raycast
-            CScreenshot::CaptureTest(ctx.mainPass, "TestRayCast", 20);
+            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
 
             // Get actual camera matrices from MainPass (don't hardcode!)
             XMMATRIX viewMatrix = ctx.mainPass->GetCameraViewMatrix();
@@ -198,7 +198,10 @@ public:
             }
 
             log.EndSession();
-            log.FlushToFile("E:/forfun/debug/logs/test_raycast.log");
+
+            // Save test log to test-specific directory
+            std::string testLogPath = GetTestLogPath(ctx.testName);
+            log.FlushToFile(testLogPath.c_str());
         });
 
         // Frame 30: Finish test
