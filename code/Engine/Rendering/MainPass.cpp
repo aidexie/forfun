@@ -9,7 +9,8 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
-#include "Components/Material.h"
+#include "Core/MaterialManager.h"
+#include "Core/TextureManager.h"
 #include <array>
 #include <chrono>
 #include <algorithm>
@@ -392,19 +393,32 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
         // 获取世界矩阵
         XMMATRIX worldMatrix = transform->WorldMatrix();
 
-        // 获取材质组件（如果没有则使用默认值）
-        auto* material = obj->GetComponent<SMaterial>();
-        XMFLOAT3 albedo = material ? material->albedo : XMFLOAT3(1.0f, 1.0f, 1.0f);
-        float metallic = material ? material->metallic : 0.0f;
-        float roughness = material ? material->roughness : 0.5f;
+        // Load material asset (or use default)
+        CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
+        if (!meshRenderer->materialPath.empty()) {
+            material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
+        }
+
+        // Get PBR properties from material
+        XMFLOAT3 albedo = material->albedo;
+        float metallic = material->metallic;
+        float roughness = material->roughness;
+
+        // Load textures from material
+        CTextureManager& texMgr = CTextureManager::Instance();
+        ID3D11ShaderResourceView* albedoSRV = material->albedoTexture.empty() ?
+            texMgr.GetDefaultWhite() : texMgr.Load(material->albedoTexture, /*srgb=*/true);
+        ID3D11ShaderResourceView* normalSRV = material->normalMap.empty() ?
+            texMgr.GetDefaultNormal() : texMgr.Load(material->normalMap, /*srgb=*/false);
+        ID3D11ShaderResourceView* metallicRoughnessSRV = material->metallicRoughnessMap.empty() ?
+            m_defaultMetallicRoughness.Get() : texMgr.Load(material->metallicRoughnessMap, /*srgb=*/false);
+
+        // Detect if using real texture or default
+        bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
 
         // 绘制所有子网格（glTF 可能有多个）
         for (auto& gpuMesh : meshRenderer->meshes) {
             if (!gpuMesh) continue;
-
-            // Detect if using real texture or default fallback
-            bool hasRealMetallicRoughnessTexture = gpuMesh->metallicRoughnessSRV.Get() &&
-                                                   gpuMesh->metallicRoughnessSRV.Get() != m_defaultMetallicRoughness.Get();
 
             // 更新物体矩阵和材质属性
             CB_Object co{};
@@ -421,18 +435,13 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
             context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
             context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
 
-            // 绑定纹理（如果为空则使用默认纹理）
+            // 绑定纹理
             // t0-t1: Albedo and Normal
-            ID3D11ShaderResourceView* srvs[2] = {
-                gpuMesh->albedoSRV.Get() ? gpuMesh->albedoSRV.Get() : m_defaultAlbedo.Get(),
-                gpuMesh->normalSRV.Get() ? gpuMesh->normalSRV.Get() : m_defaultNormal.Get()
-            };
+            ID3D11ShaderResourceView* srvs[2] = { albedoSRV, normalSRV };
             context->PSSetShaderResources(0, 2, srvs);
 
             // t6: Metallic/Roughness (G=Roughness, B=Metallic)
-            ID3D11ShaderResourceView* metallicRoughnessSrv = gpuMesh->metallicRoughnessSRV.Get() ?
-                                                             gpuMesh->metallicRoughnessSRV.Get() : m_defaultMetallicRoughness.Get();
-            context->PSSetShaderResources(6, 1, &metallicRoughnessSrv);
+            context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
 
             // 绘制
             context->DrawIndexed(gpuMesh->indexCount, 0, 0);

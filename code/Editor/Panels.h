@@ -1,4 +1,6 @@
 #pragma once
+#include <string>
+
 class CScene;
 struct EditorCamera;
 struct ImVec2;
@@ -27,4 +29,8 @@ namespace Panels {
     void ShowSceneLightSettings(bool show);
     void DrawSceneLightSettings();
     bool IsSceneLightSettingsVisible();
+
+    // Material Editor Window
+    void OpenMaterialEditor(const std::string& materialPath);
+    void DrawMaterialEditor();
 }

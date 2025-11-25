@@ -278,6 +278,40 @@ REGISTER_COMPONENT(SPointLight)
 - `CJsonWriteVisitor`/`CJsonReadVisitor`: JSON 序列化
 - 场景文件: `.scene` (JSON)
 
+### **CRITICAL: Reflection System Naming Rules**
+
+**问题历史 (2025-11-25)**:
+初次实现 Material Editor 时，在 `CMaterialAsset::VisitProperties()` 中使用了友好的 UI 显示名称（如 "Albedo Texture"、"Emissive Strength"），导致 JSON 序列化字段名与现有 .ffasset 文件格式不匹配（应该是 "albedoTexture"、"emissiveStrength"），所有材质加载失败。
+
+**强制规则**:
+
+1. **VisitProperties() 中的 name 参数必须使用精确的成员变量名**
+   ```cpp
+   // ✓ CORRECT - 使用变量名
+   visitor.VisitFloat3("albedo", albedo);
+   visitor.VisitFilePath("albedoTexture", albedoTexture, filter);
+
+   // ✗ WRONG - 使用 UI 显示名会导致序列化失败
+   visitor.VisitFloat3("Albedo", albedo);
+   visitor.VisitFilePath("Albedo Texture", albedoTexture, filter);
+   ```
+
+2. **JSON 序列化使用反射系统时，字段名 = VisitXXX 的第一个参数**
+   - `CJsonWriteVisitor` 和 `CJsonReadVisitor` 直接使用 name 参数作为 JSON key
+   - 如果 name 参数与成员变量名不匹配，会导致现有资源文件无法加载
+
+3. **UI 层仍然可以友好显示**
+   - ImGui 会将 "albedoTexture" 显示为 "albedoTexture"
+   - 如需更友好的显示名，应在 ImGuiPropertyVisitor 中处理转换，而不是改变反射层的 name
+
+4. **验证清单**（添加新的反射属性时）:
+   - [ ] VisitXXX 的第一个参数是否与成员变量名完全一致？
+   - [ ] JSON 文件中的字段名是否匹配？
+   - [ ] 是否会导致现有资源文件加载失败？
+
+**修复措施**:
+所有使用反射系统的类（Components、Assets）都应遵循此规则。如发现违反，应立即修正。
+
 ---
 
 ## Graphics Rendering (Quick Reference)
@@ -391,6 +425,44 @@ ASSERT_VEC3_EQUAL(ctx, actual, expected, epsilon, "Description");
 ```
 
 **好处**: 测试失败不会崩溃，记录到 `ctx.failures`，最后统一判断 pass/fail。
+
+### Test Naming and Registration
+
+**CRITICAL**: Test names are registered using `GetName()` return value (since 2025-11-25).
+
+**Example**:
+```cpp
+class CTestMaterialAsset : public ITestCase {
+public:
+    const char* GetName() const override {
+        return "TestMaterialAsset";  // ← This is the registered name
+    }
+};
+REGISTER_TEST(CTestMaterialAsset)
+```
+
+**Command line usage**:
+```bash
+# List all available tests
+./forfun.exe --list-tests
+
+# Run specific test (use GetName() value, NOT class name)
+./forfun.exe --test TestMaterialAsset       # ✅ Correct
+./forfun.exe --test CTestMaterialAsset      # ❌ Wrong (class name)
+```
+
+**Naming Convention**:
+- **Class name**: `CTestFeatureName` (with C prefix, following CODING_STYLE.md)
+- **GetName() return**: `"TestFeatureName"` (without C prefix, user-friendly)
+- **Command line**: Use the `GetName()` value
+
+**Troubleshooting**:
+If test not found, the system will:
+1. Show fuzzy match suggestions if similar names exist
+2. List all available tests
+3. Show usage help
+
+**Before 2025-11-25**: Tests were registered using class name (`#TestClass`), requiring `--test CTestName`. This was confusing and has been changed.
 
 ---
 

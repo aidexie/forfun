@@ -58,6 +58,7 @@ set(EDITOR_SRC
     ${CODE_PATH}/Editor/Panels_IrradianceDebug.cpp
     ${CODE_PATH}/Editor/Panels_HDRExport.cpp
     ${CODE_PATH}/Editor/Panels_SceneLightSettings.cpp
+    ${CODE_PATH}/Editor/Panels_MaterialEditor.cpp
     ${CODE_PATH}/Editor/PickingUtils.h
     ${CODE_PATH}/Editor/PickingUtils.cpp
 )
@@ -113,7 +114,6 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/MeshRenderer.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
     ${CODE_PATH}/Engine/Components/DirectionalLight.h
-    ${CODE_PATH}/Engine/Components/Material.h
     ${CODE_PATH}/Engine/Rendering/MainPass.h
     ${CODE_PATH}/Engine/Rendering/MainPass.cpp
     ${CODE_PATH}/Engine/Rendering/ShadowPass.h

@@ -12,6 +12,7 @@ class GpuMeshResource;
 
 struct SMeshRenderer : public CComponent {
     std::string path; // Path to mesh file (.obj, .gltf, .glb)
+    std::string materialPath; // Path to material asset (.ffasset)
     std::vector<std::shared_ptr<GpuMeshResource>> meshes; // GPU resources (glTF may have multiple sub-meshes)
 
     // Debug: show bounds wireframe in viewport
@@ -29,13 +30,16 @@ struct SMeshRenderer : public CComponent {
         // Save old value to detect changes
         std::string oldPath = path;
 
-        // Expose path with browse button
+        // Expose mesh path with browse button
         visitor.VisitFilePath("Path", path, "Mesh Files\0*.obj;*.gltf;*.glb\0OBJ Files\0*.obj\0glTF Files\0*.gltf;*.glb\0All Files\0*.*\0");
 
         // If path changed, mark for reload
         if (path != oldPath) {
             meshes.clear(); // Clear to trigger reload in EnsureUploaded
         }
+
+        // Expose material path with browse button
+        visitor.VisitFilePath("Material", materialPath, "Material Files\0*.ffasset\0All Files\0*.*\0");
 
         // Show local bounds info (read-only) from mesh resource
         DirectX::XMFLOAT3 localMin, localMax;

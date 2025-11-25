@@ -38,10 +38,11 @@ private:
 };
 
 // Macro for automatic test registration
+// Registers the test using GetName() instead of class name for better flexibility
 #define REGISTER_TEST(TestClass) \
     static TestClass g_##TestClass##_instance; \
     static struct TestClass##_Registrar { \
         TestClass##_Registrar() { \
-            CTestRegistry::Instance().Register(#TestClass, &g_##TestClass##_instance); \
+            CTestRegistry::Instance().Register(g_##TestClass##_instance.GetName(), &g_##TestClass##_instance); \
         } \
     } g_##TestClass##_registrar;

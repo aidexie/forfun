@@ -36,7 +36,12 @@
       "Bash(git rm:*)",
       "Bash(./forfun.exe:*)",
       "Bash(mkdir:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(build/Debug/forfun.exe:*)",
+      "WebSearch",
+      "WebFetch(domain:www.foundations.unity.com)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

@@ -5,14 +5,13 @@
 
 // RAII wrapper for GPU mesh resources
 // Automatically releases GPU resources when destroyed
+// NOTE: This class ONLY contains geometry data (vertices, indices, bounds).
+//       Textures and materials are managed separately by TextureManager and MaterialManager.
 class GpuMeshResource {
 public:
     Microsoft::WRL::ComPtr<ID3D11Buffer> vbo;
     Microsoft::WRL::ComPtr<ID3D11Buffer> ibo;
     UINT indexCount = 0;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> albedoSRV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> normalSRV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> metallicRoughnessSRV;  // G=Roughness, B=Metallic (glTF 2.0 standard)
 
     // Local space AABB (computed once at load time, shared by all instances)
     DirectX::XMFLOAT3 localBoundsMin{-0.5f, -0.5f, -0.5f};

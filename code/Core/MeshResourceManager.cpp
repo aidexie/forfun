@@ -3,7 +3,6 @@
 #include "Mesh.h"
 #include "Loader/ObjLoader.h"
 #include "Loader/GltfLoader.h"
-#include "Loader/TextureLoader.h"
 #include <d3d11.h>
 #include <algorithm>
 
@@ -151,50 +150,15 @@ std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadMesh(
         resource->hasBounds = true;
     }
 
-    // Leave textures as nullptr (Renderer will use defaults during rendering)
-
     return resource;
 }
 
 std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadGltfMesh(
     const SGltfMeshCPU& gltfMesh
 ) {
+    // glTF loader now only loads geometry data
+    // Textures and materials are managed separately by MaterialAsset system
     auto resource = UploadMesh(gltfMesh.mesh);
-    if (!resource) return nullptr;
-
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    if (!device) return nullptr;
-
-    // Load albedo texture (sRGB)
-    if (!gltfMesh.textures.baseColorPath.empty()) {
-        ComPtr<ID3D11ShaderResourceView> srv;
-        std::wstring wpath(gltfMesh.textures.baseColorPath.begin(),
-                          gltfMesh.textures.baseColorPath.end());
-        if (LoadTextureWIC(device, wpath, srv, /*srgb=*/true)) {
-            resource->albedoSRV = srv;
-        }
-    }
-
-    // Load normal texture (linear)
-    if (!gltfMesh.textures.normalPath.empty()) {
-        ComPtr<ID3D11ShaderResourceView> srv;
-        std::wstring wpath(gltfMesh.textures.normalPath.begin(),
-                          gltfMesh.textures.normalPath.end());
-        if (LoadTextureWIC(device, wpath, srv, /*srgb=*/false)) {
-            resource->normalSRV = srv;
-        }
-    }
-
-    // Load metallic-roughness texture (linear, G=Roughness, B=Metallic)
-    if (!gltfMesh.textures.metallicRoughnessPath.empty()) {
-        ComPtr<ID3D11ShaderResourceView> srv;
-        std::wstring wpath(gltfMesh.textures.metallicRoughnessPath.begin(),
-                          gltfMesh.textures.metallicRoughnessPath.end());
-        if (LoadTextureWIC(device, wpath, srv, /*srgb=*/false)) {
-            resource->metallicRoughnessSRV = srv;
-        }
-    }
-
     return resource;
 }
 

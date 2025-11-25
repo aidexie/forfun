@@ -7,10 +7,12 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
-#include "Components/Material.h"
 #include <string>
 #include <windows.h>
 #include <commdlg.h>
+
+// Font Awesome icons
+#define ICON_FA_EDIT ""           //
 
 // ImGui implementation of PropertyVisitor for reflection-based UI
 class ImGuiPropertyVisitor : public CPropertyVisitor {
@@ -186,16 +188,6 @@ void Panels::DrawInspector(CScene& scene) {
             }
         }
 
-        // Material component
-        if (auto* mat = sel->GetComponent<SMaterial>()) {
-            if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
-                mat->VisitProperties(visitor);
-            }
-        } else {
-            if (ImGui::Button("Add Material")) {
-                sel->AddComponent<SMaterial>();
-            }
-        }
     } else {
         ImGui::Text("No selection");
     }

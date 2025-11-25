@@ -7,6 +7,7 @@
 #include <string>
 #include <iostream>
 #include <filesystem>
+#include <algorithm>  // For std::transform (fuzzy matching)
 
 #include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
 #include "Engine/Rendering/MainPass.h"  // 主渲染流程
@@ -153,6 +154,24 @@ void ForceWorkDir() {
 }
 
 // -----------------------------------------------------------------------------
+// List all available tests
+// -----------------------------------------------------------------------------
+static void ListAllTests() {
+    auto testNames = CTestRegistry::Instance().GetAllTestNames();
+    CFFLog::Info("=== Available Tests ===");
+    if (testNames.empty()) {
+        CFFLog::Warning("No tests registered!");
+    } else {
+        CFFLog::Info("Total: %zu test(s)", testNames.size());
+        for (const auto& name : testNames) {
+            CFFLog::Info("  - %s", name.c_str());
+        }
+    }
+    CFFLog::Info("=======================");
+    CFFLog::Info("Usage: forfun.exe --test <TestName>");
+}
+
+// -----------------------------------------------------------------------------
 // Parse command line for test mode
 // -----------------------------------------------------------------------------
 static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
@@ -180,9 +199,32 @@ static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
         return test;
     }
 
-    // Test not found, list available tests
+    // Test not found, provide suggestions
     CFFLog::Error("Test not found: %s", testName.c_str());
+
+    // Try fuzzy matching for suggestions
     auto testNames = CTestRegistry::Instance().GetAllTestNames();
+    std::vector<std::string> suggestions;
+    for (const auto& name : testNames) {
+        // Check if registered name contains the input or vice versa
+        std::string lowerName = name;
+        std::string lowerInput = testName;
+        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+        std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(), ::tolower);
+
+        if (lowerName.find(lowerInput) != std::string::npos ||
+            lowerInput.find(lowerName) != std::string::npos) {
+            suggestions.push_back(name);
+        }
+    }
+
+    if (!suggestions.empty()) {
+        CFFLog::Info("Did you mean:");
+        for (const auto& s : suggestions) {
+            CFFLog::Info("  - %s", s.c_str());
+        }
+    }
+
     CFFLog::Info("Available tests:");
     for (const auto& name : testNames) {
         CFFLog::Info("  - %s", name.c_str());
@@ -213,6 +255,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     Core::Console::InitUTF8();
     ForceWorkDir();
+
+    // Check for --list-tests command
+    std::wstring cmdLine(lpCmdLine);
+    if (cmdLine.find(L"--list-tests") != std::wstring::npos) {
+        ListAllTests();
+        return 0;
+    }
 
     // Parse command line for test mode
     ITestCase* activeTest = ParseCommandLineForTest(lpCmdLine);
@@ -412,6 +461,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             Panels::DrawIrradianceDebug();   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment/BRDF LUT 四个 Tab）
             Panels::DrawHDRExportWindow();   // HDR Export 窗口
             Panels::DrawSceneLightSettings();  // Scene Light Settings 窗口
+            Panels::DrawMaterialEditor();    // Material Editor 窗口
         }
 
         // 5.5 提交 ImGui
