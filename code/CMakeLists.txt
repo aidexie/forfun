@@ -78,6 +78,7 @@ target_include_directories(forfun PRIVATE
     ${CODE_PATH}/Editor
     ${THIRD_PARTY_PATH}/cgltf-master
     ${THIRD_PARTY_PATH}/nlohmann
+    ${THIRD_PARTY_PATH}/stb
     ${KTX_DIR}/include
 )
 target_compile_definitions(forfun PRIVATE UNICODE _UNICODE NOMINMAX)

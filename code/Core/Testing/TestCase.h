@@ -5,6 +5,7 @@
 // Forward declarations
 class CScene;
 class CTestContext;
+class CMainPass;
 
 // Test case interface
 class ITestCase {
@@ -23,6 +24,7 @@ class CTestContext {
 public:
     int currentFrame = 0;       // Current frame number
     bool testPassed = false;    // Test result
+    CMainPass* mainPass = nullptr;  // Access to rendering for screenshots
 
     // Register a callback for a specific frame
     void OnFrame(int frameNumber, std::function<void()> callback) {

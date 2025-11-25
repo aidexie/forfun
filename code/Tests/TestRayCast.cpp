@@ -1,9 +1,11 @@
 #include "Core/Testing/TestCase.h"
 #include "Core/Testing/TestRegistry.h"
+#include "Core/Testing/Screenshot.h"
 #include "Core/FFLog.h"
 #include "Engine/Scene.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
+#include "Engine/Rendering/MainPass.h"
 #include "Editor/PickingUtils.h"
 #include <DirectXMath.h>
 
@@ -28,16 +30,18 @@ public:
             scene.SetSelected(-1);
 
             // Create a cube in front of the camera
+            // Left-handed coordinate system: camera looks at +X direction
+            // Camera is at approximately (-6, 0.8, 0), so align cube's Y
             auto* cube = scene.GetWorld().Create("TestCube");
 
             auto* transform = cube->AddComponent<STransform>();
-            transform->position = {0.0f, 0.0f, 5.0f};  // 5 units in front
+            transform->position = {5.0f, 0.8f, 0.0f};  // 5 units along +X, align Y with camera
             transform->scale = {1.0f, 1.0f, 1.0f};
 
             auto* meshRenderer = cube->AddComponent<SMeshRenderer>();
             meshRenderer->path = "mesh/cube.obj";
 
-            CFFLog::Info("Created cube at position (0, 0, 5)");
+            CFFLog::Info("Created cube at position (5, 0.8, 0) - aligned with camera height");
         });
 
         // Frame 10: Wait for resources to load
@@ -54,24 +58,21 @@ public:
         ctx.OnFrame(20, [&ctx]() {
             CFFLog::Info("Frame 20: Performing raycast test");
 
-            // Setup a simple camera looking down +Z axis
-            XMMATRIX viewMatrix = XMMatrixLookAtLH(
-                XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f),   // Eye at origin
-                XMVectorSet(0.0f, 0.0f, 1.0f, 1.0f),   // Look at +Z
-                XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)    // Up is +Y
-            );
+            // Take screenshot before raycast
+            CScreenshot::CaptureTest(ctx.mainPass, "TestRayCast", 20);
 
-            XMMATRIX projMatrix = XMMatrixPerspectiveFovLH(
-                XMConvertToRadians(60.0f),  // FOV
-                1280.0f / 720.0f,           // Aspect ratio
-                0.1f,                       // Near
-                100.0f                      // Far
-            );
+            // Get actual camera matrices from MainPass (don't hardcode!)
+            XMMATRIX viewMatrix = ctx.mainPass->GetCameraViewMatrix();
+            XMMATRIX projMatrix = ctx.mainPass->GetCameraProjMatrix();
+
+            // Get viewport size from MainPass
+            UINT vpWidth = ctx.mainPass->GetOffscreenWidth();
+            UINT vpHeight = ctx.mainPass->GetOffscreenHeight();
 
             // Cast ray from center of screen (should hit the cube)
             PickingUtils::Ray ray = PickingUtils::GenerateRayFromScreen(
-                640.0f, 360.0f,      // Screen center (1280x720)
-                1280.0f, 720.0f,     // Viewport size
+                vpWidth / 2.0f, vpHeight / 2.0f,  // Screen center
+                (float)vpWidth, (float)vpHeight,  // Viewport size
                 viewMatrix,
                 projMatrix
             );

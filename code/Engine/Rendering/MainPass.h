@@ -53,6 +53,7 @@ public:
 
     // 访问离屏目标（返回最终的 LDR sRGB 纹理用于显示）
     ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_offLDR.srv.Get(); }
+    ID3D11Texture2D* GetOffscreenTexture() const { return m_offLDR.color.Get(); }
     UINT GetOffscreenWidth()  const { return m_offLDR.w; }
     UINT GetOffscreenHeight() const { return m_offLDR.h; }
 
