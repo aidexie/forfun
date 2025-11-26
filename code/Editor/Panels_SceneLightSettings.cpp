@@ -5,7 +5,7 @@
 #include <windows.h>
 #include <commdlg.h>
 
-static bool s_showWindow = true;
+static bool s_showWindow = false;  // Default: hidden (user opens via menu)
 
 void Panels::DrawSceneLightSettings() {
     if (!s_showWindow) return;

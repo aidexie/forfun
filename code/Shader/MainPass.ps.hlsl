@@ -8,6 +8,7 @@ TextureCube gIrradianceMap : register(t3);  // IBL: Diffuse irradiance
 TextureCube gPreFilteredMap : register(t4);  // IBL: Specular pre-filtered environment
 Texture2D gBrdfLUT : register(t5);  // IBL: BRDF lookup table
 Texture2D gMetallicRoughness : register(t6);  // G=Roughness, B=Metallic (glTF 2.0 standard)
+Texture2D gEmissiveMap : register(t7);  // Emissive texture (sRGB)
 SamplerState gSamp : register(s0);
 SamplerComparisonState gShadowSampler : register(s1);
 
@@ -35,9 +36,11 @@ cbuffer CB_Frame : register(b0) {
 cbuffer CB_Object : register(b1) {
     float4x4 gWorld;
     float3 gMatAlbedo; float gMatMetallic;
-    float gMatRoughness;
-    int gHasMetallicRoughnessTexture;  // 1 = use texture, 0 = use CB values
-    float2 _padObj;
+    float3 gMatEmissive; float gMatRoughness;
+    float gMatEmissiveStrength;
+    int gHasMetallicRoughnessTexture;
+    int gHasEmissiveMap;
+    float _padObj;
 }
 
 struct PSIn {
@@ -273,7 +276,24 @@ float4 main(PSIn i) : SV_Target {
     // Final color (linear space)
     // Physically correct: only direct lighting (Lo) is affected by shadow
     // IBL (ambient) represents omnidirectional environment light, not affected by directional shadow
-    float3 colorLin = (ambient * gIblIntensity) + Lo;
+    // ============================================
+    // Emissive
+    // ============================================
+    // Calculate emissive (self-emitted light, not affected by shadows/AO/IBL)
+    float3 emissive = gMatEmissive * gMatEmissiveStrength;
+    if (gHasEmissiveMap) {
+        // Sample emissive texture (sRGB, GPU auto-converts to linear)
+        float3 emissiveTex = gEmissiveMap.Sample(gSamp, i.uv).rgb;
+        emissive = emissiveTex * gMatEmissiveStrength;
+    }
+
+    // Final color: Emissive + Reflected Light
+    // CRITICAL: Emissive is added AFTER all lighting calculations
+    // It is NOT affected by shadows, IBL, or AO (self-emitted light)
+    float3 colorLin = emissive + (ambient * gIblIntensity) + Lo;
 
     return float4(colorLin, 1.0);
 }
+
+
+

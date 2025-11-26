@@ -23,7 +23,11 @@ cbuffer CB_Frame : register(b0) {
 cbuffer CB_Object : register(b1) {
     float4x4 gWorld;
     float3 gMatAlbedo; float gMatMetallic;
-    float gMatRoughness; float3 _padObj;
+    float3 gMatEmissive; float gMatRoughness;
+    float gMatEmissiveStrength;
+    int gHasMetallicRoughnessTexture;
+    int gHasEmissiveMap;
+    float _padObj;
 }
 
 struct VSIn {
@@ -67,3 +71,4 @@ VSOut main(VSIn i) {
 
     return o;
 }
+

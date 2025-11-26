@@ -61,9 +61,11 @@ struct alignas(16) CB_Frame {
 struct alignas(16) CB_Object {
     DirectX::XMMATRIX world;
     DirectX::XMFLOAT3 albedo; float metallic;
-    float roughness;
-    int hasMetallicRoughnessTexture;  // 1 = use texture, 0 = use CB values
-    DirectX::XMFLOAT2 _pad;
+    DirectX::XMFLOAT3 emissive; float roughness;
+    float emissiveStrength;
+    int hasMetallicRoughnessTexture;
+    int hasEmissiveMap;
+    float _pad;
 };
 
 static auto gPrev = std::chrono::steady_clock::now();
@@ -395,9 +397,14 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
             texMgr.GetDefaultNormal() : texMgr.Load(material->normalMap, /*srgb=*/false);
         ID3D11ShaderResourceView* metallicRoughnessSRV = material->metallicRoughnessMap.empty() ? 
             texMgr.GetDefaultWhite() : texMgr.Load(material->metallicRoughnessMap, /*srgb=*/false);
+        ID3D11ShaderResourceView* emissiveSRV = material->emissiveMap.empty() ?
+            texMgr.GetDefaultBlack() : texMgr.Load(material->emissiveMap, /*srgb=*/true);
+
 
         // Detect if using real texture or default
         bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
+        bool hasRealEmissiveMap = !material->emissiveMap.empty();
+
 
         // 绘制所有子网格（glTF 可能有多个）
         for (auto& gpuMesh : meshRenderer->meshes) {
@@ -410,6 +417,9 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
             co.metallic = metallic;
             co.roughness = roughness;
             co.hasMetallicRoughnessTexture = hasRealMetallicRoughnessTexture ? 1 : 0;
+            co.emissive = material->emissive;
+            co.emissiveStrength = material->emissiveStrength;
+            co.hasEmissiveMap = hasRealEmissiveMap ? 1 : 0;
             context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
 
             // 绑定顶点和索引缓冲
@@ -425,6 +435,9 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
 
             // t6: Metallic/Roughness (G=Roughness, B=Metallic)
             context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
+
+            // t7: Emissive
+            context->PSSetShaderResources(7, 1, &emissiveSRV);
 
             // 绘制
             context->DrawIndexed(gpuMesh->indexCount, 0, 0);
