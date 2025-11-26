@@ -15,16 +15,15 @@ public:
     void Shutdown();
 
     // Render the grid
-    // depthSRV: Scene depth buffer (for depth testing)
+    // Note: Uses GPU depth test with currently bound DSV (no depth SRV needed)
+    // Render after all game content (opaque, skybox, transparent) to match Unity/UE
     void Render(DirectX::XMMATRIX view, DirectX::XMMATRIX proj,
-                DirectX::XMFLOAT3 cameraPos,
-                ID3D11ShaderResourceView* depthSRV,
-                UINT viewportWidth, UINT viewportHeight);
+                DirectX::XMFLOAT3 cameraPos);
 
     // Settings
     void SetEnabled(bool enabled) { m_enabled = enabled; }
     bool IsEnabled() const { return m_enabled; }
-
+    
     void SetGridColor(DirectX::XMFLOAT3 color) { m_gridColor = color; }
     DirectX::XMFLOAT3 GetGridColor() const { return m_gridColor; }
 

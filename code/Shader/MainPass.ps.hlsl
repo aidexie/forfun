@@ -306,7 +306,13 @@ float4 main(PSIn i) : SV_Target {
     // It is NOT affected by shadows, IBL, or AO (self-emitted light)
     float3 colorLin = emissive + (ambient * gIblIntensity) + Lo;
 
-    return float4(colorLin, 1.0);
+    // Alpha Output
+    // Opaque (0): Always output alpha=1.0 (fully opaque)
+    // Mask (1):   Already discarded transparent pixels, remaining are opaque (alpha=1.0)
+    // Blend (2):  Output texture alpha for smooth blending
+    float outputAlpha = (gAlphaMode == 2) ? alpha : 1.0;
+
+    return float4(colorLin, outputAlpha);
 }
 
 

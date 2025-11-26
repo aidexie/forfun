@@ -70,6 +70,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestRayCast.cpp
     ${CODE_PATH}/Tests/TestMaterialAsset.cpp
     ${CODE_PATH}/Tests/TestAlphaTest.cpp
+    ${CODE_PATH}/Tests/TestAlphaBlend.cpp
 )
 
 add_executable(forfun WIN32

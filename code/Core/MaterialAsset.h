@@ -66,7 +66,11 @@ public:
         visitor.VisitFloat3("emissive", emissive);
         visitor.VisitFloat("emissiveStrength", emissiveStrength);
         // Transparency Properties
-        visitor.VisitEnum("alphaMode", reinterpret_cast<int&>(alphaMode), {"Opaque", "Mask", "Blend"});
+        // CRITICAL: VisitEnum expects int&, but alphaMode is uint8_t enum
+        // Using temporary int to avoid undefined behavior from reinterpret_cast size mismatch
+        int alphaModeInt = static_cast<int>(alphaMode);
+        visitor.VisitEnum("alphaMode", alphaModeInt, {"Opaque", "Mask", "Blend"});
+        alphaMode = static_cast<EAlphaMode>(alphaModeInt);
         visitor.VisitFloatSlider("alphaCutoff", alphaCutoff, 0.0f, 1.0f);
 
 

@@ -26,6 +26,27 @@
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
+// ============================================
+// RenderItem - stores all data needed to render a mesh
+// ============================================
+namespace {
+    struct RenderItem {
+        CGameObject* obj;
+        SMeshRenderer* meshRenderer;
+        STransform* transform;
+        CMaterialAsset* material;
+        XMMATRIX worldMatrix;
+        float distanceToCamera;  // For sorting transparent objects
+        GpuMeshResource* gpuMesh;
+        ID3D11ShaderResourceView* albedoSRV;
+        ID3D11ShaderResourceView* normalSRV;
+        ID3D11ShaderResourceView* metallicRoughnessSRV;
+        ID3D11ShaderResourceView* emissiveSRV;
+        bool hasRealMetallicRoughnessTexture;
+        bool hasRealEmissiveMap;
+    };
+}
+
 // Helper function to load shader source from file
 static std::string LoadShaderSource(const std::string& filepath) {
     std::ifstream file(filepath);
@@ -191,6 +212,28 @@ void CMainPass::createRasterStates()
     dsd.DepthFunc = D3D11_COMPARISON_LESS;
     dsd.StencilEnable = FALSE;
     device->CreateDepthStencilState(&dsd, m_depthStateDefault.GetAddressOf());
+
+    // Transparent depth stencil state (depth test enabled, depth write DISABLED)
+    D3D11_DEPTH_STENCIL_DESC dsdTransparent{};
+    dsdTransparent.DepthEnable = TRUE;
+    dsdTransparent.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;  // Read-only
+    dsdTransparent.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+    dsdTransparent.StencilEnable = FALSE;
+    device->CreateDepthStencilState(&dsdTransparent, m_depthStateTransparent.GetAddressOf());
+
+    // Blend state for alpha blending
+    D3D11_BLEND_DESC blendDesc{};
+    blendDesc.AlphaToCoverageEnable = FALSE;
+    blendDesc.IndependentBlendEnable = FALSE;
+    blendDesc.RenderTarget[0].BlendEnable = TRUE;
+    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;       // α_src
+    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;  // (1 - α_src)
+    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    device->CreateBlendState(&blendDesc, m_blendStateTransparent.GetAddressOf());
 }
 
 void CMainPass::OnMouseDelta(int dx, int dy)
@@ -254,47 +297,18 @@ void CMainPass::updateInput(float dt)
     if (down('R')) { ResetCameraLookAt(XMFLOAT3(-6.0f,0.8f,0.0f), XMFLOAT3(0,0,0)); }
 }
 
-void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData)
+// ============================================
+// Helper: Update Frame Constants
+// ============================================
+static void updateFrameConstants(
+    ID3D11DeviceContext* context,
+    ID3D11Buffer* cbFrame,
+    const XMMATRIX& view,
+    const XMMATRIX& proj,
+    const XMFLOAT3& camPos,
+    SDirectionalLight* dirLight,
+    const CShadowPass::Output* shadowData)
 {
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
-    if (!context) return;
-
-    updateInput(dt);
-
-    // 绑定视口与目标
-    D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_off.w; vp.Height=(FLOAT)m_off.h; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
-    context->RSSetViewports(1, &vp);
-    context->RSSetState(m_rsSolid.Get());
-    context->OMSetDepthStencilState(m_depthStateDefault.Get(), 0);
-
-    // 绑定管线
-    context->IASetInputLayout(m_inputLayout.Get());
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->VSSetShader(m_vs.Get(), nullptr, 0);
-    context->PSSetShader(m_ps.Get(), nullptr, 0);
-    context->VSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
-    context->VSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
-    context->PSSetConstantBuffers(0, 1, m_cbFrame.GetAddressOf());
-    context->PSSetConstantBuffers(1, 1, m_cbObj.GetAddressOf());
-    context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
-
-    // Bind shadow sampler if shadow data is available
-    if (shadowData && shadowData->shadowSampler) {
-        context->PSSetSamplers(1, 1, &shadowData->shadowSampler);
-    }
-
-    // Use cached camera matrices (computed in UpdateCamera)
-    XMMATRIX view = m_cameraView;
-    XMMATRIX proj = m_cameraProj;
-    XMVECTOR eye = XMLoadFloat3(&m_camPos);
-
-    // Collect DirectionalLight from scene
-    SDirectionalLight* dirLight = nullptr;
-    for (auto& objPtr : scene.GetWorld().Objects()) {
-        dirLight = objPtr->GetComponent<SDirectionalLight>();
-        if (dirLight) break;  // Use first DirectionalLight found
-    }
-
     CB_Frame cf{};
     cf.view = XMMatrixTranspose(view);
     cf.proj = XMMatrixTranspose(proj);
@@ -334,7 +348,7 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
             dirLight->color.z * dirLight->intensity
         );
         cf.shadowBias = dirLight->shadow_bias;
-        cf.iblIntensity = dirLight->ibl_intensity;  // Read from DirectionalLight component
+        cf.iblIntensity = dirLight->ibl_intensity;
     } else {
         // Default light if no DirectionalLight component exists
         cf.lightDirWS = XMFLOAT3(0.4f, -1.0f, 0.2f);
@@ -342,18 +356,31 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
         XMStoreFloat3(&cf.lightDirWS, L);
         cf.lightColor = XMFLOAT3(1.0f, 1.0f, 1.0f);
         cf.shadowBias = 0.005f;
-        cf.iblIntensity = 1.0f;  // Default IBL intensity (when no DirectionalLight exists)
+        cf.iblIntensity = 1.0f;
     }
 
-    cf.camPosWS   = m_camPos;
-    context->UpdateSubresource(m_cbFrame.Get(), 0, nullptr, &cf, 0, 0);
+    cf.camPosWS = camPos;
+    context->UpdateSubresource(cbFrame, 0, nullptr, &cf, 0, 0);
+}
 
-    // Bind shadow map array
+// ============================================
+// Helper: Bind Global Resources (Shadow, IBL)
+// ============================================
+static void bindGlobalResources(
+    ID3D11DeviceContext* context,
+    const CShadowPass::Output* shadowData)
+{
+    // Bind shadow sampler (slot 1)
+    if (shadowData && shadowData->shadowSampler) {
+        context->PSSetSamplers(1, 1, &shadowData->shadowSampler);
+    }
+
+    // Bind shadow map array (slot 2)
     if (shadowData && shadowData->shadowMapArray) {
         context->PSSetShaderResources(2, 1, &shadowData->shadowMapArray);
     }
 
-    // Bind IBL textures (t3, t4, t5)
+    // Bind IBL textures (slot 3, 4, 5)
     CIBLGenerator& iblGen = CScene::Instance().GetIBLGenerator();
     ID3D11ShaderResourceView* iblSRVs[3] = {
         iblGen.GetIrradianceMapSRV(),    // t3: Irradiance cubemap
@@ -361,96 +388,285 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
         iblGen.GetBrdfLutSRV()           // t5: BRDF LUT
     };
     context->PSSetShaderResources(3, 3, iblSRVs);
+}
 
-    // 遍历场景中的所有对象并渲染
+// ============================================
+// Helper: Update Object Constants
+// ============================================
+static void updateObjectConstants(
+    ID3D11DeviceContext* context,
+    ID3D11Buffer* cbObj,
+    const RenderItem& item)
+{
+    CB_Object co{};
+    co.world = XMMatrixTranspose(item.worldMatrix);
+    co.albedo = item.material->albedo;
+    co.metallic = item.material->metallic;
+    co.roughness = item.material->roughness;
+    co.hasMetallicRoughnessTexture = item.hasRealMetallicRoughnessTexture ? 1 : 0;
+    co.emissive = item.material->emissive;
+    co.emissiveStrength = item.material->emissiveStrength;
+    co.hasEmissiveMap = item.hasRealEmissiveMap ? 1 : 0;
+    co.alphaMode = static_cast<int>(item.material->alphaMode);
+    co.alphaCutoff = item.material->alphaCutoff;
+    context->UpdateSubresource(cbObj, 0, nullptr, &co, 0, 0);
+}
+
+// ============================================
+// Helper: Collect and Classify Render Items
+// ============================================
+static void collectRenderItems(
+    CScene& scene,
+    XMVECTOR eye,
+    std::vector<RenderItem>& opaqueItems,
+    std::vector<RenderItem>& transparentItems)
+{
     for (auto& objPtr : scene.GetWorld().Objects()) {
         auto* obj = objPtr.get();
         auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
         auto* transform = obj->GetComponent<STransform>();
 
-        if (!meshRenderer || !transform) {
-            continue;
-        }
+        if (!meshRenderer || !transform) continue;
 
-        // 确保资源已上传
         meshRenderer->EnsureUploaded();
-        if (meshRenderer->meshes.empty()) {
-            continue;
-        }
-        // 获取世界矩阵
-        XMMATRIX worldMatrix = transform->WorldMatrix();
+        if (meshRenderer->meshes.empty()) continue;
 
-        // Load material asset (or use default)
+        // Load material
         CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
         if (!meshRenderer->materialPath.empty()) {
             material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
         }
 
-        // Get PBR properties from material
-        XMFLOAT3 albedo = material->albedo;
-        float metallic = material->metallic;
-        float roughness = material->roughness;
-
-        // Load textures from material
+        // Load textures
         CTextureManager& texMgr = CTextureManager::Instance();
         ID3D11ShaderResourceView* albedoSRV = material->albedoTexture.empty() ?
-            texMgr.GetDefaultWhite() : texMgr.Load(material->albedoTexture, /*srgb=*/true);
+            texMgr.GetDefaultWhite() : texMgr.Load(material->albedoTexture, true);
         ID3D11ShaderResourceView* normalSRV = material->normalMap.empty() ?
-            texMgr.GetDefaultNormal() : texMgr.Load(material->normalMap, /*srgb=*/false);
-        ID3D11ShaderResourceView* metallicRoughnessSRV = material->metallicRoughnessMap.empty() ? 
-            texMgr.GetDefaultWhite() : texMgr.Load(material->metallicRoughnessMap, /*srgb=*/false);
+            texMgr.GetDefaultNormal() : texMgr.Load(material->normalMap, false);
+        ID3D11ShaderResourceView* metallicRoughnessSRV = material->metallicRoughnessMap.empty() ?
+            texMgr.GetDefaultWhite() : texMgr.Load(material->metallicRoughnessMap, false);
         ID3D11ShaderResourceView* emissiveSRV = material->emissiveMap.empty() ?
-            texMgr.GetDefaultBlack() : texMgr.Load(material->emissiveMap, /*srgb=*/true);
+            texMgr.GetDefaultBlack() : texMgr.Load(material->emissiveMap, true);
 
-
-        // Detect if using real texture or default
         bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
         bool hasRealEmissiveMap = !material->emissiveMap.empty();
 
+        XMMATRIX worldMatrix = transform->WorldMatrix();
 
-        // 绘制所有子网格（glTF 可能有多个）
+        // Calculate distance to camera for sorting
+        XMVECTOR objPos = worldMatrix.r[3];
+        XMVECTOR delta = XMVectorSubtract(objPos, eye);
+        float distance = XMVectorGetX(XMVector3Length(delta));
+
+        // Collect all submeshes
         for (auto& gpuMesh : meshRenderer->meshes) {
             if (!gpuMesh) continue;
 
-            // 更新物体矩阵和材质属性
-            CB_Object co{};
-            co.world = XMMatrixTranspose(worldMatrix);
-            co.albedo = albedo;
-            co.metallic = metallic;
-            co.roughness = roughness;
-            co.hasMetallicRoughnessTexture = hasRealMetallicRoughnessTexture ? 1 : 0;
-            co.emissive = material->emissive;
-            co.emissiveStrength = material->emissiveStrength;
-            co.hasEmissiveMap = hasRealEmissiveMap ? 1 : 0;
-            co.alphaMode = static_cast<int>(material->alphaMode);
-            co.alphaCutoff = material->alphaCutoff;
-            context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
+            RenderItem item;
+            item.obj = obj;
+            item.meshRenderer = meshRenderer;
+            item.transform = transform;
+            item.material = material;
+            item.worldMatrix = worldMatrix;
+            item.distanceToCamera = distance;
+            item.gpuMesh = gpuMesh.get();
+            item.albedoSRV = albedoSRV;
+            item.normalSRV = normalSRV;
+            item.metallicRoughnessSRV = metallicRoughnessSRV;
+            item.emissiveSRV = emissiveSRV;
+            item.hasRealMetallicRoughnessTexture = hasRealMetallicRoughnessTexture;
+            item.hasRealEmissiveMap = hasRealEmissiveMap;
 
-            // 绑定顶点和索引缓冲
-            UINT stride = sizeof(SVertexPNT), offset = 0;
-            ID3D11Buffer* vbo = gpuMesh->vbo.Get();
-            context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-            context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
-
-            // 绑定纹理
-            // t0-t1: Albedo and Normal
-            ID3D11ShaderResourceView* srvs[2] = { albedoSRV, normalSRV };
-            context->PSSetShaderResources(0, 2, srvs);
-
-            // t6: Metallic/Roughness (G=Roughness, B=Metallic)
-            context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
-
-            // t7: Emissive
-            context->PSSetShaderResources(7, 1, &emissiveSRV);
-
-            // 绘制
-            context->DrawIndexed(gpuMesh->indexCount, 0, 0);
+            // Classify by alpha mode
+            if (material->alphaMode == EAlphaMode::Blend) {
+                transparentItems.push_back(item);
+            } else {
+                opaqueItems.push_back(item);  // Opaque and Mask use opaque pass
+            }
         }
     }
 
-    // 渲染 Skybox（最后渲染，使用深度测试但不写入）
-    // Skybox is now managed by Scene singleton
+    // Sort transparent objects back-to-front
+    if (!transparentItems.empty()) {
+        std::sort(transparentItems.begin(), transparentItems.end(),
+            [](const RenderItem& a, const RenderItem& b) {
+                return a.distanceToCamera > b.distanceToCamera;  // Descending
+            });
+    }
+}
+
+// ============================================
+// Opaque Pass Rendering
+// ============================================
+static void renderOpaquePass(
+    ID3D11DeviceContext* context,
+    const std::vector<RenderItem>& opaqueItems,
+    ID3D11InputLayout* inputLayout,
+    ID3D11VertexShader* vs,
+    ID3D11PixelShader* ps,
+    ID3D11RasterizerState* rasterState,
+    ID3D11DepthStencilState* depthState,
+    ID3D11Buffer* cbFrame,
+    ID3D11Buffer* cbObj,
+    ID3D11SamplerState* sampler)
+{
+    if (opaqueItems.empty()) return;
+
+    // Set complete pipeline state for opaque rendering
+    context->IASetInputLayout(inputLayout);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(vs, nullptr, 0);
+    context->PSSetShader(ps, nullptr, 0);
+    context->RSSetState(rasterState);
+    context->OMSetDepthStencilState(depthState, 0);
+    context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+
+    context->VSSetConstantBuffers(0, 1, &cbFrame);
+    context->VSSetConstantBuffers(1, 1, &cbObj);
+    context->PSSetConstantBuffers(0, 1, &cbFrame);
+    context->PSSetConstantBuffers(1, 1, &cbObj);
+    context->PSSetSamplers(0, 1, &sampler);
+
+    // Render all opaque items
+    for (auto& item : opaqueItems) {
+        // Update object constant buffer
+        updateObjectConstants(context, cbObj, item);
+
+        // Bind vertex and index buffers
+        UINT stride = sizeof(SVertexPNT), offset = 0;
+        ID3D11Buffer* vbo = item.gpuMesh->vbo.Get();
+        context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
+        context->IASetIndexBuffer(item.gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+
+        // Bind textures
+        ID3D11ShaderResourceView* srvs[2] = { item.albedoSRV, item.normalSRV };
+        context->PSSetShaderResources(0, 2, srvs);
+        context->PSSetShaderResources(6, 1, &item.metallicRoughnessSRV);
+        context->PSSetShaderResources(7, 1, &item.emissiveSRV);
+
+        // Draw
+        context->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
+    }
+}
+
+// ============================================
+// Transparent Pass Rendering
+// ============================================
+static void renderTransparentPass(
+    ID3D11DeviceContext* context,
+    const std::vector<RenderItem>& transparentItems,
+    ID3D11InputLayout* inputLayout,
+    ID3D11VertexShader* vs,
+    ID3D11PixelShader* ps,
+    ID3D11RasterizerState* rasterState,
+    ID3D11DepthStencilState* depthStateTransparent,
+    ID3D11BlendState* blendStateTransparent,
+    ID3D11Buffer* cbFrame,
+    ID3D11Buffer* cbObj,
+    ID3D11SamplerState* sampler)
+{
+    if (transparentItems.empty()) return;
+
+    // Set complete pipeline state for transparent rendering (CRITICAL: restore all states)
+    context->IASetInputLayout(inputLayout);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(vs, nullptr, 0);
+    context->PSSetShader(ps, nullptr, 0);
+    context->RSSetState(rasterState);
+    context->OMSetDepthStencilState(depthStateTransparent, 0);
+
+    float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    context->OMSetBlendState(blendStateTransparent, blendFactor, 0xFFFFFFFF);
+
+    context->VSSetConstantBuffers(0, 1, &cbFrame);
+    context->VSSetConstantBuffers(1, 1, &cbObj);
+    context->PSSetConstantBuffers(0, 1, &cbFrame);
+    context->PSSetConstantBuffers(1, 1, &cbObj);
+    context->PSSetSamplers(0, 1, &sampler);
+
+    // Render all transparent items (already sorted back-to-front)
+    for (auto& item : transparentItems) {
+        // Update object constant buffer
+        updateObjectConstants(context, cbObj, item);
+
+        // Bind vertex and index buffers
+        UINT stride = sizeof(SVertexPNT), offset = 0;
+        ID3D11Buffer* vbo = item.gpuMesh->vbo.Get();
+        context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
+        context->IASetIndexBuffer(item.gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+
+        // Bind textures
+        ID3D11ShaderResourceView* srvs[2] = { item.albedoSRV, item.normalSRV };
+        context->PSSetShaderResources(0, 2, srvs);
+        context->PSSetShaderResources(6, 1, &item.metallicRoughnessSRV);
+        context->PSSetShaderResources(7, 1, &item.emissiveSRV);
+
+        // Draw
+        context->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
+    }
+}
+
+void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData)
+{
+    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    if (!context) return;
+
+    updateInput(dt);
+
+    // Set viewport (pass functions don't set this)
+    D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_off.w; vp.Height=(FLOAT)m_off.h; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
+    context->RSSetViewports(1, &vp);
+
+
+    // Use cached camera matrices
+    XMMATRIX view = m_cameraView;
+    XMMATRIX proj = m_cameraProj;
+    XMVECTOR eye = XMLoadFloat3(&m_camPos);
+
+    // Collect DirectionalLight from scene
+    SDirectionalLight* dirLight = nullptr;
+    for (auto& objPtr : scene.GetWorld().Objects()) {
+        dirLight = objPtr->GetComponent<SDirectionalLight>();
+        if (dirLight) break;  // Use first DirectionalLight found
+    }
+
+
+    // Update frame constants
+    updateFrameConstants(context, m_cbFrame.Get(), view, proj, m_camPos, dirLight, shadowData);
+
+    // Bind global resources (shadow, IBL)
+    bindGlobalResources(context, shadowData);
+
+    // ============================================
+    // Collect and Classify Objects
+    // ============================================
+    std::vector<RenderItem> opaqueItems;
+    std::vector<RenderItem> transparentItems;
+
+    collectRenderItems(scene, eye, opaqueItems, transparentItems);
+
+    // ============================================
+    // Render Opaque Pass
+    // ============================================
+    renderOpaquePass(context, opaqueItems,
+                     m_inputLayout.Get(), m_vs.Get(), m_ps.Get(),
+                     m_rsSolid.Get(), m_depthStateDefault.Get(),
+                     m_cbFrame.Get(), m_cbObj.Get(), m_sampler.Get());
+
+    // ============================================
+    // Render Skybox (after Opaque, before Transparent)
+    // ============================================
     CScene::Instance().GetSkybox().Render(view, proj);
+
+
+    // ============================================
+    // Render Transparent Pass (last, back-to-front sorted)
+    // ============================================
+    renderTransparentPass(context, transparentItems,
+                          m_inputLayout.Get(), m_vs.Get(), m_ps.Get(),
+                          m_rsSolid.Get(), m_depthStateTransparent.Get(),
+                          m_blendStateTransparent.Get(),
+                          m_cbFrame.Get(), m_cbObj.Get(), m_sampler.Get());
 }
 
 void CMainPass::ensureOffscreen(UINT w, UINT h)
@@ -556,24 +772,25 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
     if (m_off.dsv) context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
     // Render scene to HDR RT (linear space)
+    // Scene rendering now includes: Opaque → Skybox → Grid → Transparent
     renderScene(scene, dt, shadowData);
-
-    // UNBIND depth buffer before grid pass (to allow reading it as SRV)
-    // Grid needs to sample depth buffer, but D3D11 doesn't allow SRV read from bound DSV
-    context->OMSetRenderTargets(1, &rtv, nullptr);  // Unbind DSV
-
-    // Render infinite grid (after skybox, before debug lines)
-    CGridPass::Instance().Render(m_cameraView, m_cameraProj, m_camPos,
-                                  m_off.depthSRV.Get(), w, h);
-
-    // REBIND depth buffer for debug lines
-    context->OMSetRenderTargets(1, &rtv, dsv);
 
     // Render debug lines on top of scene (with depth testing)
     m_debugLinePass.Render(m_cameraView, m_cameraProj, w, h);
 
     // Apply post-processing: Tone mapping + Gamma correction (HDR → LDR sRGB)
     m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h, 1.0f);
+
+    // ============================================
+    // Render Editor Tools (Grid) - After all game content
+    // ============================================
+    // Rebind RTV + DSV for Grid rendering (PostProcess unbinds DSV)
+    // Grid needs depth test, so bind HDR depth buffer (LDR has no depth)
+    ID3D11RenderTargetView* ldrRTV = m_offLDR.rtv.Get();
+    context->OMSetRenderTargets(1, &ldrRTV, m_off.dsv.Get());
+
+    CGridPass::Instance().Render(m_cameraView, m_cameraProj, m_camPos);
+
 }
 
 void CMainPass::Shutdown()

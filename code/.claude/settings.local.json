@@ -41,7 +41,9 @@
       "Bash(build/Debug/forfun.exe:*)",
       "WebSearch",
       "WebFetch(domain:www.foundations.unity.com)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(E:/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(git rev-parse:*)"
     ],
     "deny": [],
     "ask": []

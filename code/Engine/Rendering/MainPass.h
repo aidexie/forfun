@@ -82,6 +82,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsSolid;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsWire;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateDefault;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateTransparent;  // Depth read-only for transparent
+    Microsoft::WRL::ComPtr<ID3D11BlendState> m_blendStateTransparent;          // Alpha blending
 
     // 相机状态
     DirectX::XMFLOAT3 m_camPos{ -6.0f, 0.8f, 0.0f };

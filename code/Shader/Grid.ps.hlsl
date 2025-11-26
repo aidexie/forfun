@@ -1,6 +1,6 @@
 // Grid.ps.hlsl
 // Pixel Shader for infinite grid rendering
-// Uses depth buffer to reconstruct world position and draw procedural grid
+// Uses GPU depth test (SV_DEPTH output)
 
 cbuffer CBPerFrame : register(b0) {
     matrix gViewProj;          // View * Projection matrix
@@ -11,9 +11,6 @@ cbuffer CBPerFrame : register(b0) {
     float3 gPadding;
 };
 
-// Scene depth buffer
-Texture2D<float> gDepthTexture : register(t0);
-
 struct PSInput {
     float4 positionCS : SV_POSITION;
     float2 clipPos    : TEXCOORD0;
@@ -21,17 +18,8 @@ struct PSInput {
 
 struct PSOutput {
     float4 color : SV_TARGET;
+    float depth  : SV_DEPTH;  // GPU depth test
 };
-
-// Reconstruct world position from depth
-float3 ReconstructWorldPos(float2 clipPos, float depth) {
-    // Build clip space position (depth is already in [0,1] from depth buffer)
-    float4 clipSpacePos = float4(clipPos, depth, 1.0);
-
-    // Transform to world space
-    float4 worldPos = mul(clipSpacePos, gInvViewProj);
-    return worldPos.xyz / worldPos.w;
-}
 
 // Calculate grid line intensity for a given scale
 float GridLine(float2 coord, float scale) {
@@ -42,10 +30,6 @@ float GridLine(float2 coord, float scale) {
 
 PSOutput main(PSInput input) {
     PSOutput output;
-
-    // Sample scene depth at this pixel
-    int2 screenPos = int2(input.positionCS.xy);
-    float sceneDepth = gDepthTexture.Load(int3(screenPos, 0));
 
     // Reconstruct view ray direction (from camera through this pixel)
     // Use far plane (depth = 1.0) to get ray direction
@@ -76,18 +60,12 @@ PSOutput main(PSInput input) {
 
     float3 gridPos = gCameraPos + viewDir * t;
 
-    // Transform grid position to clip space for depth comparison
+    // Transform grid position to clip space for depth output
     float4 gridClipPos = mul(float4(gridPos, 1.0), gViewProj);
     gridClipPos /= gridClipPos.w;
-    float gridDepth = gridClipPos.z;
+    output.depth = gridClipPos.z;  // GPU will depth test against scene
 
-    // Depth test: discard if grid is behind scene geometry
-    // Add small bias to avoid z-fighting
-    if (gridDepth > sceneDepth + 0.00001) {
-        discard;
-    }
-
-    // Distance fade
+    // Distance fade (使用原始的gGridFadeStart/End参数，默认50-100m)
     float distanceToCamera = length(gridPos - gCameraPos);
     float fadeFactor = 1.0 - smoothstep(gGridFadeStart, gGridFadeEnd, distanceToCamera);
     if (fadeFactor < 0.01) {
@@ -95,12 +73,14 @@ PSOutput main(PSInput input) {
     }
 
     // Generate grid pattern (dual-scale: 1m fine + 10m coarse)
+    // 使用原始的强度：0.3 和 0.6
     float2 coord = gridPos.xz;
     float fineGrid = GridLine(coord, 1.0);
     float coarseGrid = GridLine(coord, 10.0);
     float grid = max(fineGrid * 0.3, coarseGrid * 0.6);
 
     // View angle fade (reduce grid at shallow angles to prevent moiré)
+    // 使用原始的参数：smoothstep(0.0, 0.2)
     float viewAngleFade = abs(viewDir.y);
     viewAngleFade = smoothstep(0.0, 0.2, viewAngleFade);
     grid *= viewAngleFade;
@@ -109,6 +89,7 @@ PSOutput main(PSInput input) {
     grid *= fadeFactor;
 
     // Unity-style grid color (neutral gray, slightly cool tone)
+    // 使用原始的颜色
     float3 gridColor = float3(0.47, 0.47, 0.50);  // Similar to Unity's grid
     output.color = float4(gridColor, grid);
 

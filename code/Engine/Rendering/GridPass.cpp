@@ -111,16 +111,21 @@ void CGridPass::CreateStates() {
     ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return;
 
-    // Blend State: Alpha blending
+    // Blend State: Alpha blending for RGB, preserve destination alpha
     D3D11_BLEND_DESC blendDesc{};
     blendDesc.RenderTarget[0].BlendEnable = TRUE;
     blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    // RGB channels: Standard alpha blending
     blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
     blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
     blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    // Alpha channel: Preserve destination alpha (keep PostProcess's alpha=1.0)
+    // This prevents ImGui from blending the viewport texture with its background
     blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
     blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED |
+                                                      D3D11_COLOR_WRITE_ENABLE_GREEN |
+                                                      D3D11_COLOR_WRITE_ENABLE_BLUE;
     device->CreateBlendState(&blendDesc, m_blendState.GetAddressOf());
 
     // Depth Stencil State: Read depth but don't write
@@ -141,10 +146,8 @@ void CGridPass::CreateStates() {
     device->CreateSamplerState(&samplerDesc, m_samplerState.GetAddressOf());
 }
 
-void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos,
-                       ID3D11ShaderResourceView* depthSRV,
-                       UINT viewportWidth, UINT viewportHeight) {
-    if (!m_initialized || !m_enabled || !depthSRV) return;
+void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
+    if (!m_initialized || !m_enabled) return;
 
     ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context) return;
@@ -172,8 +175,7 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos,
 
     context->PSSetShader(m_ps.Get(), nullptr, 0);
     context->PSSetConstantBuffers(0, 1, m_cbPerFrame.GetAddressOf());
-    context->PSSetShaderResources(0, 1, &depthSRV);
-    context->PSSetSamplers(0, 1, m_samplerState.GetAddressOf());
+    // Note: No depth SRV needed - GPU depth test handles occlusion
 
     // Set blend state and depth stencil state
     float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -182,10 +184,6 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos,
 
     // Draw full-screen quad (4 vertices, triangle strip)
     context->Draw(4, 0);
-
-    // Unbind resources
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
 
     // Restore default blend/depth state
     context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
