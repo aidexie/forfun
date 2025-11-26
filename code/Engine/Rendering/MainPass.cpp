@@ -65,7 +65,9 @@ struct alignas(16) CB_Object {
     float emissiveStrength;
     int hasMetallicRoughnessTexture;
     int hasEmissiveMap;
-    float _pad;
+    int alphaMode;  // 0=Opaque, 1=Mask, 2=Blend
+    float alphaCutoff;
+    DirectX::XMFLOAT3 _pad;
 };
 
 static auto gPrev = std::chrono::steady_clock::now();
@@ -420,6 +422,8 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
             co.emissive = material->emissive;
             co.emissiveStrength = material->emissiveStrength;
             co.hasEmissiveMap = hasRealEmissiveMap ? 1 : 0;
+            co.alphaMode = static_cast<int>(material->alphaMode);
+            co.alphaCutoff = material->alphaCutoff;
             context->UpdateSubresource(m_cbObj.Get(), 0, nullptr, &co, 0, 0);
 
             // 绑定顶点和索引缓冲

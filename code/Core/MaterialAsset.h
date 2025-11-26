@@ -5,6 +5,15 @@
 #include "Engine/PropertyVisitor.h"
 
 /**
+ * Alpha Mode - Defines how alpha channel is handled in rendering
+ */
+enum class EAlphaMode : uint8_t {
+    Opaque = 0,  // No transparency (default)
+    Mask = 1,    // Binary transparency with cutoff threshold (Alpha Test)
+    Blend = 2    // Continuous transparency (Alpha Blending)
+};
+
+/**
  * Material Asset - Shared resource representing a PBR material
  *
  * This is NOT a component. Materials are shared resources that can be
@@ -30,6 +39,10 @@ public:
     // Emissive properties
     DirectX::XMFLOAT3 emissive{0.0f, 0.0f, 0.0f};
     float emissiveStrength = 1.0f;
+    // Transparency properties
+    EAlphaMode alphaMode = EAlphaMode::Opaque;  // Alpha rendering mode
+    float alphaCutoff = 0.5f;  // Cutoff threshold for Mask mode (0.0-1.0)
+
 
     // Texture paths (relative to assets directory)
     std::string albedoTexture;           // sRGB color texture
@@ -52,6 +65,10 @@ public:
         // Emissive Properties
         visitor.VisitFloat3("emissive", emissive);
         visitor.VisitFloat("emissiveStrength", emissiveStrength);
+        // Transparency Properties
+        visitor.VisitEnum("alphaMode", reinterpret_cast<int&>(alphaMode), {"Opaque", "Mask", "Blend"});
+        visitor.VisitFloatSlider("alphaCutoff", alphaCutoff, 0.0f, 1.0f);
+
 
         // Texture Paths - using exact variable names for JSON keys
         visitor.VisitFilePath("albedoTexture", albedoTexture, "Image Files\0*.jpg;*.png;*.tga;*.bmp\0All Files\0*.*\0");

@@ -64,7 +64,13 @@ set(EDITOR_SRC
 )
 
 # Test framework
-file(GLOB TEST_SRC ${CODE_PATH}/Tests/*.cpp ${CODE_PATH}/Tests/*.h)
+# IMPORTANT: Explicitly list test files instead of using GLOB
+# GLOB won't detect new files until CMake reconfigures
+set(TEST_SRC
+    ${CODE_PATH}/Tests/TestRayCast.cpp
+    ${CODE_PATH}/Tests/TestMaterialAsset.cpp
+    ${CODE_PATH}/Tests/TestAlphaTest.cpp
+)
 
 add_executable(forfun WIN32
     ${CORE_SRC} ${ENGINE_SRC}

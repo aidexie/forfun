@@ -27,7 +27,9 @@ cbuffer CB_Object : register(b1) {
     float gMatEmissiveStrength;
     int gHasMetallicRoughnessTexture;
     int gHasEmissiveMap;
-    float _padObj;
+    int gAlphaMode;  // 0=Opaque, 1=Mask, 2=Blend
+    float gAlphaCutoff;
+    float3 _padObj;
 }
 
 struct VSIn {

@@ -40,7 +40,9 @@ cbuffer CB_Object : register(b1) {
     float gMatEmissiveStrength;
     int gHasMetallicRoughnessTexture;
     int gHasEmissiveMap;
-    float _padObj;
+    int gAlphaMode;  // 0=Opaque, 1=Mask, 2=Blend
+    float gAlphaCutoff;
+    float3 _padObj;
 }
 
 struct PSIn {
@@ -174,7 +176,19 @@ float4 main(PSIn i) : SV_Target {
 
     // Sample textures
     // Note: gAlbedo uses DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, GPU auto-converts sRGB→Linear
-    float3 albedoTex = gAlbedo.Sample(gSamp, i.uv).rgb;
+    float4 albedoTexFull = gAlbedo.Sample(gSamp, i.uv);
+    float3 albedoTex = albedoTexFull.rgb;
+    float alpha = albedoTexFull.a;
+    
+    // ============================================
+    // Alpha Test (Mask mode)
+    // ============================================
+    // Alpha Mode: 0=Opaque, 1=Mask, 2=Blend
+    // For Mask mode: discard pixels with alpha below cutoff threshold
+    // CRITICAL: This creates binary transparency (hard edges) without alpha blending
+    if (gAlphaMode == 1 && alpha < gAlphaCutoff) {
+        discard;  // Early exit: pixel is fully transparent
+    }
     float3 nTS = gNormal.Sample(gSamp, i.uv).xyz * 2.0 - 1.0;
     nTS.y = -nTS.y;  // CRITICAL: Flip Y channel (glTF uses OpenGL format, Y+up; DirectX uses Y+down)
     nTS = normalize(nTS);
