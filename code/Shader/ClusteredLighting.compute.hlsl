@@ -53,6 +53,7 @@ float GetDepthFromSlice(uint sliceIdx) {
     float t = (float)sliceIdx / (float)DEPTH_SLICES;
     // Logarithmic interpolation: Z = near * (far/near)^t
     return g_nearZ * pow(g_farZ / g_nearZ, t);
+    // return t*g_farZ;
 }
 
 // Unproject NDC point to view space

@@ -45,6 +45,11 @@ void CClusteredLightingPass::Initialize(ID3D11Device* device) {
 }
 
 void CClusteredLightingPass::Resize(uint32_t width, uint32_t height) {
+    // Check if size actually changed
+    if (m_screenWidth == width && m_screenHeight == height) {
+        return;  // No resize needed
+    }
+
     m_screenWidth = width;
     m_screenHeight = height;
 
@@ -61,6 +66,7 @@ void CClusteredLightingPass::Resize(uint32_t width, uint32_t height) {
     // Recreate cluster AABB and data buffers with new size
     auto device = CDX11Context::Instance().GetDevice();
     CreateBuffers(device);
+    m_clusterGridDirty = true;  // Force rebuild after resize
 }
 
 void CClusteredLightingPass::CreateBuffers(ID3D11Device* device) {
@@ -397,13 +403,13 @@ void CClusteredLightingPass::CullLights(ID3D11DeviceContext* context,
         return;
     }
 
-    // DEBUG: Log light count and first light details
-    CFFLog::Info("[ClusteredLighting] Collected %d point lights for culling", (int)gpuLights.size());
-    if (!gpuLights.empty()) {
-        auto& light0 = gpuLights[0];
-        CFFLog::Info("[ClusteredLighting] Light[0]: pos(%.2f, %.2f, %.2f) range=%.2f intensity=%.2f",
-            light0.position.x, light0.position.y, light0.position.z, light0.range, light0.intensity);
-    }
+    // DEBUG: Log light count and first light details (commented out to avoid per-frame spam)
+    // CFFLog::Info("[ClusteredLighting] Collected %d point lights for culling", (int)gpuLights.size());
+    // if (!gpuLights.empty()) {
+    //     auto& light0 = gpuLights[0];
+    //     CFFLog::Info("[ClusteredLighting] Light[0]: pos(%.2f, %.2f, %.2f) range=%.2f intensity=%.2f",
+    //         light0.position.x, light0.position.y, light0.position.z, light0.range, light0.intensity);
+    // }
 
     // Upload point lights to GPU
     D3D11_MAPPED_SUBRESOURCE mapped;
@@ -456,8 +462,8 @@ void CClusteredLightingPass::CullLights(ID3D11DeviceContext* context,
     uint32_t groupsX = (m_numClustersX + 7) / 8;
     uint32_t groupsY = (m_numClustersY + 7) / 8;
     uint32_t groupsZ = ClusteredConfig::DEPTH_SLICES;  // numthreads Z is 1
-    CFFLog::Info("[ClusteredLighting] Dispatching CullLights: groups(%d, %d, %d) clusters(%d, %d, %d)",
-        groupsX, groupsY, groupsZ, m_numClustersX, m_numClustersY, ClusteredConfig::DEPTH_SLICES);
+    // CFFLog::Info("[ClusteredLighting] Dispatching CullLights: groups(%d, %d, %d) clusters(%d, %d, %d)",
+    //     groupsX, groupsY, groupsZ, m_numClustersX, m_numClustersY, ClusteredConfig::DEPTH_SLICES);
     context->Dispatch(groupsX, groupsY, groupsZ);
 
     // Unbind resources
