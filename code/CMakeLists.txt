@@ -71,6 +71,8 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestMaterialAsset.cpp
     ${CODE_PATH}/Tests/TestAlphaTest.cpp
     ${CODE_PATH}/Tests/TestAlphaBlend.cpp
+    ${CODE_PATH}/Tests/TestClusteredLighting.cpp
+    ${CODE_PATH}/Tests/TestSimplePointLight.cpp
 )
 
 add_executable(forfun WIN32
@@ -121,6 +123,7 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/MeshRenderer.h
     ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
     ${CODE_PATH}/Engine/Components/DirectionalLight.h
+    ${CODE_PATH}/Engine/Components/PointLight.h
     ${CODE_PATH}/Engine/Rendering/MainPass.h
     ${CODE_PATH}/Engine/Rendering/MainPass.cpp
     ${CODE_PATH}/Engine/Rendering/ShadowPass.h
@@ -136,6 +139,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.cpp
     ${CODE_PATH}/Engine/Rendering/GridPass.h
+    ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.h
+    ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.cpp
     ${CODE_PATH}/Engine/Rendering/GridPass.cpp
 )
 

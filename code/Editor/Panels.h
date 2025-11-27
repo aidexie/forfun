@@ -27,7 +27,7 @@ namespace Panels {
 
     // Scene Light Settings Window
     void ShowSceneLightSettings(bool show);
-    void DrawSceneLightSettings();
+    void DrawSceneLightSettings(CMainPass* mainPass = nullptr);
     bool IsSceneLightSettingsVisible();
 
     // Material Editor Window

@@ -1,6 +1,8 @@
 // MainPass Pixel Shader
 // PBR rendering with CSM shadow mapping
 
+#include "ClusteredShading.hlsl"  // Clustered point light support
+
 Texture2D gAlbedo : register(t0);
 Texture2D gNormal : register(t1);
 Texture2DArray gShadowMaps : register(t2);  // CSM: Texture2DArray
@@ -253,6 +255,29 @@ float4 main(PSIn i) : SV_Target {
 
     // Direct lighting (affected by shadow)
     float3 Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
+
+    // ============================================
+    // Clustered Point Lights
+    // ============================================
+    // Calculate view-space Z for cluster lookup
+    float4 posView = mul(float4(i.posWS, 1.0), gView);
+    float viewZ = posView.z;
+
+    // Apply clustered point lights
+    float3 pointLightContribution = ApplyClusteredPointLights(
+        i.posH.xy,    // Screen position (pixels)
+        viewZ,        // View-space depth
+        i.posWS,      // World position
+        N,            // Normal
+        V,            // View direction
+        albedo,       // Albedo
+        metallic,     // Metallic
+        roughness     // Roughness
+    );
+
+    // Add point lights to direct lighting
+    Lo += pointLightContribution;
+
 
     // ============================================
     // IBL (Image-Based Lighting)

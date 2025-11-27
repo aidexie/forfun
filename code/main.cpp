@@ -308,15 +308,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     g_editor_cam.aspect = (float)initW / (float)initH;     // 初始宽高比
 
-    // 4) Scene initialization (load from .ffasset or HDR)
-    CFFLog::Info("Initializing Scene (loading skybox and IBL)...");
-    // if (!CScene::Instance().Initialize("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset"))
-    // {
-    //     CFFLog::Error("Failed to initialize Scene!");
-    //     exitCode = -3;
-    //     goto cleanup;
-    // }
-    CFFLog::Info("Scene initialized");
 
     // 5) MainPass and ShadowPass initialization
     if (!g_main_pass.Initialize())
@@ -459,7 +450,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 &g_main_pass); // 视口面板（使用你已有的离屏示例）
             Panels::DrawIrradianceDebug();   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment/BRDF LUT 四个 Tab）
             Panels::DrawHDRExportWindow();   // HDR Export 窗口
-            Panels::DrawSceneLightSettings();  // Scene Light Settings 窗口
+            Panels::DrawSceneLightSettings(&g_main_pass);  // Scene Light Settings 窗口
             Panels::DrawMaterialEditor();    // Material Editor 窗口
         }
 

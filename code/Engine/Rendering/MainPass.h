@@ -6,6 +6,7 @@
 #include "PostProcessPass.h"
 #include "DebugLinePass.h"
 #include "GridPass.h"
+#include "ClusteredLightingPass.h"
 // Forward declarations
 class CScene;
 class CShadowPass;
@@ -64,6 +65,9 @@ public:
     // 获取 DebugLinePass（用于外部添加调试线条）
     CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
 
+    // 获取 ClusteredLightingPass（用于debug控制）
+    CClusteredLightingPass& GetClusteredLightingPass() { return m_clusteredLighting; }
+
 private:
     void ensureOffscreen(UINT w, UINT h);
     void renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData);
@@ -78,6 +82,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11InputLayout>  m_inputLayout;
     Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbFrame;
     Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbObj;
+    Microsoft::WRL::ComPtr<ID3D11Buffer>       m_cbClusteredParams;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsSolid;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsWire;
@@ -99,6 +104,7 @@ private:
     CPostProcessPass m_postProcess;
 
     // Debug line rendering
+    CClusteredLightingPass m_clusteredLighting;
     CDebugLinePass m_debugLinePass;
 
 private:

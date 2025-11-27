@@ -91,6 +91,16 @@ struct alignas(16) CB_Object {
     float alphaCutoff;
     DirectX::XMFLOAT3 _pad;
 };
+// Clustered shading parameters (b3)
+struct alignas(16) CB_ClusteredParams {
+    float nearZ;
+    float farZ;
+    uint32_t numClustersX;
+    uint32_t numClustersY;
+    uint32_t numClustersZ;
+    uint32_t _pad[3];
+};
+
 
 static auto gPrev = std::chrono::steady_clock::now();
 
@@ -111,6 +121,8 @@ bool CMainPass::Initialize()
 
     // --- Initialize Debug Line Pass ---
     m_debugLinePass.Initialize();
+    // --- Initialize Clustered Lighting Pass ---
+    m_clusteredLighting.Initialize(device);
 
     // --- Initialize Grid Pass ---
     CGridPass::Instance().Initialize();
@@ -141,7 +153,7 @@ void CMainPass::createPipeline()
     ComPtr<ID3DBlob> vsBlob, psBlob, err;
 
     // Compile Vertex Shader
-    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "MainPass.vs.hlsl", nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
+    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "E:/forfun/source/code/Shader/MainPass.vs.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) {
             CFFLog::Error("=== VERTEX SHADER COMPILATION ERROR ===");
@@ -151,7 +163,7 @@ void CMainPass::createPipeline()
     }
 
     // Compile Pixel Shader
-    hr = D3DCompile(psSource.c_str(), psSource.size(), "MainPass.ps.hlsl", nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    hr = D3DCompile(psSource.c_str(), psSource.size(), "E:/forfun/source/code/Shader/MainPass.ps.hlsl", nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) {
             CFFLog::Error("=== PIXEL SHADER COMPILATION ERROR ===");
@@ -180,6 +192,8 @@ void CMainPass::createPipeline()
     device->CreateBuffer(&cb, nullptr, m_cbFrame.GetAddressOf());
     cb.ByteWidth = sizeof(CB_Object);
     device->CreateBuffer(&cb, nullptr, m_cbObj.GetAddressOf());
+    cb.ByteWidth = sizeof(CB_ClusteredParams);
+    device->CreateBuffer(&cb, nullptr, m_cbClusteredParams.GetAddressOf());
 
     // sampler
     D3D11_SAMPLER_DESC sd{};
@@ -638,6 +652,18 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
     // Bind global resources (shadow, IBL)
     bindGlobalResources(context, shadowData);
 
+    // Update clustered shading parameters (b3)
+    CB_ClusteredParams clusteredParams{};
+    clusteredParams.nearZ = 0.1f;  // TODO: Get from camera
+    clusteredParams.farZ = 1000.0f;
+    clusteredParams.numClustersX = m_clusteredLighting.GetNumClustersX();
+    clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
+    clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
+    context->UpdateSubresource(m_cbClusteredParams.Get(), 0, nullptr, &clusteredParams, 0, 0);
+    context->PSSetConstantBuffers(3, 1, m_cbClusteredParams.GetAddressOf());
+    // Bind clustered lighting data to pixel shader (t10, t11, t12)
+    m_clusteredLighting.BindToMainPass(context);
+
     // ============================================
     // Collect and Classify Objects
     // ============================================
@@ -779,6 +805,23 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
 
     // Render scene to HDR RT (linear space)
     // Scene rendering now includes: Opaque → Skybox → Grid → Transparent
+
+    // ============================================
+    // Clustered Lighting Setup
+    // ============================================
+    { CScopedDebugEvent evt(context, L"Clustered Lighting Setup");
+    // Resize cluster grid if viewport changed
+    m_clusteredLighting.Resize(w, h);
+
+    // Build cluster AABBs (view-space)
+    float nearZ = 0.1f;  // TODO: Get from camera
+    float farZ = 1000.0f;
+    m_clusteredLighting.BuildClusterGrid(context, m_cameraProj, nearZ, farZ);
+
+    // Cull lights into clusters
+    m_clusteredLighting.CullLights(context, &scene, m_cameraView);
+    }
+
     { CScopedDebugEvent evtScene(context, L"Scene Rendering");
     renderScene(scene, dt, shadowData);
     }
