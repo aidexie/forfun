@@ -114,8 +114,13 @@ float3 CalculatePointLightPBR(
     // Specular BRDF
     float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
 
-    // Energy conservation: prevent over-bright specular
-    specular = min(specular, float3(1.0, 1.0, 1.0));
+    // Energy conservation: Clamp to reasonable max (Unity-style)
+    // Note: Unity uses HDR + tone mapping, so allows specular > 1.0
+    // For LDR, we clamp to 100.0 (mobile) or don't clamp (desktop HDR)
+    #if defined(LDR_MODE)
+        specular = min(specular, float3(100.0, 100.0, 100.0));  // Unity mobile
+    #endif
+    // For HDR, no clamp - rely on tone mapping in post-processing
 
     // Diffuse BRDF (Lambertian)
     float3 kD = (1.0 - F) * (1.0 - metallic);
