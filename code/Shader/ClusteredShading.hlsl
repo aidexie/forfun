@@ -4,6 +4,8 @@
 #ifndef CLUSTERED_SHADING_HLSL
 #define CLUSTERED_SHADING_HLSL
 
+#include "Common.hlsl"  // Shared BRDF functions and point light calculation
+
 // Configuration (must match ClusteredLighting.compute.hlsl)
 #define TILE_SIZE 32
 #define DEPTH_SLICES 16
@@ -51,7 +53,6 @@ uint GetClusterIndex(float2 screenPos, float viewZ) {
     uint clusterX = (uint)(screenPos.x) / TILE_SIZE;
     uint clusterY = (uint)(screenPos.y) / TILE_SIZE;
     uint clusterZ = GetSliceFromDepth(abs(viewZ));  // abs because viewZ is negative
-    // uint clusterZ = uint((abs(viewZ)/g_clusterFarZ)*DEPTH_SLICES);  // abs because viewZ is negative
 
     // Clamp to valid range
     clusterX = clamp(clusterX, 0u, g_clusterNumX - 1u);
@@ -62,22 +63,9 @@ uint GetClusterIndex(float2 screenPos, float viewZ) {
 }
 
 // ============================================
-// Distance Attenuation (UE4 Style)
+// Point Light Calculation (Wrapper)
 // ============================================
-// Reference: UE4 DeferredLightingCommon.ush
-float GetDistanceAttenuation(float3 unnormalizedLightVector, float invRadius) {
-    float distSqr = dot(unnormalizedLightVector, unnormalizedLightVector);
-    float attenuation = 1.0 / (distSqr + 1.0);  // Inverse-square + 1 prevents infinity
-    float factor = distSqr * invRadius * invRadius;
-    float smoothFactor = saturate(1.0 - factor * factor);
-    smoothFactor = smoothFactor * smoothFactor;
-    return attenuation * smoothFactor;
-}
-
-// ============================================
-// PBR Point Light BRDF (Optimized)
-// ============================================
-// Fixed geometry function and added performance optimizations
+// Converts GpuPointLight to PointLightInput and uses shared BRDF from Common.hlsl
 float3 CalculatePointLight(
     GpuPointLight light,
     float3 worldPos,
@@ -87,61 +75,20 @@ float3 CalculatePointLight(
     float metallic,
     float roughness
 ) {
-    // Light vector (unnormalized for distance attenuation)
-    float3 unnormalizedL = light.position - worldPos;
-    float distance = length(unnormalizedL);
-    float3 L = unnormalizedL / distance;
+    // Convert to Common.hlsl format
+    PointLightInput lightInput;
+    lightInput.position = light.position;
+    lightInput.range = light.range;
+    lightInput.color = light.color;
+    lightInput.intensity = light.intensity;
 
-    // Early exit: backface (30% performance gain)
-    float NdotL = dot(N, L);
-    if (NdotL <= 0.0) return float3(0, 0, 0);
-
-    // Distance attenuation (UE4 style - single unified function)
-    float invRadius = 1.0 / light.range;
-    float attenuation = GetDistanceAttenuation(unnormalizedL, invRadius);
-
-    // Early exit: out of range
-    if (attenuation < 0.001) return float3(0, 0, 0);
-
-    // BRDF calculations
-    float3 H = normalize(V + L);
-    float NdotH = saturate(dot(N, H));
-    float NdotV = saturate(dot(N, V));
-    float VdotH = saturate(dot(V, H));
-
-    // GGX Normal Distribution
-    float alpha = roughness * roughness;
-    float alphaSquared = alpha * alpha;
-    float denom = NdotH * NdotH * (alphaSquared - 1.0) + 1.0;
-    float D = alphaSquared / (3.14159265 * denom * denom + 0.0001);
-
-    // Schlick-GGX Geometry (FIXED: Direct lighting formula!)
-    float r = roughness + 1.0;
-    float k = (r * r) / 8.0;  // Correct direct lighting k (NOT alpha/2!)
-    float G1_V = NdotV / (NdotV * (1.0 - k) + k);
-    float G1_L = NdotL / (NdotL * (1.0 - k) + k);
-    float G = G1_V * G1_L;
-
-    // Fresnel (Schlick approximation)
-    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
-    float3 F = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
-
-    // Specular BRDF
-    float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
-
-    // Energy conservation: prevent over-bright specular
-    specular = min(specular, float3(1.0, 1.0, 1.0));
-
-    // Diffuse BRDF (Lambertian)
-    float3 kD = (1.0 - F) * (1.0 - metallic);
-    float3 diffuse = kD * albedo / 3.14159265;
-
-    // Final radiance
-    float3 radiance = light.color * light.intensity * attenuation;
-    return (diffuse + specular) * radiance * NdotL;
+    // Use shared PBR calculation from Common.hlsl
+    return CalculatePointLightPBR(lightInput, worldPos, N, V, albedo, metallic, roughness);
 }
 
-// Apply all point lights in the current cluster
+// ============================================
+// Apply All Point Lights in Cluster
+// ============================================
 float3 ApplyClusteredPointLights(
     float2 screenPos,
     float viewZ,
@@ -161,6 +108,7 @@ float3 ApplyClusteredPointLights(
     // Accumulate lighting
     float3 lighting = float3(0.0, 0.0, 0.0);
 
+    // Process all lights in this cluster
     for (uint i = 0; i < cluster.count; i++) {
         uint lightIdx = g_compactLightList[cluster.offset + i];
         GpuPointLight light = g_pointLights[lightIdx];

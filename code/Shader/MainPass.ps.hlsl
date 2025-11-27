@@ -62,41 +62,8 @@ struct PSIn {
 // ============================================
 // PBR Constants and Functions
 // ============================================
-static const float PI = 3.14159265359;
-
-// Normal Distribution Function (GGX/Trowbridge-Reitz)
-float DistributionGGX(float NdotH, float roughness) {
-    float a = roughness * roughness;
-    float a2 = a * a;
-    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
-    denom = PI * denom * denom;
-    return a2 / max(denom, 0.0000001);  // Prevent divide by zero
-}
-
-// Geometry Function (Schlick-GGX for direct lighting)
-float GeometrySchlickGGX(float NdotV, float roughness) {
-    float r = roughness + 1.0;
-    float k = (r * r) / 8.0;  // Direct lighting k
-    return NdotV / (NdotV * (1.0 - k) + k);
-}
-
-// Smith's method for Geometry obstruction
-float GeometrySmith(float NdotV, float NdotL, float roughness) {
-    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
-    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
-    return ggx1 * ggx2;
-}
-
-// Fresnel-Schlick approximation
-float3 FresnelSchlick(float VdotH, float3 F0) {
-    return F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
-}
-
-// Fresnel-Schlick with roughness (for IBL)
-float3 FresnelSchlickRoughness(float NdotV, float3 F0, float roughness) {
-    float oneMinusRoughness = 1.0 - roughness;
-    return F0 + (max(float3(oneMinusRoughness, oneMinusRoughness, oneMinusRoughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
-}
+// Note: BRDF functions (DistributionGGX, GeometrySmith, FresnelSchlick, etc.)
+// are now in Common.hlsl (included via ClusteredShading.hlsl)
 
 // ============================================
 // Shadow Functions
