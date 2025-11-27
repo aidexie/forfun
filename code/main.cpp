@@ -19,6 +19,7 @@
 // Test framework
 #include "Core/Testing/TestCase.h"
 #include "Core/Testing/TestRegistry.h"
+#include "Core/DebugEvent.h"
 
 // ImGui
 #include "imgui.h"
@@ -315,7 +316,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     //     exitCode = -3;
     //     goto cleanup;
     // }
-    sceneInitialized = true;
     CFFLog::Info("Scene initialized");
 
     // 5) MainPass and ShadowPass initialization
@@ -351,6 +351,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         CFFLog::Info("Test setup complete, starting main loop");
     }else{
         CSceneSerializer::LoadScene(CScene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
+        sceneInitialized = true;
     }
 
     // 6) 主循环
@@ -421,6 +422,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // Shadow Pass (render shadow map if DirectionalLight exists)
         // Uses tight frustum fitting based on camera frustum
         if (dirLight) {
+            CScopedDebugEvent evtShadow(ctx.GetContext(), L"Shadow Pass");
             g_shadow_pass.Render(CScene::Instance(), dirLight,
                               g_main_pass.GetCameraViewMatrix(),
                               g_main_pass.GetCameraProjMatrix());
@@ -433,7 +435,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_main_pass.GetDebugLinePass());
 
         // Main Pass (use shadow output bundle)
+        {CScopedDebugEvent evtScene(ctx.GetContext(), L"main pass");
         g_main_pass.Render(CScene::Instance(), vpW, vpH, dt, &g_shadow_pass.GetOutput());
+        }
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
         ID3D11DepthStencilView* dsv = ctx.GetDSV();
@@ -442,11 +446,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         const float clearCol[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
         ctx.ClearRTV(rtv, clearCol);
-        //// 5.4 编辑器 UI（示例，可替换为你的面板）
-        //ImGui::Begin("ForFunEditor");
-        //ImGui::Text("Window: %u x %u", ctx.GetWidth(), ctx.GetHeight());
-        //ImGui::Text("dt: %.3f ms (%.1f FPS)", dt * 1000.f, 1.0f / (dt > 0 ? dt : 1e-6f));
-        //ImGui::End();
         // main.cpp  —— 每帧渲染里，渲染完 3D 场景之后，提交 ImGui 之前
         {
             bool dockOpen = true;
@@ -465,8 +464,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // 5.5 提交 ImGui
+        {CScopedDebugEvent evtScene(ctx.GetContext(), L"imgui pass");
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
 
         // 5.6 Present
         ctx.Present(1, 0);

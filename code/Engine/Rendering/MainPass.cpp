@@ -2,6 +2,7 @@
 #include "ShadowPass.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
+#include "Core/DebugEvent.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Scene.h"
@@ -648,27 +649,32 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
     // ============================================
     // Render Opaque Pass
     // ============================================
+    { CScopedDebugEvent evt(context, L"Opaque Pass");
     renderOpaquePass(context, opaqueItems,
                      m_inputLayout.Get(), m_vs.Get(), m_ps.Get(),
                      m_rsSolid.Get(), m_depthStateDefault.Get(),
                      m_cbFrame.Get(), m_cbObj.Get(), m_sampler.Get());
+    }
 
     // ============================================
     // Render Skybox (after Opaque, before Transparent)
     // ============================================
+    { CScopedDebugEvent evt(context, L"Skybox");
     CScene::Instance().GetSkybox().Render(view, proj);
 
+    }
 
     // ============================================
     // Render Transparent Pass (last, back-to-front sorted)
     // ============================================
+    { CScopedDebugEvent evt(context, L"Transparent Pass");
     renderTransparentPass(context, transparentItems,
                           m_inputLayout.Get(), m_vs.Get(), m_ps.Get(),
                           m_rsSolid.Get(), m_depthStateTransparent.Get(),
                           m_blendStateTransparent.Get(),
                           m_cbFrame.Get(), m_cbObj.Get(), m_sampler.Get());
+    }
 }
-
 void CMainPass::ensureOffscreen(UINT w, UINT h)
 {
     ID3D11Device* device = CDX11Context::Instance().GetDevice();
@@ -773,23 +779,30 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
 
     // Render scene to HDR RT (linear space)
     // Scene rendering now includes: Opaque → Skybox → Grid → Transparent
+    { CScopedDebugEvent evtScene(context, L"Scene Rendering");
     renderScene(scene, dt, shadowData);
+    }
 
     // Render debug lines on top of scene (with depth testing)
+    { CScopedDebugEvent evt(context, L"Debug Lines");
     m_debugLinePass.Render(m_cameraView, m_cameraProj, w, h);
+    }
 
     // Apply post-processing: Tone mapping + Gamma correction (HDR → LDR sRGB)
+    {CScopedDebugEvent evt(context, L"Post-Processing");
     m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h, 1.0f);
-
+    }
     // ============================================
     // Render Editor Tools (Grid) - After all game content
     // ============================================
     // Rebind RTV + DSV for Grid rendering (PostProcess unbinds DSV)
     // Grid needs depth test, so bind HDR depth buffer (LDR has no depth)
+    { CScopedDebugEvent evt(context, L"Grid");
     ID3D11RenderTargetView* ldrRTV = m_offLDR.rtv.Get();
     context->OMSetRenderTargets(1, &ldrRTV, m_off.dsv.Get());
 
     CGridPass::Instance().Render(m_cameraView, m_cameraProj, m_camPos);
+    }
 
 }
 

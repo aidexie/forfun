@@ -52,6 +52,10 @@ public:
 
     // State query for AI testing
     std::string GenerateReport() const;
+    // File path management
+    const std::string& GetFilePath() const { return m_filePath; }
+    void SetFilePath(const std::string& path) { m_filePath = path; }
+    bool HasFilePath() const { return !m_filePath.empty(); }
 
 private:
     // Private constructor for singleton
@@ -61,6 +65,7 @@ private:
 private:
     CWorld m_world;
     int m_selected = -1;
+    std::string m_filePath;  // Current scene file path
     CSkybox m_skybox;
     CIBLGenerator m_iblGen;
     CSceneLightSettings m_lightSettings;

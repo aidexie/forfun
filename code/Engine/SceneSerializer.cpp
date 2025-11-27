@@ -201,6 +201,7 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
 // ===========================
 bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
     try {
+        scene.SetFilePath(filepath);
         // Read file
         std::ifstream file(filepath);
         if (!file.is_open()) {
