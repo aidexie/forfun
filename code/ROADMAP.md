@@ -86,11 +86,18 @@ struct SMaterial {
 
 ---
 
-## Phase 2: 光照系统扩展 (预计 4-5周)
+## Phase 2: 光照系统扩展 (预计 3-3.5周)
 
 **目标**: 构建完整的动态光照系统，支持多光源和局部 IBL
 
-### 2.1 Point Light (Forward 渲染) - 1周
+**实现策略**: 避免重复实现，Point Light直接与Forward+一起开发
+
+### 2.1 Point Light + Forward+ 渲染 (合并实现) - 1-1.5周
+
+**为什么合并？**
+- 避免先实现简单Forward，再重构为Forward+的重复工作
+- 从一开始就设计正确的Light Buffer和数据结构
+- 一次性支持100+光源，不受性能限制
 
 **组件**:
 ```cpp
@@ -98,17 +105,62 @@ struct SPointLight : public IComponent {
     XMFLOAT3 color{1, 1, 1};
     float intensity = 1.0f;
     float range = 10.0f;
-    bool castShadows = false;
+    bool castShadows = false;  // Phase 2暂不实现，Phase 3添加
 };
 ```
 
-**着色器实现**:
-- 物理衰减：`1 / (distance²)`
-- 范围平滑过渡：`smoothstep(range)`
-- Cook-Torrance BRDF 复用
-- 限制：16 个点光源
+**Forward+ 核心算法**:
+1. **Tile划分** (16×16像素)
+   - Screen space划分为tile grid
+   - 每个tile独立剔除光源
 
-**验收标准**: TestPointLights 通过
+2. **Compute Shader Light Culling**
+   - 输入：所有光源的AABB/Sphere
+   - 输出：每个tile的light index list
+   ```hlsl
+   // LightCulling.compute.hlsl
+   RWStructuredBuffer<uint> tileData;  // [tileIdx * maxLightsPerTile]
+
+   [numthreads(16, 16, 1)]
+   void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
+       uint tileIdx = GetTileIndex(dispatchThreadID.xy);
+       Frustum tileFrustum = ComputeTileFrustum(tileIdx);
+
+       uint lightCount = 0;
+       for (uint i = 0; i < numLights; i++) {
+           if (SphereIntersectsFrustum(lights[i], tileFrustum)) {
+               tileData[tileIdx * MAX_LIGHTS + lightCount++] = i;
+           }
+       }
+   }
+   ```
+
+3. **Pixel Shader只处理可见光源**
+   ```hlsl
+   // MainPass.ps.hlsl
+   float4 PSMain(PSInput input) : SV_Target {
+       uint tileIdx = GetTileIndex(input.position.xy);
+       uint lightStart = tileIdx * MAX_LIGHTS_PER_TILE;
+
+       float3 lighting = 0;
+       for (uint i = 0; i < tileData[lightStart]; i++) {
+           uint lightIdx = tileData[lightStart + i + 1];
+           lighting += CalculatePointLight(lights[lightIdx], ...);
+       }
+       return float4(lighting, 1.0);
+   }
+   ```
+
+**着色器实现细节**:
+- 物理衰减：`1 / (distance²)`
+- 范围平滑过渡：`smoothstep(range - 0.5, range, distance)`
+- Cook-Torrance BRDF 复用（与DirectionalLight相同公式）
+
+**验收标准**:
+- TestPointLights - 16个点光源基础测试
+- TestForwardPlus - 100个点光源 @ 1080p 60 FPS
+
+**测试场景**: 夜晚城市（路灯、霓虹灯）
 
 ### 2.2 Spot Light - 3-4天
 
@@ -118,17 +170,24 @@ struct SSpotLight : public IComponent {
     XMFLOAT3 color{1, 1, 1};
     float intensity = 1.0f;
     float range = 10.0f;
-    float innerConeAngle = 15.0f;
-    float outerConeAngle = 30.0f;
+    float innerConeAngle = 15.0f;  // 全亮区域角度
+    float outerConeAngle = 30.0f;  // 边缘衰减角度
     bool castShadows = false;
 };
 ```
 
 **着色器实现**:
-- 锥形衰减
-- Cookie 纹理（可选）
+- 复用Forward+架构（Light Buffer增加direction字段）
+- 锥形衰减：
+  ```hlsl
+  float spotAttenuation = dot(normalize(lightDir), spotDirection);
+  float spotFactor = smoothstep(cos(outerAngle), cos(innerAngle), spotAttenuation);
+  ```
+- Cookie纹理（可选）- 投影纹理实现图案
 
-**验收标准**: TestSpotLight 通过
+**验收标准**: TestSpotLight 通过，混合Point + Spot光源渲染
+
+**测试场景**: 舞台灯光 / 手电筒
 
 ### 2.3 Reflection Probe (局部 IBL) - 1周
 
@@ -139,82 +198,94 @@ struct SReflectionProbe : public IComponent {
     XMFLOAT3 boxMax{5, 5, 5};
     int resolution = 128;
     bool isBoxProjection = true;
-    std::string bakedCubemapPath;
+    std::string bakedCubemapPath;  // .ffasset格式
 };
 ```
 
 **核心技术**:
-1. **Baking** - 编辑器中渲染 6 个面
-2. **Box Projection** - 修正反射方向
-3. **Blending** - 多 Probe 混合
+1. **Cubemap Baking（编辑器工具）**
+   - 在Probe位置渲染6个方向（+X, -X, +Y, -Y, +Z, -Z）
+   - 保存为KTX2格式（复用现有HDR Export工具）
+   - 生成mipmap chain（specular pre-filtering）
 
-**验收标准**: TestReflectionProbe 通过，室内金属球反射显示墙壁而非天空
+2. **Box Projection（Shader中修正反射方向）**
+   ```hlsl
+   // 将反射方向从无限远修正到box边界
+   float3 BoxProjection(float3 reflectDir, float3 worldPos,
+                        float3 boxMin, float3 boxMax, float3 probePos) {
+       float3 rbmax = (boxMax - worldPos) / reflectDir;
+       float3 rbmin = (boxMin - worldPos) / reflectDir;
+       float3 rbminmax = max(rbmax, rbmin);
+       float intersectDist = min(min(rbminmax.x, rbminmax.y), rbminmax.z);
+       float3 intersectPos = worldPos + reflectDir * intersectDist;
+       return intersectPos - probePos;
+   }
+   ```
 
-### 2.4 Light Probe (球谐光照) - 3-4天
+3. **多Probe混合**（可选，Phase 2暂不实现）
+   - 基于距离权重混合
+   - Phase 3再添加
+
+**验收标准**: TestReflectionProbe 通过
+- VISUAL_EXPECTATION: 金属球反射室内红墙和蓝墙，而非天空盒
+
+**测试场景**: 室内走廊，金属门把手
+
+### 2.4 Light Probe (球谐光照) - 可选，3-4天
+
+**优先级**: ⚠️ **低优先级，建议Phase 2先跳过**
+
+**原因**:
+- 实现复杂（SH编码/解码，数学密集）
+- 视觉效果微妙（漫反射环境光）
+- 调试困难（SH系数难以可视化）
+- 当前全局IBL已满足大部分需求
+
+**何时需要**:
+- 大型开放世界（需要per-region环境光）
+- 完整GI解决方案
+
+**如果实现**:
 
 **组件**:
 ```cpp
 struct SLightProbe : public IComponent {
-    float sh[9 * 3];  // 9 个球谐系数 × RGB (L0-L2)
+    float sh[9 * 3];  // 9个球谐系数 × RGB (L0-L2)
     XMFLOAT3 boxMin, boxMax;
     float blendDistance = 1.0f;
 };
 ```
 
 **核心技术**:
-1. **SH Encoding** - 将 cubemap 投影到球谐基函数
-```cpp
-// Band 0-2 (9 coefficients)
-for each pixel (direction, color):
-    for l = 0 to 2:
-        for m = -l to l:
-            sh[idx] += color * SH_basis(l, m, direction) * solidAngle
-```
-
+1. **SH Encoding** - 将cubemap投影到球谐基函数
 2. **SH Decoding in Shader**
-```hlsl
-float3 EvaluateSH(float3 normal, float sh[27]) {
-    // L0 (DC)
-    float3 result = sh[0] * 0.282095;
-    // L1 (linear)
-    result += sh[1] * 0.488603 * normal.y;
-    result += sh[2] * 0.488603 * normal.z;
-    result += sh[3] * 0.488603 * normal.x;
-    // L2 (quadratic) - 5 more terms
-    return result;
-}
-```
-
-3. **Probe Blending** - 基于位置混合
+3. **Probe Blending**
 
 **与 Reflection Probe 区别**:
 - **Reflection Probe**: 镜面反射（高频），cubemap，用于金属
 - **Light Probe**: 漫反射（低频），球谐，用于非金属
 
-**验收标准**: TestLightProbe 通过，漫反射物体受局部环境光影响
+**验收标准**: TestLightProbe 通过
 
-### 2.5 Forward+ 渲染 (Tiled Light Culling) - 1-1.5周
+### 2.5 Deferred 渲染 - ❌ 不推荐实现
 
-**目标**: 100+ 光源 @ 60 FPS
+**为什么不做？**
+1. **Forward+已足够** - 100+光源 @ 60 FPS，满足绝大多数需求
+2. **透明物体问题** - Deferred无法处理透明，需要单独Forward pass
+3. **MSAA成本** - G-Buffer的MSAA成本高
+4. **材质灵活性** - Forward+可以有不同shader，Deferred被G-Buffer限制
 
-**核心算法**:
-1. Tile 划分 (16×16 像素)
-2. Compute Shader Light Culling
-3. Pixel Shader 只处理可见光源
+**仅在以下情况考虑**:
+- 需要1000+光源（极端场景）
+- 需要屏幕空间后处理（SSAO, SSR）需要G-Buffer
 
-**验收标准**: TestForwardPlus 通过，100 光源 @ 1080p 60 FPS
+**决策**: Phase 2跳过，Forward+作为主渲染路径
 
-### 2.6 Deferred 渲染 (可选) - 1周
-
-**G-Buffer 布局**:
-- RT0: Albedo + AO
-- RT1: Normal + Roughness
-- RT2: Metallic
-- Depth
-
-**决策**: Forward+ 和 Deferred 暂定都做，到时候可能只做一个
-
-**时间估计**: Phase 2 总计 4-5 周
+**时间估计**: Phase 2 总计 3-3.5 周
+- Point Light + Forward+: 1-1.5周
+- Spot Light: 3-4天
+- Reflection Probe: 1周
+- Light Probe (可选): 跳过或3-4天
 
 ---
 
@@ -327,4 +398,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2025-11-25
+**Last Updated**: 2025-11-27
