@@ -74,6 +74,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestClusteredLighting.cpp
     ${CODE_PATH}/Tests/TestSimplePointLight.cpp
     ${CODE_PATH}/Tests/TestSpotLight.cpp
+    ${CODE_PATH}/Tests/TestCopyPaste.cpp
 )
 
 add_executable(forfun WIN32

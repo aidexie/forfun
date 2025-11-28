@@ -4,9 +4,12 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
+#include "SceneSerializer.h"
+#include <imgui.h>
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
+#include <regex>
 
 bool CScene::Initialize(const std::string& skybox_path) {
     if (m_initialized) {
@@ -170,4 +173,147 @@ std::string CScene::GenerateReport() const {
     oss << "\n================================\n";
 
     return oss.str();
+}
+
+// ===========================
+// Copy GameObject to Clipboard
+// ===========================
+void CScene::CopyGameObject(CGameObject* go) {
+    if (!go) {
+        CFFLog::Warning("[Scene] CopyGameObject: GameObject is null");
+        return;
+    }
+
+    std::string json = CSceneSerializer::SerializeGameObject(go);
+    if (json.empty()) {
+        CFFLog::Error("[Scene] Failed to serialize GameObject for copy");
+        return;
+    }
+
+    ImGui::SetClipboardText(json.c_str());
+    CFFLog::Info("[Scene] Copied GameObject \"%s\" to clipboard", go->GetName().c_str());
+}
+
+// ===========================
+// Paste GameObject from Clipboard
+// ===========================
+CGameObject* CScene::PasteGameObject() {
+    const char* clipboardText = ImGui::GetClipboardText();
+    if (!clipboardText || strlen(clipboardText) == 0) {
+        CFFLog::Warning("[Scene] Clipboard is empty, cannot paste");
+        return nullptr;
+    }
+
+    std::string jsonString(clipboardText);
+    CGameObject* newGo = CSceneSerializer::DeserializeGameObject(m_world, jsonString);
+    if (!newGo) {
+        CFFLog::Error("[Scene] Failed to deserialize GameObject from clipboard");
+        return nullptr;
+    }
+
+    // Handle naming conflict: "Name" -> "Name (1)", "Name (1)" -> "Name (2)", etc.
+    std::string originalName = newGo->GetName();
+    std::string uniqueName = originalName;
+
+    // Parse existing suffix: "Name (N)" pattern
+    std::regex pattern(R"(^(.*?)\s*\((\d+)\)$)");
+    std::smatch match;
+    std::string baseName = originalName;
+    int currentSuffix = 0;
+
+    if (std::regex_match(originalName, match, pattern)) {
+        baseName = match[1].str();
+        currentSuffix = std::stoi(match[2].str());
+    }
+
+    // Find next available number
+    int nextSuffix = currentSuffix + 1;
+    bool nameConflict = true;
+    while (nameConflict) {
+        uniqueName = baseName + " (" + std::to_string(nextSuffix) + ")";
+        nameConflict = false;
+
+        // Check if this name already exists
+        for (size_t i = 0; i < m_world.Count(); ++i) {
+            if (m_world.Get(i)->GetName() == uniqueName) {
+                nameConflict = true;
+                nextSuffix++;
+                break;
+            }
+        }
+    }
+
+    newGo->SetName(uniqueName);
+
+    // Apply Transform offset to avoid exact overlap
+    auto* transform = newGo->GetComponent<STransform>();
+    if (transform) {
+        transform->position.x += 0.5f;  // Offset 0.5 units to the right
+    }
+
+    CFFLog::Info("[Scene] Pasted GameObject as \"%s\"", uniqueName.c_str());
+    return newGo;
+}
+
+// ===========================
+// Duplicate GameObject (Copy + Paste)
+// ===========================
+CGameObject* CScene::DuplicateGameObject(CGameObject* go) {
+    if (!go) {
+        CFFLog::Warning("[Scene] DuplicateGameObject: GameObject is null");
+        return nullptr;
+    }
+
+    // Serialize and immediately deserialize (bypass clipboard)
+    std::string json = CSceneSerializer::SerializeGameObject(go);
+    if (json.empty()) {
+        CFFLog::Error("[Scene] Failed to serialize GameObject for duplication");
+        return nullptr;
+    }
+
+    CGameObject* newGo = CSceneSerializer::DeserializeGameObject(m_world, json);
+    if (!newGo) {
+        CFFLog::Error("[Scene] Failed to deserialize GameObject for duplication");
+        return nullptr;
+    }
+
+    // Handle naming conflict (same logic as Paste)
+    std::string originalName = newGo->GetName();
+    std::string uniqueName = originalName;
+
+    std::regex pattern(R"(^(.*?)\s*\((\d+)\)$)");
+    std::smatch match;
+    std::string baseName = originalName;
+    int currentSuffix = 0;
+
+    if (std::regex_match(originalName, match, pattern)) {
+        baseName = match[1].str();
+        currentSuffix = std::stoi(match[2].str());
+    }
+
+    int nextSuffix = currentSuffix + 1;
+    bool nameConflict = true;
+    while (nameConflict) {
+        uniqueName = baseName + " (" + std::to_string(nextSuffix) + ")";
+        nameConflict = false;
+
+        for (size_t i = 0; i < m_world.Count(); ++i) {
+            if (m_world.Get(i)->GetName() == uniqueName) {
+                nameConflict = true;
+                nextSuffix++;
+                break;
+            }
+        }
+    }
+
+    newGo->SetName(uniqueName);
+
+    // Apply Transform offset
+    auto* transform = newGo->GetComponent<STransform>();
+    if (transform) {
+        transform->position.x += 0.5f;
+    }
+
+    CFFLog::Info("[Scene] Duplicated GameObject as \"%s\"", uniqueName.c_str());
+    return newGo;
 }

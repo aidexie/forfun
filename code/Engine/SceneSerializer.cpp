@@ -253,6 +253,60 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
     }
 }
 
+// ===========================
+// Serialize Single GameObject to JSON String
+// ===========================
+std::string CSceneSerializer::SerializeGameObject(const CGameObject* go) {
+    if (!go) return "";
+
+    try {
+        json j;
+        j["name"] = go->GetName();
+        j["components"] = json::array();
+
+        // Serialize all components
+        go->ForEachComponent([&](const CComponent* comp) {
+            json compJson;
+            SerializeComponent(comp, compJson);
+            j["components"].push_back(compJson);
+        });
+
+        return j.dump();  // Compact JSON string
+
+    } catch (const std::exception& e) {
+        CFFLog::Error("Failed to serialize GameObject: %s", e.what());
+        return "";
+    }
+}
+
+// ===========================
+// Deserialize GameObject from JSON String
+// ===========================
+CGameObject* CSceneSerializer::DeserializeGameObject(CWorld& world, const std::string& jsonString) {
+    if (jsonString.empty()) return nullptr;
+
+    try {
+        json j = json::parse(jsonString);
+
+        std::string name = j.value("name", "GameObject");
+        auto* go = world.Create(name);
+
+        // Load components
+        if (j.contains("components") && j["components"].is_array()) {
+            for (const auto& compJson : j["components"]) {
+                DeserializeComponent(go, compJson);
+            }
+        }
+
+        return go;
+
+    } catch (const std::exception& e) {
+        CFFLog::Error("Failed to deserialize GameObject: %s", e.what());
+        return nullptr;
+    }
+}
+
+
 
 
 

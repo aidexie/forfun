@@ -57,6 +57,11 @@ public:
     void SetFilePath(const std::string& path) { m_filePath = path; }
     bool HasFilePath() const { return !m_filePath.empty(); }
 
+    // Copy/Paste/Duplicate operations (for Hierarchy panel)
+    void CopyGameObject(CGameObject* go);     // Copy to clipboard (JSON)
+    CGameObject* PasteGameObject();           // Paste from clipboard
+    CGameObject* DuplicateGameObject(CGameObject* go);  // Copy + Paste in one step
+
 private:
     // Private constructor for singleton
     CScene() = default;
