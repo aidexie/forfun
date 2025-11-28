@@ -16,17 +16,29 @@ struct ClusterData {
     uint count;
 };
 
-struct GpuPointLight {
-    float3 position;
-    float range;
-    float3 color;
-    float intensity;
+// Light types (must match C++ ELightType)
+#define LIGHT_TYPE_POINT 0
+#define LIGHT_TYPE_SPOT  1
+
+// Unified GPU light structure (supports both Point and Spot lights)
+struct GpuLight {
+    float3 position;     // World space position (all types)
+    float range;         // Maximum light radius (all types)
+    float3 color;        // Linear RGB (all types)
+    float intensity;     // Luminous intensity (all types)
+
+    // Spot light specific (unused for point lights)
+    float3 direction;    // World space direction (normalized)
+    float innerConeAngle;// cos(innerAngle) - precomputed
+    float outerConeAngle;// cos(outerAngle) - precomputed
+    uint type;           // LIGHT_TYPE_POINT or LIGHT_TYPE_SPOT
+    float2 padding;      // Align to 16 bytes
 };
 
 // Cluster data bound to t10, t11, t12
 StructuredBuffer<ClusterData> g_clusterData : register(t10);
 StructuredBuffer<uint> g_compactLightList : register(t11);
-StructuredBuffer<GpuPointLight> g_pointLights : register(t12);
+StructuredBuffer<GpuLight> g_lights : register(t12);  // All lights (Point + Spot)
 
 // Additional cbuffer for cluster parameters (shared with MainPass)
 cbuffer ClusteredParams : register(b3) {
@@ -65,9 +77,9 @@ uint GetClusterIndex(float2 screenPos, float viewZ) {
 // ============================================
 // Point Light Calculation (Wrapper)
 // ============================================
-// Converts GpuPointLight to PointLightInput and uses shared BRDF from Common.hlsl
+// Converts GpuLight to PointLightInput and uses shared BRDF from Common.hlsl
 float3 CalculatePointLight(
-    GpuPointLight light,
+    GpuLight light,
     float3 worldPos,
     float3 N,
     float3 V,
@@ -84,6 +96,33 @@ float3 CalculatePointLight(
 
     // Use shared PBR calculation from Common.hlsl
     return CalculatePointLightPBR(lightInput, worldPos, N, V, albedo, metallic, roughness);
+}
+
+// ============================================
+// Spot Light Calculation (Wrapper)
+// ============================================
+// Converts GpuLight to SpotLightInput and uses shared BRDF from Common.hlsl
+float3 CalculateSpotLight(
+    GpuLight light,
+    float3 worldPos,
+    float3 N,
+    float3 V,
+    float3 albedo,
+    float metallic,
+    float roughness
+) {
+    // Convert to Common.hlsl format
+    SpotLightInput lightInput;
+    lightInput.position = light.position;
+    lightInput.range = light.range;
+    lightInput.color = light.color;
+    lightInput.intensity = light.intensity;
+    lightInput.direction = light.direction;
+    lightInput.innerConeAngle = light.innerConeAngle;
+    lightInput.outerConeAngle = light.outerConeAngle;
+
+    // Use shared PBR calculation from Common.hlsl
+    return CalculateSpotLightPBR(lightInput, worldPos, N, V, albedo, metallic, roughness);
 }
 
 // ============================================
@@ -111,9 +150,15 @@ float3 ApplyClusteredPointLights(
     // Process all lights in this cluster
     for (uint i = 0; i < cluster.count; i++) {
         uint lightIdx = g_compactLightList[cluster.offset + i];
-        GpuPointLight light = g_pointLights[lightIdx];
+        GpuLight light = g_lights[lightIdx];
 
-        lighting += CalculatePointLight(light, worldPos, N, V, albedo, metallic, roughness);
+        // Dispatch to correct calculation based on light type
+        if (light.type == LIGHT_TYPE_POINT) {
+            lighting += CalculatePointLight(light, worldPos, N, V, albedo, metallic, roughness);
+        }
+        else if (light.type == LIGHT_TYPE_SPOT) {
+            lighting += CalculateSpotLight(light, worldPos, N, V, albedo, metallic, roughness);
+        }
     }
 
     return lighting;

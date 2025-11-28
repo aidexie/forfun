@@ -8,6 +8,7 @@ Claude Code guidance for this repository.
 - `.clang-format` - 代码格式化配置
 - `docs/RENDERING.md` - 渲染系统详细文档
 - `docs/EDITOR.md` - 编辑器系统详细文档
+- `docs/TESTING.md` - 自动化测试详细文档 ⭐
 
 ---
 
@@ -49,120 +50,44 @@ Claude Code guidance for this repository.
 
 ---
 
-## 功能开发 + 自动测试工作流
+## Automated Testing (Quick Reference)
 
-### 步骤 1：实现功能
+**详细文档**: 参见 **`docs/TESTING.md`** 获取完整测试指南
 
-当用户请求"实现 XXX 功能"时：
-1. 实现核心功能代码
-2. **必须主动编写自动化测试**（不等用户要求）
-3. 测试命名：`CTest{FeatureName}`
+### 核心原则
 
-### 步骤 2：编写测试
+**每个新功能都必须主动编写自动化测试**（不等用户要求）
 
-测试必须包含：
-- **场景设置**（Frame 1-10）：创建测试场景、加载资源
-- **截图**（Frame 20）：捕获关键帧的视觉效果
-- **断言验证**（Frame 20）：使用 `ASSERT_*` 宏验证逻辑正确性
-- **视觉预期描述**（Frame 20）：使用 `VISUAL_EXPECTATION` 标记
-- **最终总结**（Frame 30）：检查 `ctx.failures` 并设置 `ctx.testPassed`
+### 快速工作流
 
-**视觉预期示例**：
-```cpp
-CFFLog::Info("VISUAL_EXPECTATION: Sky should be blue with visible clouds");
-CFFLog::Info("VISUAL_EXPECTATION: No black/pink missing texture colors");
-CFFLog::Info("VISUAL_EXPECTATION: Environment lighting visible on test cube");
-```
+1. **实现功能** → 2. **写测试**（`CTestFeatureName`）→ 3. **运行测试** → 4. **AI自动分析** → 5. **生成报告**
 
-### 步骤 3：运行测试
-
-使用 Bash tool 运行：
 ```bash
-timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test CTestXXX
+# 运行测试
+timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test TestXXX
 ```
 
-### 步骤 4：AI 自动分析
+### AI 必须自动执行
 
-测试运行完成后，**必须自动执行**以下步骤：
+测试运行后：
+1. 读取 `E:/forfun/debug/{TestName}/test.log` - 检查断言
+2. 读取 `E:/forfun/debug/{TestName}/screenshot_frame20.png` - 视觉验证
+3. 读取 `E:/forfun/debug/{TestName}/runtime.log` - 错误日志（如需要）
+4. 生成测试分析报告
 
-1. **读取测试日志**：
-   ```
-   E:/forfun/debug/{TestName}/test.log
-   ```
-   - 检查断言状态（查找 "✓ ALL ASSERTIONS PASSED" 或 "✗ TEST FAILED"）
-   - 提取 VISUAL_EXPECTATION 描述
-   - 记录任何失败的断言
+### 关键经验教训（2025-11-28）
 
-2. **读取截图**：
-   ```
-   E:/forfun/debug/{TestName}/screenshot_frame*.png
-   ```
-   - 使用 Read tool 查看截图（AI 的多模态能力）
-   - 对比截图与 VISUAL_EXPECTATION 描述
-   - 检查明显的渲染错误（黑屏、缺失纹理、错误颜色）
+**⚠️ 使用 Sphere 测试光照**
+- ❌ Cube：只有6个面，光从上方来时只有顶面被照亮 → 侧面看起来是黑的 → 误报失败
+- ✅ Sphere：表面法线各个方向均匀分布 → 任何角度都能正确显示光照效果
 
-3. **读取运行时日志**（如有必要）：
-   ```
-   E:/forfun/debug/{TestName}/runtime.log
-   ```
-   - 如果测试失败，查找错误信息
-   - 检查资源加载问题
+**⚠️ 显式设置材质**
+- 必须使用 `.ffasset` 文件：`meshRenderer->materialPath = "materials/default_white.ffasset"`
+- 无法通过代码直接设置 albedo/metallic/roughness
 
-### 步骤 5：生成测试分析报告
-
-**报告格式**：
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-测试分析报告：{TestName}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✅ 断言状态：所有断言通过 (0 failures)
-   或
-✗ 断言状态：3 个断言失败
-   - [TestName:Frame10] Object count: expected 1, got 2
-   - [TestName:Frame20] Hit distance: expected 10.400, got 11.200
-
-✅ 视觉验证：截图符合预期
-   - ✓ Sky shows blue color with clouds
-   - ✓ No missing textures
-   - ✓ Environment lighting visible
-   或
-✗ 视觉验证：发现问题
-   - ✗ Screenshot shows black screen (expected: blue sky)
-
-📊 日志摘要：
-   - Frame 1: Scene setup complete
-   - Frame 10: All setup assertions passed
-   - Frame 20: Raycast test passed
-
-📸 截图：
-   - screenshot_frame20.png (1116x803)
-   - 显示：[简要描述截图内容]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ 总结：功能实现正确，测试通过
-   或
-✗ 总结：测试失败，需要修复以下问题：
-   1. [具体问题描述]
-   2. [具体问题描述]
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-### 步骤 6：失败时的处理
-
-如果测试失败：
-1. 分析失败原因（从日志和截图）
-2. 修复代码
-3. 重新构建
-4. 返回步骤 3（重新运行测试）
-5. 重复直到测试通过
-
-### 重要提醒
-
-- ⚠️ **不要跳过测试**：每个新功能都必须有自动化测试
-- ⚠️ **不要等待用户要求**：主动编写并运行测试
-- ⚠️ **不要忘记分析**：测试运行后必须读取并分析结果
-- ⚠️ **不要只看断言**：视觉验证同样重要
+**⚠️ Spot Light 需要更高强度**
+- 推荐强度：500-1000（因为 cone attenuation 会减弱亮度）
+- Point Light 通常只需 50-300
 
 ---
 
@@ -361,111 +286,6 @@ REGISTER_COMPONENT(SPointLight)
 
 ---
 
-## Automated Testing
-
-### Test Framework
-
-**位置**: `Core/Testing/`
-- `TestCase.h` - `ITestCase` 接口, `CTestContext` API
-- `TestRegistry.h` - `REGISTER_TEST()` 宏
-- `Screenshot.h` - `CScreenshot::CaptureTest()`
-- `Tests/` - 测试用例
-
-**运行测试**:
-```bash
-./build/Debug/forfun.exe --test TestRayCast
-```
-
-**输出**:
-```
-E:/forfun/debug/{TestName}/
-  ├── runtime.log       (Frame-by-frame execution log)
-  ├── test.log          (Test session log with assertions)
-  └── screenshot_frame20.png
-```
-
-### Frame Callback Pattern
-
-**核心概念**: 测试在正常引擎循环中执行，通过帧回调调度操作。
-
-```cpp
-class CTestMyFeature : public ITestCase {
-public:
-    const char* GetName() const override { return "TestMyFeature"; }
-
-    void Setup(CTestContext& ctx) override {
-        ctx.OnFrame(1, [&]() {
-            // 创建测试场景
-        });
-
-        ctx.OnFrame(20, [&]() {
-            // 执行测试 + 截图 + 断言
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
-            ASSERT_EQUAL(ctx, actual, expected, "Description");
-        });
-
-        ctx.OnFrame(30, [&]() {
-            ctx.testPassed = ctx.failures.empty();
-            ctx.Finish();
-        });
-    }
-};
-
-REGISTER_TEST(CTestMyFeature)
-```
-
-### Assertion Macros
-
-```cpp
-ASSERT(ctx, condition, "Description");
-ASSERT_EQUAL(ctx, actual, expected, "Description");
-ASSERT_NOT_NULL(ctx, pointer, "Description");
-ASSERT_IN_RANGE(ctx, value, min, max, "Description");
-ASSERT_VEC3_EQUAL(ctx, actual, expected, epsilon, "Description");
-```
-
-**好处**: 测试失败不会崩溃，记录到 `ctx.failures`，最后统一判断 pass/fail。
-
-### Test Naming and Registration
-
-**CRITICAL**: Test names are registered using `GetName()` return value (since 2025-11-25).
-
-**Example**:
-```cpp
-class CTestMaterialAsset : public ITestCase {
-public:
-    const char* GetName() const override {
-        return "TestMaterialAsset";  // ← This is the registered name
-    }
-};
-REGISTER_TEST(CTestMaterialAsset)
-```
-
-**Command line usage**:
-```bash
-# List all available tests
-./forfun.exe --list-tests
-
-# Run specific test (use GetName() value, NOT class name)
-./forfun.exe --test TestMaterialAsset       # ✅ Correct
-./forfun.exe --test CTestMaterialAsset      # ❌ Wrong (class name)
-```
-
-**Naming Convention**:
-- **Class name**: `CTestFeatureName` (with C prefix, following CODING_STYLE.md)
-- **GetName() return**: `"TestFeatureName"` (without C prefix, user-friendly)
-- **Command line**: Use the `GetName()` value
-
-**Troubleshooting**:
-If test not found, the system will:
-1. Show fuzzy match suggestions if similar names exist
-2. List all available tests
-3. Show usage help
-
-**Before 2025-11-25**: Tests were registered using class name (`#TestClass`), requiring `--test CTestName`. This was confusing and has been changed.
-
----
-
 ## Documentation Index
 
 ### Core Documents (Root)
@@ -493,6 +313,15 @@ If test not found, the system will:
   - HDR Export Tool (完整导出流程)
   - File Dialog Utilities
 
+- `docs/TESTING.md` - 自动化测试完整文档 ⭐
+  - Test Framework Architecture (Frame Callback Pattern)
+  - Test Naming Convention (GetName() vs Class Name)
+  - Assertion Macros (ASSERT_*, VISUAL_EXPECTATION)
+  - Development Workflow (Write → Run → AI Analysis → Report)
+  - Best Practices (Sphere vs Cube, Material Setup, Light Intensity)
+  - Common Issues & Solutions
+  - AI Auto-Analysis Requirements
+
 ---
 
-**Last Updated**: 2025-11-25
+**Last Updated**: 2025-11-28

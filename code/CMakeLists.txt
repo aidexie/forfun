@@ -73,6 +73,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestAlphaBlend.cpp
     ${CODE_PATH}/Tests/TestClusteredLighting.cpp
     ${CODE_PATH}/Tests/TestSimplePointLight.cpp
+    ${CODE_PATH}/Tests/TestSpotLight.cpp
 )
 
 add_executable(forfun WIN32
@@ -124,6 +125,7 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/MeshRenderer.cpp
     ${CODE_PATH}/Engine/Components/DirectionalLight.h
     ${CODE_PATH}/Engine/Components/PointLight.h
+    ${CODE_PATH}/Engine/Components/SpotLight.h
     ${CODE_PATH}/Engine/Rendering/MainPass.h
     ${CODE_PATH}/Engine/Rendering/MainPass.cpp
     ${CODE_PATH}/Engine/Rendering/ShadowPass.h

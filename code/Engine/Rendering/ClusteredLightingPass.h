@@ -26,12 +26,30 @@ struct SClusterData {
     uint32_t count;   // Number of lights in this cluster
 };
 
-struct SGpuPointLight {
-    DirectX::XMFLOAT3 position;  // World space position
-    float range;                 // Maximum light radius
-    DirectX::XMFLOAT3 color;     // Linear RGB
-    float intensity;             // Luminous intensity
+// Light type enumeration (must match HLSL)
+enum class ELightType : uint32_t {
+    Point = 0,
+    Spot = 1
 };
+
+// Unified GPU light structure (supports both Point and Spot lights)
+// Union-style: Spot-specific fields are unused for Point lights
+struct SGpuLight {
+    DirectX::XMFLOAT3 position;  // World space position (all types)
+    float range;                 // Maximum light radius (all types)
+    DirectX::XMFLOAT3 color;     // Linear RGB (all types)
+    float intensity;             // Luminous intensity (all types)
+
+    // Spot light specific (unused for point lights, zero-initialized)
+    DirectX::XMFLOAT3 direction; // World space direction (normalized)
+    float innerConeAngle;        // cos(innerAngle) - precomputed for shader
+    float outerConeAngle;        // cos(outerAngle) - precomputed for shader
+    uint32_t type;               // ELightType (0=Point, 1=Spot)
+    DirectX::XMFLOAT2 padding;   // Align to 16 bytes
+};
+
+// Legacy typedef for compatibility (will be removed)
+using SGpuPointLight = SGpuLight;
 
 // Clustered Lighting Pass
 // Responsibilities:

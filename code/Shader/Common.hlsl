@@ -131,4 +131,82 @@ float3 CalculatePointLightPBR(
     return (diffuse + specular) * radiance * NdotL;
 }
 
+// ============================================
+// Spot Light BRDF (Point Light + Cone Attenuation)
+// ============================================
+
+struct SpotLightInput {
+    float3 position;
+    float range;
+    float3 color;
+    float intensity;
+    float3 direction;     // World space direction (normalized)
+    float innerConeAngle; // cos(innerAngle)
+    float outerConeAngle; // cos(outerAngle)
+};
+
+float3 CalculateSpotLightPBR(
+    SpotLightInput light,
+    float3 worldPos,
+    float3 N,
+    float3 V,
+    float3 albedo,
+    float metallic,
+    float roughness
+) {
+    // Light vector (unnormalized for distance attenuation)
+    float3 unnormalizedL = light.position - worldPos;
+    float distance = length(unnormalizedL);
+    float3 L = unnormalizedL / distance;
+
+    // Early exit: backface (30% performance gain)
+    float NdotL = dot(N, L);
+    if (NdotL <= 0.0) return float3(0, 0, 0);
+
+    // Distance attenuation (same as point light)
+    float invRadius = 1.0 / light.range;
+    float attenuation = GetDistanceAttenuation(unnormalizedL, invRadius);
+
+    // Cone attenuation (spot light specific)
+    float3 lightDir = -L;  // Direction from light to surface
+    float cosTheta = dot(lightDir, light.direction);
+    float spotFactor = smoothstep(light.outerConeAngle, light.innerConeAngle, cosTheta);
+
+    // Combined attenuation
+    attenuation *= spotFactor;
+
+    // Early exit: out of range or out of cone
+    if (attenuation < 0.001) return float3(0, 0, 0);
+
+    // BRDF calculations (same as point light)
+    float3 H = normalize(V + L);
+    float NdotH = saturate(dot(N, H));
+    float NdotV = saturate(dot(N, V));
+    float VdotH = saturate(dot(V, H));
+
+    // Cook-Torrance BRDF terms
+    float D = DistributionGGX(NdotH, roughness);
+    float G = GeometrySmith(NdotV, NdotL, roughness);
+
+    // Fresnel
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float3 F = FresnelSchlick(VdotH, F0);
+
+    // Specular BRDF
+    float3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 0.001);
+
+    // Energy conservation (same as point light)
+    #if defined(LDR_MODE)
+        specular = min(specular, float3(100.0, 100.0, 100.0));
+    #endif
+
+    // Diffuse BRDF (Lambertian)
+    float3 kD = (1.0 - F) * (1.0 - metallic);
+    float3 diffuse = kD * albedo / PI;
+
+    // Final radiance
+    float3 radiance = light.color * light.intensity * attenuation;
+    return (diffuse + specular) * radiance * NdotL;
+}
+
 #endif // COMMON_HLSL

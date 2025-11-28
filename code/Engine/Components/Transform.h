@@ -20,6 +20,18 @@ struct STransform : public CComponent {
         return S * R * T;
     }
 
+    DirectX::XMMATRIX GetRotationMatrix() const {
+        using namespace DirectX;
+        return XMMatrixRotationRollPitchYaw(rotationEuler.x, rotationEuler.y, rotationEuler.z);
+    }
+
+    void SetRotation(float pitch, float yaw, float roll) {
+        // Convert degrees to radians
+        rotationEuler.x = DirectX::XMConvertToRadians(pitch);
+        rotationEuler.y = DirectX::XMConvertToRadians(yaw);
+        rotationEuler.z = DirectX::XMConvertToRadians(roll);
+    }
+
     const char* GetTypeName() const override { return "Transform"; }
 
     void VisitProperties(CPropertyVisitor& visitor) override {

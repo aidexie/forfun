@@ -8,6 +8,7 @@
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
 #include "Components/PointLight.h"
+#include "Components/SpotLight.h"
 #include <string>
 #include <windows.h>
 #include <commdlg.h>
@@ -254,6 +255,17 @@ void Panels::DrawInspector(CScene& scene) {
         } else {
             if (ImGui::Button("Add PointLight")) {
                 sel->AddComponent<SPointLight>();
+            }
+        }
+
+        // SpotLight component
+        if (auto* sl = sel->GetComponent<SSpotLight>()) {
+            if (ImGui::CollapsingHeader("SpotLight", ImGuiTreeNodeFlags_DefaultOpen)) {
+                sl->VisitProperties(visitor);
+            }
+        } else {
+            if (ImGui::Button("Add SpotLight")) {
+                sel->AddComponent<SSpotLight>();
             }
         }
 

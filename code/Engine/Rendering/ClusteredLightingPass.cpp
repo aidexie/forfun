@@ -5,6 +5,7 @@
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/PointLight.h"
+#include "Engine/Components/SpotLight.h"
 #include <d3dcompiler.h>
 #include <cmath>
 
@@ -180,15 +181,15 @@ void CClusteredLightingPass::CreateBuffers(ID3D11Device* device) {
         }
     }
 
-    // Point Light Buffer (SGpuPointLight[max 1024 lights for now])
+    // Light Buffer (SGpuLight[max 1024 lights for now] - supports Point + Spot)
     {
         D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(SGpuPointLight) * 1024;  // Support up to 1024 point lights
+        desc.ByteWidth = sizeof(SGpuLight) * 1024;  // Support up to 1024 lights (Point + Spot)
         desc.Usage = D3D11_USAGE_DYNAMIC;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(SGpuPointLight);
+        desc.StructureByteStride = sizeof(SGpuLight);
 
         hr = device->CreateBuffer(&desc, nullptr, m_pointLightBuffer.ReleaseAndGetAddressOf());
         if (FAILED(hr)) {
@@ -272,7 +273,7 @@ void CClusteredLightingPass::CreateShaders(ID3D11Device* device) {
 
     if (FAILED(hr)) {
         if (errorBlob) {
-            CFFLog::Error("[ClusteredLightingPass] Shader compilation error (BuildClusterGrid): {}",
+            CFFLog::Error("[ClusteredLightingPass] Shader compilation error (BuildClusterGrid): %s",
                           (char*)errorBlob->GetBufferPointer());
         }
         return;
@@ -296,7 +297,7 @@ void CClusteredLightingPass::CreateShaders(ID3D11Device* device) {
 
     if (FAILED(hr)) {
         if (errorBlob) {
-            CFFLog::Error("[ClusteredLightingPass] Shader compilation error (CullLights): {}",
+            CFFLog::Error("[ClusteredLightingPass] Shader compilation error (CullLights): %s",
                           (char*)errorBlob->GetBufferPointer());
         }
         return;
@@ -382,18 +383,50 @@ void CClusteredLightingPass::CullLights(ID3D11DeviceContext* context,
                                         const XMMATRIX& view) {
     if (!m_cullLightsCS || !scene) return;
 
-    // Gather point lights from scene
-    std::vector<SGpuPointLight> gpuLights;
+    // Gather all lights (Point + Spot) from scene
+    std::vector<SGpuLight> gpuLights;
     auto& world = scene->GetWorld();
     for (auto& go : world.Objects()) {
-        auto* light = go->GetComponent<SPointLight>();
         auto* transform = go->GetComponent<STransform>();
-        if (light && transform) {
-            SGpuPointLight gpuLight;
+        if (!transform) continue;
+
+        // Check for Point Light
+        auto* pointLight = go->GetComponent<SPointLight>();
+        if (pointLight) {
+            SGpuLight gpuLight = {};  // Zero-initialize
             gpuLight.position = transform->position;
-            gpuLight.range = light->range;
-            gpuLight.color = light->color;
-            gpuLight.intensity = light->intensity;
+            gpuLight.range = pointLight->range;
+            gpuLight.color = pointLight->color;
+            gpuLight.intensity = pointLight->intensity;
+            gpuLight.type = (uint32_t)ELightType::Point;
+            // direction, innerConeAngle, outerConeAngle remain zero (unused for point lights)
+            gpuLights.push_back(gpuLight);
+        }
+
+        // Check for Spot Light
+        auto* spotLight = go->GetComponent<SSpotLight>();
+        if (spotLight) {
+            SGpuLight gpuLight = {};  // Zero-initialize
+            gpuLight.position = transform->position;
+            gpuLight.range = spotLight->range;
+            gpuLight.color = spotLight->color;
+            gpuLight.intensity = spotLight->intensity;
+            gpuLight.type = (uint32_t)ELightType::Spot;
+
+            // Transform local direction to world space
+            XMVECTOR localDir = XMLoadFloat3(&spotLight->direction);
+            localDir = XMVector3Normalize(localDir);  // Ensure normalized
+            XMMATRIX rotation = transform->GetRotationMatrix();
+            XMVECTOR worldDir = XMVector3TransformNormal(localDir, rotation);
+            worldDir = XMVector3Normalize(worldDir);
+            XMStoreFloat3(&gpuLight.direction, worldDir);
+
+            // Precompute cos(angle) for shader (degrees to radians, then cos)
+            float innerRadians = XMConvertToRadians(spotLight->innerConeAngle);
+            float outerRadians = XMConvertToRadians(spotLight->outerConeAngle);
+            gpuLight.innerConeAngle = cosf(innerRadians);
+            gpuLight.outerConeAngle = cosf(outerRadians);
+
             gpuLights.push_back(gpuLight);
         }
     }
@@ -403,19 +436,34 @@ void CClusteredLightingPass::CullLights(ID3D11DeviceContext* context,
         return;
     }
 
-    // DEBUG: Log light count and first light details (commented out to avoid per-frame spam)
-    // CFFLog::Info("[ClusteredLighting] Collected %d point lights for culling", (int)gpuLights.size());
-    // if (!gpuLights.empty()) {
-    //     auto& light0 = gpuLights[0];
-    //     CFFLog::Info("[ClusteredLighting] Light[0]: pos(%.2f, %.2f, %.2f) range=%.2f intensity=%.2f",
-    //         light0.position.x, light0.position.y, light0.position.z, light0.range, light0.intensity);
-    // }
+    // DEBUG: Log light count and types (temp debug for spot light)
+    static int logCounter = 0;
+    if (logCounter++ < 3) {  // Only log first 3 frames
+        int pointCount = 0, spotCount = 0;
+        for (const auto& light : gpuLights) {
+            if (light.type == (uint32_t)ELightType::Point) pointCount++;
+            else if (light.type == (uint32_t)ELightType::Spot) spotCount++;
+        }
+        CFFLog::Info("[ClusteredLighting] Collected %d lights (Point: %d, Spot: %d)",
+                     (int)gpuLights.size(), pointCount, spotCount);
 
-    // Upload point lights to GPU
+        // Log first spot light details
+        for (const auto& light : gpuLights) {
+            if (light.type == (uint32_t)ELightType::Spot) {
+                CFFLog::Info("[ClusteredLighting] Spot Light: pos(%.2f,%.2f,%.2f) dir(%.2f,%.2f,%.2f) range=%.2f intensity=%.2f cosInner=%.3f cosOuter=%.3f",
+                    light.position.x, light.position.y, light.position.z,
+                    light.direction.x, light.direction.y, light.direction.z,
+                    light.range, light.intensity, light.innerConeAngle, light.outerConeAngle);
+                break;  // Only log first one
+            }
+        }
+    }
+
+    // Upload all lights to GPU
     D3D11_MAPPED_SUBRESOURCE mapped;
     HRESULT hr = context->Map(m_pointLightBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (SUCCEEDED(hr)) {
-        memcpy(mapped.pData, gpuLights.data(), sizeof(SGpuPointLight) * gpuLights.size());
+        memcpy(mapped.pData, gpuLights.data(), sizeof(SGpuLight) * gpuLights.size());
         context->Unmap(m_pointLightBuffer.Get(), 0);
     }
 
