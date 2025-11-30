@@ -1,14 +1,16 @@
-
 #include "Update.h"
 #include "Camera.h"
+
 void Update::OnKeyDown(uint32_t vk){ if(vk<256) m_keys[vk]=true; }
 void Update::OnKeyUp(uint32_t vk){ if(vk<256) m_keys[vk]=false; }
 void Update::OnRButton(bool down){ m_rmb = down; }
+
 void Update::OnMouseDelta(int dx,int dy){
     if(!m_rmb || !m_cam) return;
     const float sens=0.0022f;
-    m_cam->RotateYawPitch(-dx*sens, -dy*sens);
+    m_cam->Rotate(-dx*sens, -dy*sens);  // ✅ 使用新的 Rotate 方法
 }
+
 void Update::Tick(float dt){
     if(!m_cam) return;
     const float sp=2.0f;

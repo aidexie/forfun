@@ -5,6 +5,7 @@
 #include "Rendering/Skybox.h"
 #include "Rendering/IBLGenerator.h"
 #include "SceneLightSettings.h"
+#include "Camera.h"  // ✅ 新增：编辑器相机
 
 // CScene singleton - manages CWorld, skybox, and IBL resources
 class CScene {
@@ -50,6 +51,10 @@ public:
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
 
+    // ✅ 编辑器相机访问（相机现在属于 Scene 逻辑层）
+    CCamera& GetEditorCamera() { return m_editorCamera; }
+    const CCamera& GetEditorCamera() const { return m_editorCamera; }
+
     // State query for AI testing
     std::string GenerateReport() const;
     // File path management
@@ -75,6 +80,9 @@ private:
     CIBLGenerator m_iblGen;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
+
+    // ✅ 编辑器相机（Scene 负责管理逻辑数据）
+    CCamera m_editorCamera;
 };
 
 

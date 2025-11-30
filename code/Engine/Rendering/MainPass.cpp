@@ -251,66 +251,6 @@ void CMainPass::createRasterStates()
     device->CreateBlendState(&blendDesc, m_blendStateTransparent.GetAddressOf());
 }
 
-void CMainPass::OnMouseDelta(int dx, int dy)
-{
-    if (!m_rmbLook) return;
-    const float sens = 0.0022f;
-    m_yaw   -= dx * sens;
-    m_pitch += -dy * sens;
-    const float limit = 1.5533f;
-    m_pitch = std::clamp(m_pitch, -limit, limit);
-}
-void CMainPass::OnRButton(bool down) { m_rmbLook = down; }
-
-void CMainPass::UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt)
-{
-    updateInput(dt);
-
-    // Calculate camera matrices
-    float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
-    float cp = std::cos(m_pitch), sp = std::cos(m_pitch) == 0.f ? 0.f : std::sin(m_pitch);
-    XMVECTOR eye = XMLoadFloat3(&m_camPos);
-    XMVECTOR forward = XMVector3Normalize(XMVectorSet(cp*cy, sp, cp*sy, 0.0f));
-    XMVECTOR at = eye + forward;
-    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-    m_cameraView = XMMatrixLookAtLH(eye, at, up);
-
-    float aspect = (viewportHeight > 0) ? (float)viewportWidth / (float)viewportHeight : 1.0f;
-    m_cameraProj = XMMatrixPerspectiveFovLH(XM_PIDIV4, aspect, 0.1f, 1000.0f);
-}
-
-void CMainPass::ResetCameraLookAt(const XMFLOAT3& eye, const XMFLOAT3& target)
-{
-    m_camPos = eye;
-    XMVECTOR e = XMLoadFloat3(&m_camPos);
-    XMVECTOR t = XMLoadFloat3(&target);
-    XMVECTOR d = XMVector3Normalize(t - e);
-    XMFLOAT3 f; XMStoreFloat3(&f, d);
-    m_yaw   = std::atan2(f.z, f.x);
-    m_pitch = std::asin(std::clamp(f.y, -1.0f, 1.0f));
-}
-
-void CMainPass::updateInput(float dt)
-{
-    auto down = [](int vk){ return (GetAsyncKeyState(vk) & 0x8000) != 0; };
-
-    const float speed = 5.0f;
-    float cy = std::cos(m_yaw), sy = std::sin(m_yaw);
-    float cp = std::cos(m_pitch), sp = std::sin(m_pitch);
-    XMVECTOR forward = XMVector3Normalize(XMVectorSet(cp*cy, sp, cp*sy, 0.0f));
-    XMVECTOR right   = XMVector3Normalize(XMVector3Cross(forward, XMVectorSet(0,1,0,0)));
-
-    XMVECTOR delta = XMVectorZero();
-    if (down('W')) delta += forward * speed * dt;
-    if (down('S')) delta -= forward * speed * dt;
-    if (down('A')) delta += right   * speed * dt;
-    if (down('D')) delta -= right   * speed * dt;
-
-    XMFLOAT3 d; XMStoreFloat3(&d, delta);
-    m_camPos.x += d.x; m_camPos.y += d.y; m_camPos.z += d.z;
-
-    if (down('R')) { ResetCameraLookAt(XMFLOAT3(-6.0f,0.8f,0.0f), XMFLOAT3(0,0,0)); }
-}
 
 // ============================================
 // Helper: Update Frame Constants
@@ -621,22 +561,22 @@ static void renderTransparentPass(
     }
 }
 
-void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData)
+// ============================================
+// renderScene - 内部渲染函数（使用指定相机）
+// ============================================
+void CMainPass::renderScene(const CCamera& camera, CScene& scene, float dt, const CShadowPass::Output* shadowData)
 {
     ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context) return;
-
-    updateInput(dt);
 
     // Set viewport (pass functions don't set this)
     D3D11_VIEWPORT vp{}; vp.Width=(FLOAT)m_off.w; vp.Height=(FLOAT)m_off.h; vp.MinDepth=0.0f; vp.MaxDepth=1.0f;
     context->RSSetViewports(1, &vp);
 
-
-    // Use cached camera matrices
-    XMMATRIX view = m_cameraView;
-    XMMATRIX proj = m_cameraProj;
-    XMVECTOR eye = XMLoadFloat3(&m_camPos);
+    // ✅ 使用传入的相机矩阵
+    XMMATRIX view = camera.GetViewMatrix();
+    XMMATRIX proj = camera.GetProjectionMatrix();
+    XMVECTOR eye = XMLoadFloat3(&camera.position);
 
     // Collect DirectionalLight from scene
     SDirectionalLight* dirLight = nullptr;
@@ -647,15 +587,15 @@ void CMainPass::renderScene(CScene& scene, float dt, const CShadowPass::Output* 
 
 
     // Update frame constants
-    updateFrameConstants(context, m_cbFrame.Get(), view, proj, m_camPos, dirLight, shadowData);
+    updateFrameConstants(context, m_cbFrame.Get(), view, proj, camera.position, dirLight, shadowData);
 
     // Bind global resources (shadow, IBL)
     bindGlobalResources(context, shadowData);
 
     // Update clustered shading parameters (b3)
     CB_ClusteredParams clusteredParams{};
-    clusteredParams.nearZ = 0.1f;  // TODO: Get from camera
-    clusteredParams.farZ = 1000.0f;
+    clusteredParams.nearZ = camera.nearZ;  // ✅ 从相机获取
+    clusteredParams.farZ = camera.farZ;
     clusteredParams.numClustersX = m_clusteredLighting.GetNumClustersX();
     clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
     clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
@@ -773,8 +713,15 @@ void CMainPass::ensureOffscreen(UINT w, UINT h)
     device->CreateShaderResourceView(m_offLDR.color.Get(), &ldrSRVDesc, m_offLDR.srv.GetAddressOf());
 }
 
-void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
-                      const CShadowPass::Output* shadowData)
+// ============================================
+// Render - 使用指定相机渲染场景
+// ============================================
+void CMainPass::Render(
+    const CCamera& camera,
+    CScene& scene,
+    UINT w, UINT h,
+    float dt,
+    const CShadowPass::Output* shadowData)
 {
     ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
     if (!context) return;
@@ -803,9 +750,6 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
     context->ClearRenderTargetView(m_off.rtv.Get(), clear);
     if (m_off.dsv) context->ClearDepthStencilView(m_off.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-    // Render scene to HDR RT (linear space)
-    // Scene rendering now includes: Opaque → Skybox → Grid → Transparent
-
     // ============================================
     // Clustered Lighting Setup
     // ============================================
@@ -813,28 +757,30 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
     // Resize cluster grid if viewport changed
     m_clusteredLighting.Resize(w, h);
 
-    // Build cluster AABBs (view-space)
-    float nearZ = 0.1f;  // TODO: Get from camera
-    float farZ = 1000.0f;
-    m_clusteredLighting.BuildClusterGrid(context, m_cameraProj, nearZ, farZ);
+    // Build cluster AABBs (view-space) - 使用传入的相机
+    float nearZ = camera.nearZ;
+    float farZ = camera.farZ;
+    m_clusteredLighting.BuildClusterGrid(context, camera.GetProjectionMatrix(), nearZ, farZ);
 
-    // Cull lights into clusters
-    m_clusteredLighting.CullLights(context, &scene, m_cameraView);
+    // Cull lights into clusters - 使用传入的相机
+    m_clusteredLighting.CullLights(context, &scene, camera.GetViewMatrix());
     }
 
     { CScopedDebugEvent evtScene(context, L"Scene Rendering");
-    renderScene(scene, dt, shadowData);
+    // ✅ 调用 renderScene，传入自定义相机
+    renderScene(camera, scene, dt, shadowData);
     }
 
     // Render debug lines on top of scene (with depth testing)
     { CScopedDebugEvent evt(context, L"Debug Lines");
-    m_debugLinePass.Render(m_cameraView, m_cameraProj, w, h);
+    m_debugLinePass.Render(camera.GetViewMatrix(), camera.GetProjectionMatrix(), w, h);
     }
 
     // Apply post-processing: Tone mapping + Gamma correction (HDR → LDR sRGB)
     {CScopedDebugEvent evt(context, L"Post-Processing");
     m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(), w, h, 1.0f);
     }
+
     // ============================================
     // Render Editor Tools (Grid) - After all game content
     // ============================================
@@ -844,9 +790,8 @@ void CMainPass::Render(CScene& scene, UINT w, UINT h, float dt,
     ID3D11RenderTargetView* ldrRTV = m_offLDR.rtv.Get();
     context->OMSetRenderTargets(1, &ldrRTV, m_off.dsv.Get());
 
-    CGridPass::Instance().Render(m_cameraView, m_cameraProj, m_camPos);
+    CGridPass::Instance().Render(camera.GetViewMatrix(), camera.GetProjectionMatrix(), camera.position);
     }
-
 }
 
 void CMainPass::Shutdown()

@@ -34,7 +34,7 @@ ImVec2 Panels::GetViewportLastSize() {
     return s_lastAvail;
 }
 
-void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
+void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
     ID3D11ShaderResourceView* srv,
     size_t srcWidth, size_t srcHeight,
     CMainPass* mainPass)
@@ -146,7 +146,7 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
     s_lastAvail = avail;
 
     // Keep editor camera's aspect in sync with the panel (optional)
-    editorCam.aspect = (avail.y > 0.f) ? (avail.x / avail.y) : editorCam.aspect;
+    editorCam.aspectRatio = (avail.y > 0.f) ? (avail.x / avail.y) : editorCam.aspectRatio;  // ✅ aspect → aspectRatio
 
     // Draw the provided texture (no ownership). If null, show placeholder.
     ImVec2 imagePos = ImGui::GetCursorScreenPos();
@@ -168,8 +168,8 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
         const ImVec2 center(gizmoPos.x + gizmoSize * 0.5f, gizmoPos.y + gizmoSize * 0.5f);
         const float axisLength = gizmoSize * 0.35f;
 
-        // Get camera view matrix and extract rotation
-        XMMATRIX viewMat = mainPass->GetCameraViewMatrix();
+        // ✅ Get camera view matrix from camera parameter
+        XMMATRIX viewMat = editorCam.GetViewMatrix();
         XMFLOAT4X4 view;
         XMStoreFloat4x4(&view, viewMat);
 
@@ -286,9 +286,9 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
                 // Get viewport rect
                 ImGuizmo::SetRect(imagePos.x, imagePos.y, avail.x, avail.y);
 
-                // Get camera matrices
-                XMMATRIX view = mainPass->GetCameraViewMatrix();
-                XMMATRIX proj = mainPass->GetCameraProjMatrix();
+                // ✅ Get camera matrices from camera parameter
+                XMMATRIX view = editorCam.GetViewMatrix();
+                XMMATRIX proj = editorCam.GetProjectionMatrix();
 
                 // Convert to float arrays (ImGuizmo expects row-major float[16])
                 XMFLOAT4X4 viewF, projF;
@@ -380,9 +380,9 @@ void Panels::DrawViewport(CScene& scene, EditorCamera& editorCam,
 
         // Check if mouse is within viewport bounds
         if (mouseX >= 0 && mouseX < avail.x && mouseY >= 0 && mouseY < avail.y) {
-            // Generate ray from screen coordinates
-            XMMATRIX view = mainPass->GetCameraViewMatrix();
-            XMMATRIX proj = mainPass->GetCameraProjMatrix();
+            // ✅ Generate ray from screen coordinates using camera parameter
+            XMMATRIX view = editorCam.GetViewMatrix();
+            XMMATRIX proj = editorCam.GetProjectionMatrix();
 
             PickingUtils::Ray ray = PickingUtils::GenerateRayFromScreen(
                 mouseX, mouseY, avail.x, avail.y, view, proj);

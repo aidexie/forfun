@@ -7,6 +7,7 @@
 #include "DebugLinePass.h"
 #include "GridPass.h"
 #include "ClusteredLightingPass.h"
+#include "../Camera.h"  // ✅ 新增：CCamera 类
 // Forward declarations
 class CScene;
 class CShadowPass;
@@ -40,17 +41,20 @@ public:
     bool Initialize();
     void Shutdown();
 
-    // 相机交互
-    void OnRButton(bool down);
-    void OnMouseDelta(int dx, int dy);
+    // ✅ 相机交互已移除（现在由 EditorContext 管理）
+    // ✅ UpdateCamera 已移除（aspect ratio 由调用方在 camera 上直接设置）
 
-    // 更新摄像机矩阵（在 ShadowPass 之前调用）
-    void UpdateCamera(UINT viewportWidth, UINT viewportHeight, float dt);
-
-    // 渲染场景到离屏目标
+    // === 渲染接口 ===
+    // ✅ 使用指定相机渲染场景到离屏目标
+    // 调用方负责提供相机（编辑器相机 or Reflection Probe 相机）
     // shadowData: shadow resources from CShadowPass (nullptr = no shadows)
-    void Render(CScene& scene, UINT w, UINT h, float dt,
-                const CShadowPass::Output* shadowData);
+    void Render(
+        const CCamera& camera,
+        CScene& scene,
+        UINT w, UINT h,
+        float dt,
+        const CShadowPass::Output* shadowData
+    );
 
     // 访问离屏目标（返回最终的 LDR sRGB 纹理用于显示）
     ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_offLDR.srv.Get(); }
@@ -58,9 +62,10 @@ public:
     UINT GetOffscreenWidth()  const { return m_offLDR.w; }
     UINT GetOffscreenHeight() const { return m_offLDR.h; }
 
-    // 获取摄像机矩阵（用于 ShadowPass 视锥拟合）
-    DirectX::XMMATRIX GetCameraViewMatrix() const { return m_cameraView; }
-    DirectX::XMMATRIX GetCameraProjMatrix() const { return m_cameraProj; }
+    // ✅ 相机访问已移除（相机现在在 Scene 中，不在 MainPass）
+    // GetEditorCamera() -> 使用 CScene::Instance().GetEditorCamera()
+    // GetCameraViewMatrix() -> 使用 scene.GetEditorCamera().GetViewMatrix()
+    // GetCameraProjMatrix() -> 使用 scene.GetEditorCamera().GetProjectionMatrix()
 
     // 获取 DebugLinePass（用于外部添加调试线条）
     CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
@@ -70,7 +75,9 @@ public:
 
 private:
     void ensureOffscreen(UINT w, UINT h);
-    void renderScene(CScene& scene, float dt, const CShadowPass::Output* shadowData);
+
+    // ✅ 内部渲染函数：接受自定义相机
+    void renderScene(const CCamera& camera, CScene& scene, float dt, const CShadowPass::Output* shadowData);
 
 private:
     OffscreenTarget m_off;     // HDR linear space (R16G16B16A16_FLOAT)
@@ -90,14 +97,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateTransparent;  // Depth read-only for transparent
     Microsoft::WRL::ComPtr<ID3D11BlendState> m_blendStateTransparent;          // Alpha blending
 
-    // 相机状态
-    DirectX::XMFLOAT3 m_camPos{ -6.0f, 0.8f, 0.0f };
-    float m_yaw = 0.0f, m_pitch = 0.0f;
-    bool  m_rmbLook = false;
-
-    // 摄像机矩阵缓存（用于 ShadowPass）
-    DirectX::XMMATRIX m_cameraView = DirectX::XMMatrixIdentity();
-    DirectX::XMMATRIX m_cameraProj = DirectX::XMMatrixIdentity();
+    // ✅ 相机系统已移除（m_editorCamera, m_rmbLook）
+    // 相机现在由 Scene 持有，交互由 EditorContext 管理
 
     // Skybox is now managed by Scene singleton
     // Post-process (tone mapping + gamma correction)
@@ -111,6 +112,5 @@ private:
     // 内部工具
     void createPipeline();
     void createRasterStates();
-    void ResetCameraLookAt(const DirectX::XMFLOAT3& eye, const DirectX::XMFLOAT3& target);
-    void updateInput(float dt);
+    // ✅ 已删除：ResetCameraLookAt, updateInput（交互逻辑移至 EditorContext）
 };

@@ -2,7 +2,7 @@
 #include <string>
 
 class CScene;
-struct EditorCamera;
+class CCamera;  // ✅ 改用 CCamera
 struct ImVec2;
 struct ID3D11ShaderResourceView;
 class CMainPass;
@@ -13,7 +13,7 @@ namespace Panels {
     void DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass);
     void DrawHierarchy(CScene& scene);
     void DrawInspector(CScene& scene);
-    void DrawViewport(CScene& scene, EditorCamera& editorCam,
+    void DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
         ID3D11ShaderResourceView* srv,
         size_t srcWidth, size_t srcHeight,
         CMainPass* mainPass = nullptr);

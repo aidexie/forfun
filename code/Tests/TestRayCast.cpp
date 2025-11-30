@@ -86,9 +86,10 @@ public:
             // Take screenshot before raycast
             CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
 
-            // Get actual camera matrices from MainPass (don't hardcode!)
-            XMMATRIX viewMatrix = ctx.mainPass->GetCameraViewMatrix();
-            XMMATRIX projMatrix = ctx.mainPass->GetCameraProjMatrix();
+            // ✅ Get actual camera matrices from Scene's editor camera
+            CCamera& editorCam = CScene::Instance().GetEditorCamera();
+            XMMATRIX viewMatrix = editorCam.GetViewMatrix();
+            XMMATRIX projMatrix = editorCam.GetProjectionMatrix();
 
             // Get viewport size from MainPass
             UINT vpWidth = ctx.mainPass->GetOffscreenWidth();

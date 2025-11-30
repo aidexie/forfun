@@ -50,6 +50,8 @@ endif()
 file(GLOB_RECURSE CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
 file(GLOB ENGINE_SRC ${CODE_PATH}/Engine/*.cpp ${CODE_PATH}/Engine/*.h)
 set(EDITOR_SRC
+    ${CODE_PATH}/Editor/EditorContext.h
+    ${CODE_PATH}/Editor/EditorContext.cpp
     ${CODE_PATH}/Editor/Panels.h
     ${CODE_PATH}/Editor/Panels_Dockspace.cpp
     ${CODE_PATH}/Editor/HierarchyPanel.cpp

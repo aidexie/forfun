@@ -29,7 +29,8 @@
 
 #include "Panels.h"   // Panels::DrawDockspace / DrawHierarchy / DrawInspector / DrawViewport
 #include "Scene.h"    // 面板的场景数据结构
-#include "Camera.h"   // EditorCamera（Viewport 面板用）
+#include "Camera.h"   // CCamera（Viewport 面板用）
+#include "EditorContext.h"  // ✅ 编辑器交互管理（相机控制）
 #include "Components/DirectionalLight.h"
 #include "SceneSerializer.h"
 #include "DebugPaths.h"  // Debug output directories
@@ -47,8 +48,8 @@ static CShadowPass g_shadow_pass;
 static bool g_minimized = false;
 static POINT g_last_mouse = { 0, 0 };
 
-// Scene is now a singleton - access via CCScene::Instance()
-static EditorCamera g_editor_cam;
+// ✅ Scene 现在管理 EditorCamera（通过 CScene::Instance().GetEditorCamera()）
+// ✅ EditorContext 现在管理相机交互（通过 CEditorContext::Instance()）
 
 // -----------------------------------------------------------------------------
 // WndProc
@@ -72,11 +73,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_RBUTTONDOWN:
-        g_main_pass.OnRButton(true);
+        CEditorContext::Instance().OnRButton(true);  // ✅ 使用 EditorContext
         SetCapture(hWnd);
         return 0;
     case WM_RBUTTONUP:
-        g_main_pass.OnRButton(false);
+        CEditorContext::Instance().OnRButton(false);  // ✅ 使用 EditorContext
         ReleaseCapture();
         return 0;
     case WM_MOUSEMOVE:
@@ -86,7 +87,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 POINT p{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
                 int dx = p.x - g_last_mouse.x;
                 int dy = p.y - g_last_mouse.y;
-                g_main_pass.OnMouseDelta(dx, dy);
+                // ✅ 使用 EditorContext，传入 Scene 的相机
+                CEditorContext::Instance().OnMouseDelta(dx, dy, CScene::Instance().GetEditorCamera());
                 g_last_mouse = p;
             }
         }
@@ -188,7 +190,12 @@ static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
     if (end == std::wstring::npos) end = cmdLine.length();
 
     std::wstring testNameW = cmdLine.substr(start, end - start);
-    std::string testName(testNameW.begin(), testNameW.end());
+
+    // ✅ 正确的 wstring → string 转换（使用 Windows API）
+    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, testNameW.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string testName(sizeNeeded, 0);
+    WideCharToMultiByte(CP_UTF8, 0, testNameW.c_str(), -1, &testName[0], sizeNeeded, nullptr, nullptr);
+    testName.resize(sizeNeeded - 1); // Remove null terminator
 
     // Remove leading/trailing spaces
     testName.erase(0, testName.find_first_not_of(" \t\n\r"));
@@ -318,7 +325,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     imguiInitialized = true;
     CFFLog::Info("ImGui initialized");
 
-    g_editor_cam.aspect = (float)initW / (float)initH;     // 初始宽高比
+    // ✅ 初始化编辑器相机的宽高比
+    CScene::Instance().GetEditorCamera().aspectRatio = (float)initW / (float)initH;
 
 
     // 5) MainPass and ShadowPass initialization
@@ -401,8 +409,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : CDX11Context::Instance().GetWidth();
         UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : CDX11Context::Instance().GetHeight();
 
-        // Update camera matrices first (needed for tight frustum fitting)
-        g_main_pass.UpdateCamera(vpW, vpH, dt);
+        // ✅ 更新相机（aspect ratio + WASD 移动）
+        CCamera& editorCamera = CScene::Instance().GetEditorCamera();
+        float aspect = (vpH > 0) ? (float)vpW / (float)vpH : 1.0f;
+        editorCamera.aspectRatio = aspect;
+        CEditorContext::Instance().Update(dt, editorCamera);
 
         // Collect DirectionalLight from scene
         SDirectionalLight* dirLight = nullptr;
@@ -415,9 +426,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // Uses tight frustum fitting based on camera frustum
         if (dirLight) {
             CScopedDebugEvent evtShadow(ctx.GetContext(), L"Shadow Pass");
+            // ✅ 从 Scene 获取相机矩阵
             g_shadow_pass.Render(CScene::Instance(), dirLight,
-                              g_main_pass.GetCameraViewMatrix(),
-                              g_main_pass.GetCameraProjMatrix());
+                              editorCamera.GetViewMatrix(),
+                              editorCamera.GetProjectionMatrix());
         }
 
         // Clear debug line buffer at start of frame
@@ -428,7 +440,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // Main Pass (use shadow output bundle)
         {CScopedDebugEvent evtScene(ctx.GetContext(), L"main pass");
-        g_main_pass.Render(CScene::Instance(), vpW, vpH, dt, &g_shadow_pass.GetOutput());
+        // ✅ 传入编辑器相机（MainPass 不知道 Scene 内部有什么相机）
+        g_main_pass.Render(editorCamera, CScene::Instance(), vpW, vpH, dt, &g_shadow_pass.GetOutput());
         }
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
@@ -444,7 +457,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_main_pass); // DockSpace 容器
             Panels::DrawHierarchy(CScene::Instance());            // 层级面板
             Panels::DrawInspector(CScene::Instance());            // 检视面板
-            Panels::DrawViewport(CScene::Instance(), g_editor_cam,
+            // ✅ 传入 Scene 的编辑器相机
+            Panels::DrawViewport(CScene::Instance(), CScene::Instance().GetEditorCamera(),
                 g_main_pass.GetOffscreenSRV(),
                 g_main_pass.GetOffscreenWidth(),
                 g_main_pass.GetOffscreenHeight(),
