@@ -5,7 +5,7 @@
 #include "Engine/Scene.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
-#include "Engine/Rendering/MainPass.h"
+#include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Editor/PickingUtils.h"
 #include <DirectXMath.h>
 #include <sstream>
@@ -84,7 +84,7 @@ public:
             CFFLog::Info("Frame 20: Performing raycast test");
 
             // Take screenshot before raycast
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             // ✅ Get actual camera matrices from Scene's editor camera
             CCamera& editorCam = CScene::Instance().GetEditorCamera();
@@ -92,8 +92,8 @@ public:
             XMMATRIX projMatrix = editorCam.GetProjectionMatrix();
 
             // Get viewport size from MainPass
-            UINT vpWidth = ctx.mainPass->GetOffscreenWidth();
-            UINT vpHeight = ctx.mainPass->GetOffscreenHeight();
+            UINT vpWidth = ctx.pipeline->GetOffscreenWidth();
+            UINT vpHeight = ctx.pipeline->GetOffscreenHeight();
             float screenX = vpWidth / 2.0f;
             float screenY = vpHeight / 2.0f;
 

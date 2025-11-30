@@ -129,7 +129,7 @@ public:
             CFFLog::Info("Frame 20: Capturing screenshot");
 
             // Capture screenshot
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             // Visual expectations (for AI analysis)
             CFFLog::Info("VISUAL_EXPECTATION: Multiple colored lights illuminating cubes in dark scene");

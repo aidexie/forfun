@@ -59,7 +59,7 @@ public:
         // Frame 20: Capture screenshot
         ctx.OnFrame(20, [&ctx]() {
             CFFLog::Info("Frame 20: Capturing screenshot");
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             CFFLog::Info("VISUAL_EXPECTATION: Cube should be BRIGHT WHITE from point light");
             CFFLog::Info("VISUAL_EXPECTATION: Black background (no IBL)");

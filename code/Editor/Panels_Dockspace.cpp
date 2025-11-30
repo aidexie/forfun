@@ -2,7 +2,7 @@
 #include "imgui.h"
 #include "Scene.h"
 #include "SceneSerializer.h"
-#include "Engine/Rendering/MainPass.h"
+#include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Engine/Rendering/IBLGenerator.h"
 #include "Core/FFLog.h"
 #include <windows.h> // For file dialogs
@@ -45,7 +45,7 @@ static std::string SaveFileDialog(const char* filter) {
     return "";
 }
 
-void Panels::DrawDockspace(bool* pOpen, CScene& scene, CMainPass* mainPass) {
+void Panels::DrawDockspace(bool* pOpen, CScene& scene, CForwardRenderPipeline* pipeline) {
     ImGuiWindowFlags winFlags = ImGuiWindowFlags_NoDocking
         | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove

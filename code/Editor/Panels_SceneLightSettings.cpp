@@ -1,14 +1,14 @@
 #include "Panels.h"
 #include "imgui.h"
 #include "Engine/Scene.h"
-#include "Engine/Rendering/MainPass.h"
+#include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Core/FFLog.h"
 #include <windows.h>
 #include <commdlg.h>
 
 static bool s_showWindow = false;  // Default: hidden (user opens via menu)
 
-void Panels::DrawSceneLightSettings(CMainPass* mainPass) {
+void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
     if (!s_showWindow) return;
 
     if (ImGui::Begin("Scene Light Settings", &s_showWindow)) {
@@ -66,7 +66,7 @@ void Panels::DrawSceneLightSettings(CMainPass* mainPass) {
         ImGui::Spacing();
 
         // Clustered Lighting Debug
-        if (mainPass) {
+        if (pipeline) {
             ImGui::Text("Clustered Lighting Debug");
             ImGui::Separator();
 
@@ -74,7 +74,7 @@ void Panels::DrawSceneLightSettings(CMainPass* mainPass) {
             const char* debugModes[] = { "None", "Light Count Heatmap", "Cluster AABB" };
 
             if (ImGui::Combo("Debug Mode", &debugModeIndex, debugModes, IM_ARRAYSIZE(debugModes))) {
-                auto& clusteredPass = mainPass->GetClusteredLightingPass();
+                auto& clusteredPass = pipeline->GetSceneRenderer().GetClusteredLightingPass();
                 switch (debugModeIndex) {
                     case 0: clusteredPass.SetDebugMode(CClusteredLightingPass::EDebugMode::None); break;
                     case 1: clusteredPass.SetDebugMode(CClusteredLightingPass::EDebugMode::LightCountHeatmap); break;

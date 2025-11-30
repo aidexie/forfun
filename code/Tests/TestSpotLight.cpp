@@ -7,7 +7,7 @@
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
 #include "Engine/Components/SpotLight.h"
-#include "Engine/Rendering/MainPass.h"
+#include "Engine/Rendering/ForwardRenderPipeline.h"
 #include <DirectXMath.h>
 
 using namespace DirectX;
@@ -128,7 +128,7 @@ public:
         // Frame 20: Capture screenshot
         ctx.OnFrame(20, [&]() {
             CFFLog::Info("[TestSpotLight:Frame20] Capturing screenshot");
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             // Additional assertion: Verify light data
             auto& world = CScene::Instance().GetWorld();

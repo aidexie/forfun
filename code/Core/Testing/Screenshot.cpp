@@ -1,7 +1,7 @@
 #include "Screenshot.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
-#include "Engine/Rendering/MainPass.h"
+#include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "TestCase.h"
 #include <d3d11.h>
 #include <vector>
@@ -103,31 +103,31 @@ bool CScreenshot::Capture(ID3D11Texture2D* texture, const std::string& path) {
     return true;
 }
 
-bool CScreenshot::CaptureFromMainPass(CMainPass* mainPass, const std::string& path) {
-    if (!mainPass) {
-        CFFLog::Error("Screenshot: Null MainPass");
+bool CScreenshot::CaptureFromPipeline(CForwardRenderPipeline* pipeline, const std::string& path) {
+    if (!pipeline) {
+        CFFLog::Error("Screenshot: Null ForwardRenderPipeline");
         return false;
     }
 
-    ID3D11Texture2D* texture = mainPass->GetOffscreenTexture();
+    ID3D11Texture2D* texture = pipeline->GetOffscreenTexture();
     if (!texture) {
-        CFFLog::Error("Screenshot: MainPass offscreen texture is null");
+        CFFLog::Error("Screenshot: ForwardRenderPipeline offscreen texture is null");
         return false;
     }
 
     return Capture(texture, path);
 }
 
-bool CScreenshot::CaptureTest(CMainPass* mainPass, const std::string& testName, int frame) {
-    if (!mainPass) {
-        CFFLog::Error("Screenshot: Null MainPass");
+bool CScreenshot::CaptureTest(CForwardRenderPipeline* pipeline, const std::string& testName, int frame) {
+    if (!pipeline) {
+        CFFLog::Error("Screenshot: Null ForwardRenderPipeline");
         return false;
     }
 
     // Build path: E:/forfun/debug/{testName}/screenshot_frame{frame}.png
     std::string path = GetTestScreenshotPath(testName.c_str(), frame);
 
-    return CaptureFromMainPass(mainPass, path);
+    return CaptureFromPipeline(pipeline, path);
 }
 
 bool CScreenshot::EnsureDirectoryExists(const std::string& filePath) {

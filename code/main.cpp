@@ -10,8 +10,8 @@
 #include <algorithm>  // For std::transform (fuzzy matching)
 
 #include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
-#include "Engine/Rendering/MainPass.h"  // 主渲染流程
-#include "Engine/Rendering/ShadowPass.h"  // 阴影渲染流程
+#include "Engine/Rendering/ForwardRenderPipeline.h"  // ✅ Forward 渲染流程
+#include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
 #include "Engine/Rendering/DebugRenderSystem.h"  // Debug 几何渲染
 #include "Console.h"
@@ -43,8 +43,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // -----------------------------------------------------------------------------
 static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
 static const wchar_t* kWndTitle = L"ForFunEditor";
-static CMainPass g_main_pass;
-static CShadowPass g_shadow_pass;
+static CForwardRenderPipeline g_pipeline;  // ✅ Forward 渲染 Pipeline
 static bool g_minimized = false;
 static POINT g_last_mouse = { 0, 0 };
 
@@ -258,8 +257,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     bool dx11Initialized = false;
     bool imguiInitialized = false;
     bool sceneInitialized = false;
-    bool mainPassInitialized = false;
-    bool shadowPassInitialized = false;
+    bool pipelineInitialized = false;
 
     Core::Console::InitUTF8();
     ForceWorkDir();
@@ -276,7 +274,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     CTestContext testContext;
     // Setup test if in test mode
     if (activeTest) {
-        testContext.mainPass = &g_main_pass;  // Give test access to MainPass for screenshots
+        testContext.pipeline = &g_pipeline;  // Give test access to ForwardRenderPipeline for screenshots
         testContext.testName = activeTest->GetName();  // Set test name for detailed logging
 
         // Set test-specific runtime log path
@@ -329,24 +327,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     CScene::Instance().GetEditorCamera().aspectRatio = (float)initW / (float)initH;
 
 
-    // 5) MainPass and ShadowPass initialization
-    if (!g_main_pass.Initialize())
+    // 5) ✅ ForwardRenderPipeline initialization
+    if (!g_pipeline.Initialize())
     {
-        CFFLog::Error("Failed to initialize MainPass!");
+        CFFLog::Error("Failed to initialize ForwardRenderPipeline!");
         exitCode = -4;
         goto cleanup;
     }
-    mainPassInitialized = true;
-    CFFLog::Info("MainPass initialized");
-
-    if (!g_shadow_pass.Initialize())
-    {
-        CFFLog::Error("Failed to initialize ShadowPass!");
-        exitCode = -5;
-        goto cleanup;
-    }
-    shadowPassInitialized = true;
-    CFFLog::Info("ShadowPass initialized");
+    pipelineInitialized = true;
+    CFFLog::Info("ForwardRenderPipeline initialized");
 
     if (!activeTest)
     {
@@ -415,33 +404,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         editorCamera.aspectRatio = aspect;
         CEditorContext::Instance().Update(dt, editorCamera);
 
-        // Collect DirectionalLight from scene
-        SDirectionalLight* dirLight = nullptr;
-        for (auto& objPtr : CScene::Instance().GetWorld().Objects()) {
-            dirLight = objPtr->GetComponent<SDirectionalLight>();
-            if (dirLight) break;
-        }
-
-        // Shadow Pass (render shadow map if DirectionalLight exists)
-        // Uses tight frustum fitting based on camera frustum
-        if (dirLight) {
-            CScopedDebugEvent evtShadow(ctx.GetContext(), L"Shadow Pass");
-            // ✅ 从 Scene 获取相机矩阵
-            g_shadow_pass.Render(CScene::Instance(), dirLight,
-                              editorCamera.GetViewMatrix(),
-                              editorCamera.GetProjectionMatrix());
-        }
-
         // Clear debug line buffer at start of frame
-        g_main_pass.GetDebugLinePass().BeginFrame();
+        g_pipeline.GetDebugLinePass().BeginFrame();
 
         // Collect and render debug geometry (AABB, rays, gizmos, etc.)
-        CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_main_pass.GetDebugLinePass());
+        CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
 
-        // Main Pass (use shadow output bundle)
-        {CScopedDebugEvent evtScene(ctx.GetContext(), L"main pass");
-        // ✅ 传入编辑器相机（MainPass 不知道 Scene 内部有什么相机）
-        g_main_pass.Render(editorCamera, CScene::Instance(), vpW, vpH, dt, &g_shadow_pass.GetOutput());
+        // Forward Rendering Pipeline
+        {CScopedDebugEvent evtScene(ctx.GetContext(), L"forward pipeline");
+        // Setup RenderContext for editor viewport
+        CRenderPipeline::RenderContext renderCtx{
+            editorCamera,               // camera
+            CScene::Instance(),         // scene
+            nullptr,                    // outputRTV (pipeline uses internal offscreen targets)
+            nullptr,                    // outputDSV
+            vpW,                        // width
+            vpH,                        // height
+            dt,                         // deltaTime
+            FShowFlags::Editor()        // showFlags (full editor features)
+        };
+        g_pipeline.Render(renderCtx);
         }
 
         ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
@@ -454,18 +436,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // main.cpp  —— 每帧渲染里，渲染完 3D 场景之后，提交 ImGui 之前
         {
             bool dockOpen = true;
-            Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_main_pass); // DockSpace 容器
+            Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_pipeline); // DockSpace 容器
             Panels::DrawHierarchy(CScene::Instance());            // 层级面板
             Panels::DrawInspector(CScene::Instance());            // 检视面板
             // ✅ 传入 Scene 的编辑器相机
             Panels::DrawViewport(CScene::Instance(), CScene::Instance().GetEditorCamera(),
-                g_main_pass.GetOffscreenSRV(),
-                g_main_pass.GetOffscreenWidth(),
-                g_main_pass.GetOffscreenHeight(),
-                &g_main_pass); // 视口面板（使用你已有的离屏示例）
+                g_pipeline.GetOffscreenSRV(),
+                g_pipeline.GetOffscreenWidth(),
+                g_pipeline.GetOffscreenHeight(),
+                &g_pipeline); // 视口面板（使用你已有的离屏示例）
             Panels::DrawIrradianceDebug();   // IBL debug 窗口（包含 Irradiance/PreFiltered/Environment/BRDF LUT 四个 Tab）
             Panels::DrawHDRExportWindow();   // HDR Export 窗口
-            Panels::DrawSceneLightSettings(&g_main_pass);  // Scene Light Settings 窗口
+            Panels::DrawSceneLightSettings(&g_pipeline);  // Scene Light Settings 窗口
             Panels::DrawMaterialEditor();    // Material Editor 窗口
         }
 
@@ -486,14 +468,9 @@ cleanup:
     // 7) 统一清理出口（按初始化相反顺序清理）
     CFFLog::Info("=== Shutting down (exit code: %d) ===", exitCode);
 
-    if (shadowPassInitialized) {
-        CFFLog::Info("Shutting down ShadowPass...");
-        g_shadow_pass.Shutdown();
-    }
-
-    if (mainPassInitialized) {
-        CFFLog::Info("Shutting down MainPass...");
-        g_main_pass.Shutdown();
+    if (pipelineInitialized) {
+        CFFLog::Info("Shutting down ForwardRenderPipeline...");
+        g_pipeline.Shutdown();
     }
 
     if (sceneInitialized) {

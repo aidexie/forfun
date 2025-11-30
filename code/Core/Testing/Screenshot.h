@@ -2,7 +2,7 @@
 #include <string>
 
 struct ID3D11Texture2D;
-class CMainPass;
+class CForwardRenderPipeline;
 
 // Screenshot utilities for automated testing
 // Captures rendered frames to PNG files for AI visual verification
@@ -14,17 +14,17 @@ public:
     // Returns true on success
     static bool Capture(ID3D11Texture2D* texture, const std::string& path);
 
-    // Capture from MainPass offscreen target (convenience wrapper)
-    // mainPass: The main rendering pass
+    // Capture from ForwardRenderPipeline offscreen target (convenience wrapper)
+    // pipeline: The forward rendering pipeline
     // path: Output file path
-    static bool CaptureFromMainPass(CMainPass* mainPass, const std::string& path);
+    static bool CaptureFromPipeline(CForwardRenderPipeline* pipeline, const std::string& path);
 
     // Capture for test cases with automatic naming
-    // mainPass: The main rendering pass
+    // pipeline: The forward rendering pipeline
     // testName: Name of the test (e.g., "TestRayCast")
     // frame: Frame number
     // Saves to: E:/forfun/debug/screenshots/{testName}_frame{frame}.png
-    static bool CaptureTest(CMainPass* mainPass, const std::string& testName, int frame);
+    static bool CaptureTest(CForwardRenderPipeline* pipeline, const std::string& testName, int frame);
 
 private:
     static bool EnsureDirectoryExists(const std::string& path);

@@ -47,7 +47,7 @@ public:
         // Frame 20: Screenshot and verify
         ctx.OnFrame(20, [&ctx]() {
             CFFLog::Info("[TestAlphaBlend:Frame20] Capturing screenshot");
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             CFFLog::Info("VISUAL_EXPECTATION: Face with smooth alpha blending");
             CFFLog::Info("VISUAL_EXPECTATION: Skybox visible through transparent parts");

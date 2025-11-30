@@ -58,7 +58,7 @@ public:
         // Frame 20: Screenshot and verify
         ctx.OnFrame(20, [&ctx]() {
             CFFLog::Info("[TestAlphaTest:Frame20] Capturing screenshot");
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             CFFLog::Info("VISUAL_EXPECTATION: Grass with hard-edged transparency");
             CFFLog::Info("VISUAL_EXPECTATION: No black squares around grass blades");

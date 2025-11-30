@@ -129,8 +129,13 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/DirectionalLight.h
     ${CODE_PATH}/Engine/Components/PointLight.h
     ${CODE_PATH}/Engine/Components/SpotLight.h
-    ${CODE_PATH}/Engine/Rendering/MainPass.h
-    ${CODE_PATH}/Engine/Rendering/MainPass.cpp
+    # ✅ New Rendering Architecture
+    ${CODE_PATH}/Engine/Rendering/ShowFlags.h
+    ${CODE_PATH}/Engine/Rendering/RenderPipeline.h
+    ${CODE_PATH}/Engine/Rendering/SceneRenderer.h
+    ${CODE_PATH}/Engine/Rendering/SceneRenderer.cpp
+    ${CODE_PATH}/Engine/Rendering/ForwardRenderPipeline.h
+    ${CODE_PATH}/Engine/Rendering/ForwardRenderPipeline.cpp
     ${CODE_PATH}/Engine/Rendering/ShadowPass.h
     ${CODE_PATH}/Engine/Rendering/ShadowPass.cpp
     ${CODE_PATH}/Engine/Rendering/Skybox.h

@@ -8,7 +8,7 @@
 // Forward declarations
 class CScene;
 class CTestContext;
-class CMainPass;
+class CForwardRenderPipeline;
 
 // Assertion macros (fail-fast: return immediately on failure)
 #define ASSERT(ctx, condition, message) \
@@ -52,7 +52,7 @@ public:
     int currentFrame = 0;       // Current frame number
     bool testPassed = false;    // Test result
     const char* testName = nullptr;  // Test name for detailed logging
-    CMainPass* mainPass = nullptr;  // Access to rendering for screenshots
+    CForwardRenderPipeline* pipeline = nullptr;  // Access to rendering for screenshots
     std::vector<std::string> failures;  // Collected failures
 
     // Register a callback for a specific frame

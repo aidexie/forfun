@@ -120,7 +120,7 @@ public:
             CFFLog::Info("Frame 20: Capturing screenshot and final verification");
 
             // Take screenshot
-            CScreenshot::CaptureTest(ctx.mainPass, ctx.testName, 20);
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
 
             // Visual expectations
             CFFLog::Info("VISUAL_EXPECTATION: White cube should be visible on the left");

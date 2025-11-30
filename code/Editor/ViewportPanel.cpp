@@ -8,7 +8,7 @@
 #include "GameObject.h"
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
-#include "Rendering/MainPass.h"
+#include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Rendering/GridPass.h"
 #include "PickingUtils.h"
 #include "Core/FFLog.h"
@@ -37,7 +37,7 @@ ImVec2 Panels::GetViewportLastSize() {
 void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
     ID3D11ShaderResourceView* srv,
     size_t srcWidth, size_t srcHeight,
-    CMainPass* mainPass)
+    CForwardRenderPipeline* pipeline)
 {
     ImGui::Begin("Viewport");
 
@@ -161,7 +161,7 @@ void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCam
     // ============================================
     // Custom View Orientation Gizmo (Top-Right Corner)
     // ============================================
-    if (mainPass) {
+    if (pipeline) {
         // Gizmo properties
         const float gizmoSize = 120.0f;
         const ImVec2 gizmoPos(imagePos.x + avail.x - gizmoSize - 15, imagePos.y + 15);
@@ -270,7 +270,7 @@ void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCam
     // ============================================
     // Transform Gizmo (ImGuizmo)
     // ============================================
-    if (mainPass) {
+    if (pipeline) {
         CGameObject* selectedObj = scene.GetSelectedObject();
 
         // Enable/disable gizmo based on selection
@@ -371,7 +371,7 @@ void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCam
         ImGui::IsItemHovered() &&
         !ImGuizmo::IsUsing() &&
         !ImGui::IsAnyItemActive() &&
-        mainPass)
+        pipeline)
     {
         // Get mouse position relative to viewport image
         ImVec2 mousePos = ImGui::GetMousePos();
