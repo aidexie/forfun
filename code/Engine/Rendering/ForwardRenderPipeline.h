@@ -16,8 +16,8 @@
 // 渲染顺序：
 // 1. Shadow Pass (if showFlags.Shadows)
 // 2. Scene Rendering (Opaque + Transparent + Skybox) → HDR RT
-// 3. Debug Lines (if showFlags.DebugLines)
-// 4. Post-Processing (if showFlags.PostProcessing) → LDR RT
+// 3. Post-Processing (if showFlags.PostProcessing) → LDR RT
+// 4. Debug Lines (if showFlags.DebugLines) → LDR RT
 // 5. Grid (if showFlags.Grid) → LDR RT
 //
 // 使用场景：

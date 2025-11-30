@@ -110,17 +110,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 5. Debug Lines (if enabled)
-    // ============================================
-    if (ctx.showFlags.DebugLines) {
-        CScopedDebugEvent evt(d3dCtx, L"Debug Lines");
-        m_debugLinePass.Render(ctx.camera.GetViewMatrix(),
-                              ctx.camera.GetProjectionMatrix(),
-                              ctx.width, ctx.height);
-    }
-
-    // ============================================
-    // 6. Post-Processing (HDR → LDR)
+    // 5. Post-Processing (HDR → LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(d3dCtx, L"Post-Processing");
@@ -132,6 +122,18 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
         // For now, still apply tone mapping (otherwise output is HDR)
         m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(),
                            ctx.width, ctx.height, 1.0f);
+    }
+
+    // ============================================
+    // 6. Debug Lines (if enabled)
+    // ============================================
+    if (ctx.showFlags.DebugLines) {
+        CScopedDebugEvent evt(d3dCtx, L"Debug Lines");
+        // Rebind LDR RTV + HDR depth (Debug lines need depth test)
+        d3dCtx->OMSetRenderTargets(1, m_offLDR.rtv.GetAddressOf(), m_off.dsv.Get());
+        m_debugLinePass.Render(ctx.camera.GetViewMatrix(),
+                              ctx.camera.GetProjectionMatrix(),
+                              ctx.width, ctx.height);
     }
 
     // ============================================
