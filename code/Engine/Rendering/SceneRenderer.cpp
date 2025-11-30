@@ -56,6 +56,40 @@ std::string LoadShaderSource(const std::string& filepath) {
     return buffer.str();
 }
 
+// Custom include handler for D3DCompile
+class CShaderIncludeHandler : public ID3DInclude {
+public:
+    HRESULT __stdcall Open(D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName,
+                          LPCVOID pParentData, LPCVOID* ppData, UINT* pBytes) override {
+        // Build full path relative to Shader directory
+        std::string fullPath = std::string("../source/code/Shader/") + pFileName;
+
+        std::ifstream file(fullPath, std::ios::binary);
+        if (!file.is_open()) {
+            CFFLog::Error("Failed to open include file: %s (tried path: %s)", pFileName, fullPath.c_str());
+            return E_FAIL;
+        }
+
+        // Read file content
+        file.seekg(0, std::ios::end);
+        size_t size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        char* buffer = new char[size];
+        file.read(buffer, size);
+
+        *ppData = buffer;
+        *pBytes = static_cast<UINT>(size);
+
+        return S_OK;
+    }
+
+    HRESULT __stdcall Close(LPCVOID pData) override {
+        delete[] static_cast<const char*>(pData);
+        return S_OK;
+    }
+};
+
 // Constant Buffer 结构
 struct alignas(16) CB_Frame {
     XMMATRIX view;
@@ -499,9 +533,10 @@ void CSceneRenderer::createPipeline()
 #endif
 
     ComPtr<ID3DBlob> vsBlob, psBlob, err;
+    CShaderIncludeHandler includeHandler;
 
     HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "MainPass.vs.hlsl", nullptr,
-                           D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "vs_5_0",
+                           &includeHandler, "main", "vs_5_0",
                            compileFlags, 0, &vsBlob, &err);
     if (FAILED(hr)) {
         if (err) CFFLog::Error("VS Error: %s", (const char*)err->GetBufferPointer());
@@ -509,7 +544,7 @@ void CSceneRenderer::createPipeline()
     }
 
     hr = D3DCompile(psSource.c_str(), psSource.size(), "MainPass.ps.hlsl", nullptr,
-                   D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", "ps_5_0",
+                   &includeHandler, "main", "ps_5_0",
                    compileFlags, 0, &psBlob, &err);
     if (FAILED(hr)) {
         if (err) CFFLog::Error("PS Error: %s", (const char*)err->GetBufferPointer());
