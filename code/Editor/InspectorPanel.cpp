@@ -9,6 +9,9 @@
 #include "Components/DirectionalLight.h"
 #include "Components/PointLight.h"
 #include "Components/SpotLight.h"
+#include "Components/ReflectionProbe.h"
+#include "Rendering/ReflectionProbeBaker.h"
+#include "Core/FFLog.h"
 #include <string>
 #include <windows.h>
 #include <commdlg.h>
@@ -266,6 +269,63 @@ void Panels::DrawInspector(CScene& scene) {
         } else {
             if (ImGui::Button("Add SpotLight")) {
                 sel->AddComponent<SSpotLight>();
+            }
+        }
+
+        // ReflectionProbe component
+        if (auto* rp = sel->GetComponent<SReflectionProbe>()) {
+            if (ImGui::CollapsingHeader("ReflectionProbe", ImGuiTreeNodeFlags_DefaultOpen)) {
+                rp->VisitProperties(visitor);
+
+                ImGui::Separator();
+
+                // Bake Now button
+                if (ImGui::Button("Bake Now", ImVec2(-1, 0))) {
+                    // Get probe position from Transform
+                    auto* tr = sel->GetComponent<STransform>();
+                    if (!tr) {
+                        CFFLog::Error("ReflectionProbe requires Transform component");
+                    } else if (rp->assetPath.empty()) {
+                        CFFLog::Error("ReflectionProbe assetPath is empty. Please set an asset path first.");
+                    } else {
+                        // Create baker
+                        static CReflectionProbeBaker baker;
+                        if (!baker.Initialize()) {
+                            CFFLog::Error("Failed to initialize ReflectionProbeBaker");
+                        } else {
+                            // Bake the probe
+                            CFFLog::Info("Baking Reflection Probe...");
+                            bool success = baker.BakeProbe(
+                                tr->position,
+                                rp->resolution,
+                                scene,
+                                rp->assetPath
+                            );
+
+                            if (success) {
+                                CFFLog::Info("Reflection Probe baked successfully!");
+                                rp->isDirty = false;
+                            } else {
+                                CFFLog::Error("Failed to bake Reflection Probe");
+                            }
+                        }
+                    }
+                }
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Bake reflection probe cubemap and IBL maps");
+                }
+
+                // Show dirty status
+                if (rp->isDirty) {
+                    ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "Status: Needs Rebake");
+                } else {
+                    ImGui::TextColored(ImVec4(0, 1, 0, 1), "Status: Up to Date");
+                }
+            }
+        } else {
+            if (ImGui::Button("Add ReflectionProbe")) {
+                sel->AddComponent<SReflectionProbe>();
             }
         }
 
