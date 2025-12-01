@@ -5,25 +5,66 @@
 using namespace DirectX;
 
 // ============================================
-// 内部辅助函数：根据 yaw/pitch 计算前向向量
+// 构造函数
 // ============================================
-XMVECTOR CCamera::CalculateForwardVector(float yaw, float pitch) {
-    float cy = cosf(yaw);
-    float sy = sinf(yaw);
-    float cp = cosf(pitch);
-    float sp = sinf(pitch);
+CCamera::CCamera() {
+    // 从默认 yaw/pitch 初始化 quaternion
+    UpdateQuaternionFromYawPitch();
+}
 
-    // 左手坐标系：+X=Right, +Y=Up, +Z=Forward
-    return XMVector3Normalize(XMVectorSet(cy * cp, sp, sy * cp, 0));
+// ============================================
+// 内部辅助函数：yaw/pitch → quaternion
+// ============================================
+void CCamera::UpdateQuaternionFromYawPitch() {
+    // 从 yaw/pitch 构建 Quaternion（roll = 0）
+    // 左手坐标系：Yaw (Y 轴), Pitch (X 轴), Roll (Z 轴)
+    XMVECTOR quat = XMQuaternionRotationRollPitchYaw(pitch, yaw, 0.0f);
+    XMStoreFloat4(&m_rotation, quat);
+}
+
+// ============================================
+// 内部辅助函数：quaternion → yaw/pitch（近似）
+// ============================================
+void CCamera::UpdateYawPitchFromQuaternion() {
+    // 从 Quaternion 提取 yaw/pitch（用于编辑器显示）
+    XMVECTOR quat = XMLoadFloat4(&m_rotation);
+
+    // 提取 forward 向量
+    XMVECTOR forward = XMVector3Rotate(XMVectorSet(0, 0, 1, 0), quat);
+    XMFLOAT3 fwd;
+    XMStoreFloat3(&fwd, forward);
+
+    // 反推 yaw/pitch
+    pitch = asinf(fwd.y);
+    yaw = atan2f(fwd.z, fwd.x);
 }
 
 // ============================================
 // 矩阵计算
 // ============================================
 XMMATRIX CCamera::GetViewMatrix() const {
-    XMVECTOR forward = CalculateForwardVector(yaw, pitch);
-    XMVECTOR up = XMVectorSet(0, 1, 0, 0);
-    return XMMatrixLookToLH(XMLoadFloat3(&position), forward, up);
+    XMVECTOR pos = XMLoadFloat3(&position);
+
+    if (m_useQuaternion) {
+        // 使用 Quaternion（精确，无万向锁）
+        XMVECTOR quat = XMLoadFloat4(&m_rotation);
+        XMMATRIX rotMatrix = XMMatrixRotationQuaternion(quat);
+        XMMATRIX transMatrix = XMMatrixTranslationFromVector(pos);
+
+        // View Matrix = Inverse(Rotation * Translation)
+        return XMMatrixInverse(nullptr, rotMatrix * transMatrix);
+    } else {
+        // 使用 yaw/pitch（兼容旧代码，但有万向锁）
+        float cy = cosf(yaw);
+        float sy = sinf(yaw);
+        float cp = cosf(pitch);
+        float sp = sinf(pitch);
+
+        XMVECTOR forward = XMVector3Normalize(XMVectorSet(cy * cp, sp, sy * cp, 0));
+        XMVECTOR up = XMVectorSet(0, 1, 0, 0);
+
+        return XMMatrixLookToLH(pos, forward, up);
+    }
 }
 
 XMMATRIX CCamera::GetProjectionMatrix() const {
@@ -35,52 +76,71 @@ XMMATRIX CCamera::GetViewProjectionMatrix() const {
 }
 
 // ============================================
-// SetLookAt - 设置相机看向目标点
+// SetLookAt - 设置相机看向目标点（完美支持任意 up 向量）
 // ============================================
 void CCamera::SetLookAt(const XMFLOAT3& eye, const XMFLOAT3& target, const XMFLOAT3& up) {
     position = eye;
 
-    // 计算方向向量
-    XMVECTOR direction = XMVector3Normalize(
-        XMLoadFloat3(&target) - XMLoadFloat3(&eye)
+    // 构建 View Matrix
+    XMMATRIX viewMatrix = XMMatrixLookAtLH(
+        XMLoadFloat3(&eye),
+        XMLoadFloat3(&target),
+        XMLoadFloat3(&up)
     );
 
-    // 从方向向量反推 yaw 和 pitch
-    XMFLOAT3 dir;
-    XMStoreFloat3(&dir, direction);
+    // 提取 Rotation（View Matrix 的逆）
+    XMMATRIX worldMatrix = XMMatrixInverse(nullptr, viewMatrix);
+    XMVECTOR scale, rotQuat, trans;
+    XMMatrixDecompose(&scale, &rotQuat, &trans, worldMatrix);
 
-    pitch = asinf(dir.y);
-    yaw = atan2f(dir.z, dir.x);
+    // 存储 Quaternion
+    XMStoreFloat4(&m_rotation, rotQuat);
+    m_useQuaternion = true;
+
+    // 同时更新 yaw/pitch（用于编辑器显示，但不精确）
+    UpdateYawPitchFromQuaternion();
 }
 
 // ============================================
-// 获取相机方向向量
+// SetYawPitch - 设置 yaw/pitch（编辑器相机控制）
+// ============================================
+void CCamera::SetYawPitch(float newYaw, float newPitch) {
+    yaw = newYaw;
+    pitch = newPitch;
+
+    // 更新内部 Quaternion
+    UpdateQuaternionFromYawPitch();
+    m_useQuaternion = false;  // 使用 yaw/pitch 模式（编辑器相机）
+}
+
+// ============================================
+// 获取相机方向向量（从 Quaternion 提取）
 // ============================================
 XMFLOAT3 CCamera::GetForward() const {
-    XMFLOAT3 forward;
-    XMStoreFloat3(&forward, CalculateForwardVector(yaw, pitch));
-    return forward;
+    XMVECTOR quat = XMLoadFloat4(&m_rotation);
+    XMVECTOR forward = XMVector3Rotate(XMVectorSet(0, 0, 1, 0), quat);  // +Z = Forward
+
+    XMFLOAT3 result;
+    XMStoreFloat3(&result, forward);
+    return result;
 }
 
 XMFLOAT3 CCamera::GetRight() const {
-    XMVECTOR forward = CalculateForwardVector(yaw, pitch);
-    XMVECTOR up = XMVectorSet(0, 1, 0, 0);
-    XMVECTOR right = XMVector3Normalize(XMVector3Cross(up, forward));
+    XMVECTOR quat = XMLoadFloat4(&m_rotation);
+    XMVECTOR right = XMVector3Rotate(XMVectorSet(1, 0, 0, 0), quat);  // +X = Right
 
-    XMFLOAT3 rightVec;
-    XMStoreFloat3(&rightVec, right);
-    return rightVec;
+    XMFLOAT3 result;
+    XMStoreFloat3(&result, right);
+    return result;
 }
 
 XMFLOAT3 CCamera::GetUp() const {
-    XMVECTOR forward = CalculateForwardVector(yaw, pitch);
-    XMVECTOR up = XMVectorSet(0, 1, 0, 0);
-    XMVECTOR right = XMVector3Cross(up, forward);
-    XMVECTOR cameraUp = XMVector3Normalize(XMVector3Cross(forward, right));
+    XMVECTOR quat = XMLoadFloat4(&m_rotation);
+    XMVECTOR up = XMVector3Rotate(XMVectorSet(0, 1, 0, 0), quat);  // +Y = Up
 
-    XMFLOAT3 upVec;
-    XMStoreFloat3(&upVec, cameraUp);
-    return upVec;
+    XMFLOAT3 result;
+    XMStoreFloat3(&result, up);
+    return result;
 }
 
 // ============================================
@@ -105,12 +165,16 @@ void CCamera::MoveUp(float distance) {
 }
 
 void CCamera::Rotate(float deltaYaw, float deltaPitch) {
-    const float pitchLimit = 1.5533f;  // ~89° (避免万向锁)
+    const float pitchLimit = 1.5533f;  // ~89° (避免视觉上的万向锁)
 
     yaw += deltaYaw;
     pitch += deltaPitch;
 
-    // 限制 pitch 范围
+    // 限制 pitch 范围（避免翻转）
     if (pitch > pitchLimit) pitch = pitchLimit;
     if (pitch < -pitchLimit) pitch = -pitchLimit;
+
+    // 更新内部 Quaternion
+    UpdateQuaternionFromYawPitch();
+    m_useQuaternion = false;  // 编辑器相机模式
 }
