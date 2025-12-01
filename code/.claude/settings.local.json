@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(for file in Panels_Dockspace.cpp Panels_SceneLightSettings.cpp ViewportPanel.cpp)",
-      "Bash(do sed -i 's/\\bmainPass\\b/pipeline/g' \"$file\")"
+      "Bash(do sed -i 's/\\bmainPass\\b/pipeline/g' \"$file\")",
+      "Bash(cmake --build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

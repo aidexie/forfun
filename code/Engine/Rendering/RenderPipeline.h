@@ -36,10 +36,6 @@ public:
         // Scene (required)
         CScene& scene;          // 要渲染的场景
 
-        // Output Targets (required)
-        ID3D11RenderTargetView* outputRTV;  // 输出 RenderTarget
-        ID3D11DepthStencilView* outputDSV;  // 输出 DepthStencil
-
         // Viewport Size (required)
         unsigned int width;     // 渲染分辨率宽度
         unsigned int height;    // 渲染分辨率高度
@@ -49,6 +45,21 @@ public:
 
         // Rendering Control (required)
         FShowFlags showFlags;   // 控制渲染哪些内容
+
+        // ============================================
+        // Final Output (optional)
+        // ============================================
+        // 如果非空，Pipeline 会在渲染结束后将结果复制到这里
+        // 如果为空，使用 Pipeline 的 GetOffscreenSRV() 获取结果
+        ID3D11RenderTargetView* finalOutputRTV = nullptr;
+
+        // 指定需要哪种输出格式
+        enum class EOutputFormat
+        {
+            LDR,  // Tone-mapped sRGB (用于屏幕显示)
+            HDR   // Linear HDR (用于 Reflection Probe, IBL 等)
+        };
+        EOutputFormat outputFormat = EOutputFormat::LDR;
     };
 
     virtual ~CRenderPipeline() = default;
@@ -61,8 +72,8 @@ public:
     // 典型的渲染流程：
     // 1. Shadow Pass (if showFlags.Shadows)
     // 2. Scene Rendering (Opaque + Transparent + Skybox)
-    // 3. Debug Rendering (if showFlags.DebugLines)
-    // 4. Post-Processing (if showFlags.PostProcessing)
+    // 3. Post-Processing (if showFlags.PostProcessing)
+    // 4. Debug Rendering (if showFlags.DebugLines)
     // 5. Editor Tools (Grid, Gizmos, etc.)
     virtual void Render(const RenderContext& ctx) = 0;
 

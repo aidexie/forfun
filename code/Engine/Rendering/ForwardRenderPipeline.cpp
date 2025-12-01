@@ -116,13 +116,8 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
         CScopedDebugEvent evt(d3dCtx, L"Post-Processing");
         m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(),
                            ctx.width, ctx.height, 1.0f);
-    } else {
-        // No post-processing: copy HDR to LDR directly
-        // TODO: Implement simple copy if needed
-        // For now, still apply tone mapping (otherwise output is HDR)
-        m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(),
-                           ctx.width, ctx.height, 1.0f);
     }
+    // Note: If PostProcessing is disabled, we skip this step and use HDR directly
 
     // ============================================
     // 6. Debug Lines (if enabled)
@@ -150,12 +145,74 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 8. Copy final result to output RTV (if different)
+    // 8. Copy final result to finalOutputRTV (if provided)
     // ============================================
-    if (ctx.outputRTV != m_offLDR.rtv.Get()) {
-        // Copy m_offLDR to ctx.outputRTV
-        // TODO: Implement copy if needed
-        // For now, assume caller uses GetOffscreenSRV() for display
+    if (ctx.finalOutputRTV) {
+        // Unbind all render targets before copy operations
+        // D3D11 doesn't allow a texture to be bound as RTV and used as copy source
+        ID3D11RenderTargetView* nullRTV = nullptr;
+        ID3D11DepthStencilView* nullDSV = nullptr;
+        d3dCtx->OMSetRenderTargets(1, &nullRTV, nullDSV);
+
+        // Choose source based on outputFormat
+        ID3D11Texture2D* sourceTexture;
+        if (ctx.outputFormat == RenderContext::EOutputFormat::HDR) {
+            sourceTexture = m_off.color.Get();      // HDR linear (R16G16B16A16_FLOAT)
+        } else {
+            sourceTexture = m_offLDR.color.Get();   // LDR sRGB (R8G8B8A8_UNORM_SRGB)
+        }
+
+        // Get destination resource from RTV
+        ID3D11Resource* dstResource = nullptr;
+        ctx.finalOutputRTV->GetResource(&dstResource);
+
+        if (dstResource) {
+            // Get descriptors to check compatibility
+            D3D11_TEXTURE2D_DESC srcDesc, dstDesc;
+            sourceTexture->GetDesc(&srcDesc);
+            ((ID3D11Texture2D*)dstResource)->GetDesc(&dstDesc);
+
+            // Check if we can use CopyResource (requires identical dimensions)
+            bool canUseCopyResource =
+                (srcDesc.Width == dstDesc.Width) &&
+                (srcDesc.Height == dstDesc.Height) &&
+                (srcDesc.ArraySize == dstDesc.ArraySize) &&
+                (srcDesc.MipLevels == dstDesc.MipLevels) &&
+                (srcDesc.Format == dstDesc.Format);
+
+            if (canUseCopyResource) {
+                // Full resource copy (fastest)
+                d3dCtx->CopyResource(dstResource, sourceTexture);
+            } else {
+                // Copy single subresource (e.g., 2D -> Cubemap face)
+                // Assume: src is 2D (array=1, mip=0), dst is array texture (e.g., cubemap face)
+                UINT dstSubresource = 0;  // Will be overridden if dst is array texture
+
+                // If destination is array texture (like cubemap), we need to get the correct subresource
+                // The RTV descriptor tells us which array slice to write to
+                D3D11_RENDER_TARGET_VIEW_DESC rtvDesc;
+                ctx.finalOutputRTV->GetDesc(&rtvDesc);
+
+                if (rtvDesc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY) {
+                    // Destination is an array texture (e.g., cubemap face)
+                    UINT arraySlice = rtvDesc.Texture2DArray.FirstArraySlice;
+                    UINT mipSlice = rtvDesc.Texture2DArray.MipSlice;
+                    dstSubresource = D3D11CalcSubresource(mipSlice, arraySlice, dstDesc.MipLevels);
+                }
+
+                // Copy entire source to destination subresource
+                d3dCtx->CopySubresourceRegion(
+                    dstResource,       // dst
+                    dstSubresource,    // dst subresource
+                    0, 0, 0,          // dst x, y, z
+                    sourceTexture,     // src
+                    0,                // src subresource (mip 0, array 0)
+                    nullptr           // copy entire src (null = full region)
+                );
+            }
+
+            dstResource->Release();
+        }
     }
 }
 

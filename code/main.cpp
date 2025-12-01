@@ -14,6 +14,7 @@
 #include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
 #include "Engine/Rendering/DebugRenderSystem.h"  // Debug 几何渲染
+#include "Core/RenderDocCapture.h"  // RenderDoc API
 #include "Console.h"
 
 // Test framework
@@ -262,6 +263,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     Core::Console::InitUTF8();
     ForceWorkDir();
 
+    // Initialize RenderDoc API (if RenderDoc is attached)
+    CRenderDocCapture::Initialize();
+
     // Check for --list-tests command
     std::wstring cmdLine(lpCmdLine);
     if (cmdLine.find(L"--list-tests") != std::wstring::npos) {
@@ -416,12 +420,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         CRenderPipeline::RenderContext renderCtx{
             editorCamera,               // camera
             CScene::Instance(),         // scene
-            nullptr,                    // outputRTV (pipeline uses internal offscreen targets)
-            nullptr,                    // outputDSV
             vpW,                        // width
             vpH,                        // height
             dt,                         // deltaTime
             FShowFlags::Editor()        // showFlags (full editor features)
+            // finalOutputRTV = nullptr (use pipeline's internal buffers)
+            // outputFormat = LDR (default, for editor display)
         };
         g_pipeline.Render(renderCtx);
         }

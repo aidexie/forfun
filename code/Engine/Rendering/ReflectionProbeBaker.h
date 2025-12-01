@@ -144,18 +144,6 @@ private:
     // 返回: 成功返回 true，失败返回 false
     bool createCubemapRenderTarget(int resolution);
 
-    // 获取 Cubemap face 的视图矩阵和上向量
-    // face: Face 索引
-    // position: Probe 位置
-    // outView: 输出的视图矩阵
-    // outProj: 输出的投影矩阵
-    void getCubemapFaceMatrices(
-        int face,
-        const DirectX::XMFLOAT3& position,
-        DirectX::XMMATRIX& outView,
-        DirectX::XMMATRIX& outProj
-    );
-
     // ============================================
     // Members
     // ============================================

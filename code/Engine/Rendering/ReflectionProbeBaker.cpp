@@ -6,6 +6,7 @@
 #include "Core/FFLog.h"
 #include "Core/ReflectionProbeAsset.h"
 #include "Core/Exporter/KTXExporter.h"
+#include "Core/RenderDocCapture.h"
 #include "Engine/Scene.h"
 #include "Engine/Camera.h"
 #include <filesystem>
@@ -14,63 +15,55 @@ using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
 // ============================================
-// Helper: Compute cubemap face view/projection matrices
+// Helper: Setup camera for cubemap face rendering
 // ============================================
-static void ComputeCubemapFaceMatrices(
-    int face,
-    const XMFLOAT3& position,
-    XMMATRIX& outView,
-    XMMATRIX& outProj)
+// 设置相机的 yaw/pitch 来朝向指定的 cubemap face
+// DirectX 左手坐标系：+X=Right, +Y=Up, +Z=Forward
+static void SetupCameraForCubemapFace(CCamera& camera, int face, const XMFLOAT3& position)
 {
-    XMVECTOR pos = XMLoadFloat3(&position);
+    using namespace DirectX;
 
-    // Cubemap face directions (DirectX left-handed)
-    // face: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
-    XMVECTOR targets[6] = {
-        XMVectorSet( 1.0f,  0.0f,  0.0f, 0.0f),  // +X (Right)
-        XMVectorSet(-1.0f,  0.0f,  0.0f, 0.0f),  // -X (Left)
-        XMVectorSet( 0.0f,  1.0f,  0.0f, 0.0f),  // +Y (Up)
-        XMVectorSet( 0.0f, -1.0f,  0.0f, 0.0f),  // -Y (Down)
-        XMVectorSet( 0.0f,  0.0f,  1.0f, 0.0f),  // +Z (Forward)
-        XMVectorSet( 0.0f,  0.0f, -1.0f, 0.0f),  // -Z (Back)
-    };
+    camera.position = position;
 
-    XMVECTOR ups[6] = {
-        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f),  // +X
-        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f),  // -X
-        XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f),  // +Y (looking down, up is -Z)
-        XMVectorSet(0.0f, 0.0f,  1.0f, 0.0f),  // -Y (looking up, up is +Z)
-        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f),  // +Z
-        XMVectorSet(0.0f, 1.0f,  0.0f, 0.0f),  // -Z
-    };
+    // 设置 FOV 为 90 度（覆盖整个 cubemap face）
+    camera.fovY = XM_PIDIV2;         // 90 度
+    camera.aspectRatio = 1.0f;       // 1:1 方形
+    camera.nearZ = 0.3f;
+    camera.farZ = 1000.0f;
 
-    XMVECTOR target = pos + targets[face];
-    XMVECTOR up = ups[face];
+    // 为每个 cubemap face 设置 LookAt
+    // DirectX Cubemap 标准约定
+    XMFLOAT3 target, up;
 
-    outView = XMMatrixLookAtLH(pos, target, up);
-    outProj = XMMatrixPerspectiveFovLH(XM_PIDIV2, 1.0f, 0.3f, 1000.0f);  // 90° FOV, 1:1 aspect
-}
-
-// ============================================
-// CCubemapFaceCamera - Internal helper class
-// ============================================
-// Specialized camera for rendering cubemap faces
-// Overrides GetViewMatrix() and GetProjectionMatrix() to use precomputed matrices
-class CCubemapFaceCamera : public CCamera
-{
-public:
-    CCubemapFaceCamera(int face, const XMFLOAT3& position)
-    {
-        ComputeCubemapFaceMatrices(face, position, m_viewMatrix, m_projMatrix);
+    switch (face) {
+    case 0: // +X (Right)
+        target = XMFLOAT3(position.x + 1.0f, position.y, position.z);
+        up = XMFLOAT3(0, 1, 0);
+        break;
+    case 1: // -X (Left)
+        target = XMFLOAT3(position.x - 1.0f, position.y, position.z);
+        up = XMFLOAT3(0, 1, 0);
+        break;
+    case 2: // +Y (Up)
+        target = XMFLOAT3(position.x, position.y + 1.0f, position.z);
+        up = XMFLOAT3(0, 0, -1);   // ⚠️ 特殊：朝上看时，up 指向 +Z
+        break;
+    case 3: // -Y (Down)
+        target = XMFLOAT3(position.x, position.y - 1.0f, position.z);
+        up = XMFLOAT3(0, 0, 1);  // ⚠️ 特殊：朝下看时，up 指向 -Z
+        break;
+    case 4: // +Z (Forward)
+        target = XMFLOAT3(position.x, position.y, position.z + 1.0f);
+        up = XMFLOAT3(0, 1, 0);
+        break;
+    case 5: // -Z (Back)
+        target = XMFLOAT3(position.x, position.y, position.z - 1.0f);
+        up = XMFLOAT3(0, 1, 0);
+        break;
     }
 
-    XMMATRIX GetViewMatrix() const { return m_viewMatrix; }
-    XMMATRIX GetProjectionMatrix() const { return m_projMatrix; }
-
-private:
-    XMMATRIX m_viewMatrix;
-    XMMATRIX m_projMatrix;
-};
+    camera.SetLookAt(position, target, up);
+}
 
 CReflectionProbeBaker::CReflectionProbeBaker()
     : m_pipeline(nullptr)
@@ -254,6 +247,14 @@ void CReflectionProbeBaker::renderToCubemap(
 {
     auto device = CDX11Context::Instance().GetDevice();
 
+    // RenderDoc 捕获：自动捕获第一个面的渲染
+    // 这样你可以在 RenderDoc 中查看烘焙时的渲染状态
+    static bool s_captureFirstFace = true;
+    if (s_captureFirstFace) {
+        CRenderDocCapture::BeginFrameCapture();
+        s_captureFirstFace = false;  // 只捕获一次
+    }
+
     // Create depth stencil view (shared for all faces)
     ComPtr<ID3D11DepthStencilView> dsv;
     D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
@@ -288,6 +289,19 @@ void CReflectionProbeBaker::renderToCubemap(
         renderCubemapFace(face, position, resolution, scene, faceRTV.Get(), dsv.Get());
     }
 
+    // 解绑所有 render targets 和 depth stencil（确保 GPU 写入完成）
+    auto context = CDX11Context::Instance().GetContext();
+    // ID3D11RenderTargetView* nullRTV = nullptr;
+    // ID3D11DepthStencilView* nullDSV = nullptr;
+    // ctx->OMSetRenderTargets(1, &nullRTV, nullDSV);
+
+    ID3D11RenderTargetView* nullRTV = nullptr;
+    context->OMSetRenderTargets(1, &nullRTV, nullptr);
+    ID3D11ShaderResourceView* nullSRV = nullptr;
+    context->PSSetShaderResources(0, 1, &nullSRV);
+    // 在所有 6 个面渲染完成后结束 RenderDoc 捕获
+    CRenderDocCapture::EndFrameCapture();
+
     CFFLog::Info("Rendered all 6 cubemap faces");
 }
 
@@ -306,20 +320,23 @@ void CReflectionProbeBaker::renderCubemapFace(
     ctx->ClearRenderTargetView(faceRTV, clearColor);
     ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
-    // Create a CCubemapFaceCamera for this face
-    CCubemapFaceCamera faceCamera(face, position);
+    // Setup camera for this cubemap face
+    CCamera faceCamera;
+    SetupCameraForCubemapFace(faceCamera, face, position);
 
     // Setup RenderContext for this face
     CRenderPipeline::RenderContext renderCtx{
-        faceCamera,
-        scene,
-        faceRTV,
-        dsv,
-        static_cast<unsigned int>(resolution),
-        static_cast<unsigned int>(resolution),
-        0.0f,  // deltaTime not needed for baking
-        FShowFlags::ReflectionProbe()
+        faceCamera,                                     // camera
+        scene,                                          // scene
+        static_cast<unsigned int>(resolution),          // width
+        static_cast<unsigned int>(resolution),          // height
+        0.0f,                                          // deltaTime (not needed for baking)
+        FShowFlags::ReflectionProbe()                   // showFlags
     };
+
+    // Configure output: copy HDR result to this cubemap face
+    renderCtx.finalOutputRTV = faceRTV;
+    renderCtx.outputFormat = CRenderPipeline::RenderContext::EOutputFormat::HDR;
 
     // Render using the pipeline
     m_pipeline->Render(renderCtx);
@@ -404,7 +421,7 @@ bool CReflectionProbeBaker::saveCubemapAsKTX2(
 }
 
 bool CReflectionProbeBaker::createAssetFile(
-    const std::string& assetPath,
+    const std::string& fullAssetPath,
     int resolution)
 {
     // 创建 ReflectionProbeAsset
@@ -414,18 +431,8 @@ bool CReflectionProbeBaker::createAssetFile(
     asset.m_irradianceMap = "irradiance.ktx2";
     asset.m_prefilteredMap = "prefiltered.ktx2";
 
-    // 构建完整路径（相对路径 → 绝对路径）
-    std::string fullPath = "E:/forfun/assets/" + assetPath;
 
     // 保存
-    return asset.SaveToFile(fullPath);
+    return asset.SaveToFile(fullAssetPath);
 }
 
-void CReflectionProbeBaker::getCubemapFaceMatrices(
-    int face,
-    const XMFLOAT3& position,
-    XMMATRIX& outView,
-    XMMATRIX& outProj)
-{
-    ComputeCubemapFaceMatrices(face, position, outView, outProj);
-}
