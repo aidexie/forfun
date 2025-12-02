@@ -56,9 +56,8 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
 
                 settings.skyboxAssetPath = selectedPath;
 
-                // Apply immediately: reload skybox
-                CFFLog::Info("Applying new skybox: %s", settings.skyboxAssetPath.c_str());
-                CScene::Instance().Initialize(settings.skyboxAssetPath);
+                // Apply immediately: reload environment (skybox + IBL)
+                CScene::Instance().ReloadEnvironment(settings.skyboxAssetPath);
             }
         }
 
@@ -90,8 +89,9 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
 
         // Apply button (manual apply if needed)
         if (ImGui::Button("Apply Settings")) {
-            CFFLog::Info("Applying scene light settings");
-            CScene::Instance().Initialize(settings.skyboxAssetPath);
+            if (!settings.skyboxAssetPath.empty()) {
+                CScene::Instance().ReloadEnvironment(settings.skyboxAssetPath);
+            }
         }
 
         ImGui::SameLine();

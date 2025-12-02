@@ -23,9 +23,28 @@ public:
     CScene(CScene&&) = delete;
     CScene& operator=(CScene&&) = delete;
 
-    // Initialize CScene (load skybox and generate IBL)
-    bool Initialize(const std::string& skybox_path);
+    // === Lifecycle ===
+    bool Initialize();   // Create GPU resources (call once at startup)
     void Shutdown();
+    void Clear();        // Clear all GameObjects and reset selection
+
+    // === Scene File Management ===
+    bool LoadFromFile(const std::string& scenePath);
+    bool SaveToFile(const std::string& scenePath);
+
+    // === Environment Resource Management ===
+    // Reload skybox display cubemap only
+    bool ReloadSkybox(const std::string& envKtxPath);
+    // Reload global IBL (irradiance + prefiltered)
+    bool ReloadIBL(const std::string& irrPath, const std::string& prefilterPath);
+    // Convenience: reload both skybox and IBL from .ffasset
+    bool ReloadEnvironment(const std::string& ffassetPath);
+
+    // === Reflection Probe Management ===
+    // Reload all probes from scene's ReflectionProbe components
+    void ReloadProbesFromScene();
+    // Hot-reload single probe (after baking)
+    bool ReloadProbe(int probeIndex, const std::string& assetPath);
 
     // CWorld access
     CWorld& GetWorld() { return m_world; }

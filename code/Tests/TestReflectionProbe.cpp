@@ -105,6 +105,10 @@ public:
                 { 0.0f, 1.0f, 0.0f }      // up
             );
 
+            // Load environment (skybox + global IBL) and probes
+            scene.ReloadEnvironment("skybox/afrikaans_church_exterior_1k/afrikaans_church_exterior_1k.ffasset");
+            scene.ReloadProbesFromScene();
+
             CFFLog::Info("[TestReflectionProbe:Frame1] Scene setup complete");
         });
 

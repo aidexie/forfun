@@ -1,7 +1,6 @@
 #include "Panels.h"
 #include "imgui.h"
 #include "Scene.h"
-#include "SceneSerializer.h"
 #include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Engine/Rendering/IBLGenerator.h"
 #include "Core/FFLog.h"
@@ -71,8 +70,7 @@ void Panels::DrawDockspace(bool* pOpen, CScene& scene, CForwardRenderPipeline* p
         // Ctrl+S: Save Scene (no dialog, direct save)
         if (ImGui::IsKeyPressed(ImGuiKey_S, false)) {
             if (scene.HasFilePath()) {
-                CSceneSerializer::SaveScene(scene, scene.GetFilePath());
-                CFFLog::Info("Scene saved to: %s", scene.GetFilePath().c_str());
+                scene.SaveToFile(scene.GetFilePath());
             } else {
                 CFFLog::Error("Cannot save: No file path set. Use 'Save Scene As...' first.");
             }
@@ -84,26 +82,21 @@ void Panels::DrawDockspace(bool* pOpen, CScene& scene, CForwardRenderPipeline* p
             // Save Scene: Direct save to current path (no dialog)
             // Disabled if no file path set
             if (ImGui::MenuItem("Save Scene", "Ctrl+S", nullptr, scene.HasFilePath())) {
-                CSceneSerializer::SaveScene(scene, scene.GetFilePath());
-                CFFLog::Info("Scene saved to: %s", scene.GetFilePath().c_str());
+                scene.SaveToFile(scene.GetFilePath());
             }
 
             // Save Scene As: Always show dialog
             if (ImGui::MenuItem("Save Scene As...")) {
                 std::string path = SaveFileDialog("Scene Files (*.scene)\0*.scene\0All Files (*.*)\0*.*\0");
                 if (!path.empty()) {
-                    scene.SetFilePath(path);
-                    CSceneSerializer::SaveScene(scene, path);
-                    CFFLog::Info("Scene saved to: %s", path.c_str());
+                    scene.SaveToFile(path);
                 }
             }
 
             if (ImGui::MenuItem("Load Scene", "Ctrl+O")) {
                 std::string path = OpenFileDialog("Scene Files (*.scene)\0*.scene\0All Files (*.*)\0*.*\0");
                 if (!path.empty()) {
-                    CSceneSerializer::LoadScene(scene, path);
-                    scene.SetFilePath(path);
-                    CFFLog::Info("Scene loaded from: %s", path.c_str());
+                    scene.LoadFromFile(path);
                 }
             }
             ImGui::Separator();

@@ -11,74 +11,198 @@
 #include <iomanip>
 #include <regex>
 
-bool CScene::Initialize(const std::string& skybox_path) {
+bool CScene::Initialize() {
     if (m_initialized) {
         CFFLog::Warning("Scene: Already initialized!");
         return true;
     }
 
-    CFFLog::Info("Scene: Initializing...");
+    CFFLog::Info("Scene: Initializing GPU resources...");
 
-    // Check if path is .ffasset (pre-baked) or .hdr (need to generate)
-    std::filesystem::path assetPath(skybox_path);
-    bool isFFAsset = (assetPath.extension() == ".ffasset");
-
-    if (isFFAsset) {
-        CFFLog::Info("Scene: Loading from .ffasset (pre-baked IBL)...");
-
-        // Parse .ffasset file
-        CFFAssetLoader::SkyboxAsset skyboxAsset;
-        if (!CFFAssetLoader::LoadSkyboxAsset(skybox_path, skyboxAsset))
-        {
-            CFFLog::Error("Failed to load .ffasset file!");
-            return false;
-        }
-
-        // Load skybox environment from KTX2
-        if (!m_skybox.InitializeFromKTX2(skyboxAsset.envPath)) {
-            CFFLog::Error("Failed to load skybox from KTX2!");
-            return false;
-        }
-
-        // Initialize IBL generator (for shader resources)
-        if (!m_iblGen.Initialize()) {
-            CFFLog::Error("Failed to initialize IBL generator!");
-            return false;
-        }
-
-        // Load irradiance map from KTX2
-        if (!m_iblGen.LoadIrradianceFromKTX2(skyboxAsset.irrPath)) {
-            CFFLog::Error("Failed to load irradiance map from KTX2!");
-            return false;
-        }
-
-        // Load pre-filtered map from KTX2
-        if (!m_iblGen.LoadPreFilteredFromKTX2(skyboxAsset.prefilterPath)) {
-            CFFLog::Error("Failed to load pre-filtered map from KTX2!");
-            return false;
-        }
-
-        // Load BRDF LUT from fixed path
-        std::string brdfLutPath = "E:/forfun/assets/skybox/brdf_lut.ktx2";
-        if (!m_iblGen.LoadBrdfLutFromKTX2(brdfLutPath)) {
-            CFFLog::Error("Failed to load BRDF LUT from %s", brdfLutPath.c_str());
-            return false;
-        }
-
-        CFFLog::Info("Scene: Pre-baked IBL loaded successfully!");
-
-        // Initialize Reflection Probe Manager
-        if (!m_probeManager.Initialize()) {
-            CFFLog::Error("Failed to initialize ReflectionProbeManager!");
-            return false;
-        }
-
-        // Load probes (global IBL + local probes from scene)
-        m_probeManager.LoadProbesFromScene(*this, skyboxAsset.irrPath, skyboxAsset.prefilterPath);
+    // Initialize IBL generator (creates GPU resources for IBL)
+    if (!m_iblGen.Initialize()) {
+        CFFLog::Error("Failed to initialize IBL generator!");
+        return false;
     }
-    CFFLog::Info("Scene: Initialization complete!");
-    CFFLog::Info("Note: Debug visualization can be enabled via IBL Debug window.");
+
+    // Load BRDF LUT (shared across all environments)
+    std::string brdfLutPath = "E:/forfun/assets/skybox/brdf_lut.ktx2";
+    if (!m_iblGen.LoadBrdfLutFromKTX2(brdfLutPath)) {
+        CFFLog::Error("Failed to load BRDF LUT from %s", brdfLutPath.c_str());
+        return false;
+    }
+
+    // Initialize Reflection Probe Manager (creates TextureCubeArray)
+    if (!m_probeManager.Initialize()) {
+        CFFLog::Error("Failed to initialize ReflectionProbeManager!");
+        return false;
+    }
+
+    CFFLog::Info("Scene: GPU resources initialized!");
     m_initialized = true;
+    return true;
+}
+
+void CScene::Clear() {
+    // Clear all GameObjects
+    while (m_world.Count() > 0) {
+        m_world.Destroy(0);
+    }
+    m_selected = -1;
+    m_filePath.clear();
+    CFFLog::Info("Scene: Cleared all GameObjects");
+}
+
+// === Scene File Management ===
+
+bool CScene::LoadFromFile(const std::string& scenePath) {
+    CFFLog::Info("Scene: Loading from %s", scenePath.c_str());
+
+    // 1. Deserialize GameObjects (Serializer clears existing scene internally)
+    if (!CSceneSerializer::LoadScene(*this, scenePath)) {
+        CFFLog::Error("Scene: Failed to load scene file!");
+        return false;
+    }
+
+    // 3. Load environment (skybox + IBL) from lightSettings
+    if (!m_lightSettings.skyboxAssetPath.empty()) {
+        if (!ReloadEnvironment(m_lightSettings.skyboxAssetPath)) {
+            CFFLog::Warning("Scene: Failed to load environment, continuing without skybox");
+        }
+    }
+
+    // 4. Load reflection probes (now GameObjects exist)
+    ReloadProbesFromScene();
+
+    // 5. Record file path
+    m_filePath = scenePath;
+
+    CFFLog::Info("Scene: Loaded successfully!");
+    return true;
+}
+
+bool CScene::SaveToFile(const std::string& scenePath) {
+    CFFLog::Info("Scene: Saving to %s", scenePath.c_str());
+
+    if (!CSceneSerializer::SaveScene(*this, scenePath)) {
+        CFFLog::Error("Scene: Failed to save scene file!");
+        return false;
+    }
+
+    m_filePath = scenePath;
+    CFFLog::Info("Scene: Saved successfully!");
+    return true;
+}
+
+// === Environment Resource Management ===
+
+bool CScene::ReloadSkybox(const std::string& envKtxPath) {
+    CFFLog::Info("Scene: Reloading skybox from %s", envKtxPath.c_str());
+
+    if (!m_skybox.InitializeFromKTX2(envKtxPath)) {
+        CFFLog::Error("Failed to reload skybox from KTX2!");
+        return false;
+    }
+
+    CFFLog::Info("Scene: Skybox reloaded successfully!");
+    return true;
+}
+
+bool CScene::ReloadIBL(const std::string& irrPath, const std::string& prefilterPath) {
+    CFFLog::Info("Scene: Reloading IBL (irr=%s, pref=%s)", irrPath.c_str(), prefilterPath.c_str());
+
+    if (!m_iblGen.LoadIrradianceFromKTX2(irrPath)) {
+        CFFLog::Error("Failed to reload irradiance map!");
+        return false;
+    }
+
+    if (!m_iblGen.LoadPreFilteredFromKTX2(prefilterPath)) {
+        CFFLog::Error("Failed to reload pre-filtered map!");
+        return false;
+    }
+
+    CFFLog::Info("Scene: IBL reloaded successfully!");
+    return true;
+}
+
+bool CScene::ReloadEnvironment(const std::string& ffassetPath) {
+    CFFLog::Info("Scene: Reloading environment from %s", ffassetPath.c_str());
+
+    // Build full path (add E:/forfun/assets/ prefix if relative)
+    std::string fullPath = ffassetPath;
+    if (!std::filesystem::path(ffassetPath).is_absolute()) {
+        fullPath = "E:/forfun/assets/" + ffassetPath;
+    }
+
+    // Parse .ffasset file
+    CFFAssetLoader::SkyboxAsset skyboxAsset;
+    if (!CFFAssetLoader::LoadSkyboxAsset(fullPath, skyboxAsset)) {
+        CFFLog::Error("Failed to load .ffasset file!");
+        return false;
+    }
+
+    // Reload skybox
+    if (!ReloadSkybox(skyboxAsset.envPath)) {
+        return false;
+    }
+
+    // Reload IBL
+    if (!ReloadIBL(skyboxAsset.irrPath, skyboxAsset.prefilterPath)) {
+        return false;
+    }
+
+    // Update lightSettings
+    m_lightSettings.skyboxAssetPath = ffassetPath;
+
+    // Reload global probe (index 0) with new IBL
+    m_probeManager.LoadGlobalProbe(skyboxAsset.irrPath, skyboxAsset.prefilterPath);
+
+    CFFLog::Info("Scene: Environment reloaded successfully!");
+    return true;
+}
+
+// === Reflection Probe Management ===
+
+void CScene::ReloadProbesFromScene() {
+    CFFLog::Info("Scene: Reloading probes from scene...");
+
+    // Get global IBL paths from current environment
+    std::string globalIrrPath, globalPrefPath;
+    if (!m_lightSettings.skyboxAssetPath.empty()) {
+        // Build full path (add E:/forfun/assets/ prefix if relative)
+        std::string fullPath = m_lightSettings.skyboxAssetPath;
+        if (!std::filesystem::path(fullPath).is_absolute()) {
+            fullPath = "E:/forfun/assets/" + fullPath;
+        }
+
+        CFFAssetLoader::SkyboxAsset skyboxAsset;
+        if (CFFAssetLoader::LoadSkyboxAsset(fullPath, skyboxAsset)) {
+            globalIrrPath = skyboxAsset.irrPath;
+            globalPrefPath = skyboxAsset.prefilterPath;
+        }
+    }
+
+    m_probeManager.LoadProbesFromScene(*this, globalIrrPath, globalPrefPath);
+    CFFLog::Info("Scene: Probes reloaded!");
+}
+
+bool CScene::ReloadProbe(int probeIndex, const std::string& assetPath) {
+    CFFLog::Info("Scene: Reloading probe %d from %s", probeIndex, assetPath.c_str());
+
+    // Parse probe .ffasset
+    CFFAssetLoader::SkyboxAsset probeAsset;
+    if (!CFFAssetLoader::LoadSkyboxAsset(assetPath, probeAsset)) {
+        CFFLog::Error("Failed to load probe asset!");
+        return false;
+    }
+
+    // Reload into TextureCubeArray at specified index
+    if (!m_probeManager.ReloadProbe(probeIndex, probeAsset.irrPath, probeAsset.prefilterPath)) {
+        CFFLog::Error("Failed to reload probe into TextureCubeArray!");
+        return false;
+    }
+
+    CFFLog::Info("Scene: Probe %d reloaded successfully!", probeIndex);
     return true;
 }
 

@@ -80,6 +80,12 @@ public:
     // slot 4 (CB): CB_Probes
     void Bind(ID3D11DeviceContext* context);
 
+    // 加载/重载全局 Probe（index 0）
+    bool LoadGlobalProbe(const std::string& irrPath, const std::string& prefPath);
+
+    // 热重载单个 Probe（用于 Bake 后更新）
+    bool ReloadProbe(int probeIndex, const std::string& irrPath, const std::string& prefPath);
+
     // 获取 Probe 数量（用于调试）
     int GetProbeCount() const { return m_probeCount; }
 

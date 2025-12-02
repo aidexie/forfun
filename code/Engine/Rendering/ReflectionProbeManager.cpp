@@ -174,6 +174,69 @@ int CReflectionProbeManager::SelectProbeForPosition(const DirectX::XMFLOAT3& wor
     return bestIndex;
 }
 
+bool CReflectionProbeManager::LoadGlobalProbe(const std::string& irrPath, const std::string& prefPath)
+{
+    if (!m_initialized) {
+        CFFLog::Error("[ReflectionProbeManager] Not initialized");
+        return false;
+    }
+
+    // Load global IBL at index 0
+    if (!loadAndCopyToArray(irrPath, 0, true)) {
+        CFFLog::Error("[ReflectionProbeManager] Failed to load global irradiance");
+        return false;
+    }
+
+    if (!loadAndCopyToArray(prefPath, 0, false)) {
+        CFFLog::Error("[ReflectionProbeManager] Failed to load global prefiltered");
+        return false;
+    }
+
+    // Update probe data for index 0
+    m_probeData.probes[0].position = { 0, 0, 0 };
+    m_probeData.probes[0].radius = 1e10f;  // Infinite (fallback)
+
+    // Ensure probe count includes global
+    if (m_probeCount < 1) {
+        m_probeCount = 1;
+    }
+    m_probeData.probeCount = m_probeCount;
+
+    // Update constant buffer
+    auto* context = CDX11Context::Instance().GetContext();
+    context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
+
+    CFFLog::Info("[ReflectionProbeManager] Global probe (index 0) reloaded");
+    return true;
+}
+
+bool CReflectionProbeManager::ReloadProbe(int probeIndex, const std::string& irrPath, const std::string& prefPath)
+{
+    if (!m_initialized) {
+        CFFLog::Error("[ReflectionProbeManager] Not initialized");
+        return false;
+    }
+
+    if (probeIndex < 0 || probeIndex >= MAX_PROBES) {
+        CFFLog::Error("[ReflectionProbeManager] Invalid probe index: %d", probeIndex);
+        return false;
+    }
+
+    // Load probe at specified index
+    if (!loadAndCopyToArray(irrPath, probeIndex, true)) {
+        CFFLog::Error("[ReflectionProbeManager] Failed to reload probe %d irradiance", probeIndex);
+        return false;
+    }
+
+    if (!loadAndCopyToArray(prefPath, probeIndex, false)) {
+        CFFLog::Error("[ReflectionProbeManager] Failed to reload probe %d prefiltered", probeIndex);
+        return false;
+    }
+
+    CFFLog::Info("[ReflectionProbeManager] Probe %d reloaded", probeIndex);
+    return true;
+}
+
 // ============================================
 // Internal Methods
 // ============================================

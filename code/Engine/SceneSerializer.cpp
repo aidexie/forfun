@@ -219,13 +219,11 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
         }
         scene.SetSelected(-1);
 
-        // Load light settings
+        // Load light settings (just deserialize, don't apply - CScene::LoadFromFile handles that)
         if (j.contains("lightSettings")) {
             const auto& settingsJson = j["lightSettings"];
             if (settingsJson.contains("skyboxAssetPath")) {
                 scene.GetLightSettings().skyboxAssetPath = settingsJson["skyboxAssetPath"].get<std::string>();
-                // Apply settings immediately: reload skybox
-                scene.Initialize(scene.GetLightSettings().skyboxAssetPath);
             }
         }
 

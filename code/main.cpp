@@ -33,7 +33,6 @@
 #include "Camera.h"   // CCamera（Viewport 面板用）
 #include "EditorContext.h"  // ✅ 编辑器交互管理（相机控制）
 #include "Components/DirectionalLight.h"
-#include "SceneSerializer.h"
 #include "DebugPaths.h"  // Debug output directories
 #include "FFLog.h"  // Logging system
 
@@ -331,20 +330,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     CScene::Instance().GetEditorCamera().aspectRatio = (float)initW / (float)initH;
 
 
-    // 5) ✅ ForwardRenderPipeline initialization
+    // 5) CScene GPU resource initialization
+    if (!CScene::Instance().Initialize())
+    {
+        CFFLog::Error("Failed to initialize CScene!");
+        exitCode = -4;
+        goto cleanup;
+    }
+    sceneInitialized = true;
+
+    // 6) ✅ ForwardRenderPipeline initialization
     if (!g_pipeline.Initialize())
     {
         CFFLog::Error("Failed to initialize ForwardRenderPipeline!");
-        exitCode = -4;
+        exitCode = -5;
         goto cleanup;
     }
     pipelineInitialized = true;
     CFFLog::Info("ForwardRenderPipeline initialized");
 
+    // 7) Load default scene (if not in test mode)
     if (!activeTest)
     {
-        CSceneSerializer::LoadScene(CScene::Instance(), "E:\\forfun\\assets\\assets\\scenes\\simple.scene");
-        sceneInitialized = true;
+        CScene::Instance().LoadFromFile("E:\\forfun\\assets\\assets\\scenes\\simple.scene");
     }
 
     // 6) 主循环
