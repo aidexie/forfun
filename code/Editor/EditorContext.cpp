@@ -20,7 +20,7 @@ void CEditorContext::OnMouseDelta(int dx, int dy, CCamera& camera) {
     if (!m_rmbLook) return;
 
     // 立即应用鼠标旋转
-    camera.Rotate(-dx * m_mouseSensitivity, -dy * m_mouseSensitivity);
+    camera.Rotate(dx * m_mouseSensitivity, dy * m_mouseSensitivity);
 }
 
 void CEditorContext::Update(float dt, CCamera& camera) {
