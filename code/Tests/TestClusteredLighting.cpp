@@ -100,6 +100,16 @@ public:
 
             CFFLog::Info("Created %zu point lights in night scene", sizeof(lights) / sizeof(lights[0]));
             CFFLog::Info("Total objects in scene: %d", scene.GetWorld().Count());
+
+            // Setup camera to view the scene
+            // Cubes are at X=(2-11), Y=(0-4), Z=(-1 to 1)
+            // Position camera to view from front-left, looking at center of scene
+            scene.GetEditorCamera().position = { -2.0f, 5.0f, -8.0f };
+            scene.GetEditorCamera().SetLookAt(
+                { -2.0f, 5.0f, -8.0f },  // eye
+                { 7.0f, 1.0f, 0.0f },    // target (center of cubes)
+                { 0.0f, 1.0f, 0.0f }     // up
+            );
         });
 
         // Frame 10: Verify scene setup

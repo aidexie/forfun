@@ -39,7 +39,8 @@ CClusteredLightingPass::~CClusteredLightingPass() = default;
 
 void CClusteredLightingPass::Initialize(ID3D11Device* device) {
     CFFLog::Info("[ClusteredLightingPass] Initializing...");
-    CreateBuffers(device);
+    // Note: Don't create buffers here - they need valid screen dimensions
+    // CreateBuffers() will be called from Resize() when dimensions are known
     CreateShaders(device);
     CreateDebugShaders(device);
     CFFLog::Info("[ClusteredLightingPass] Initialized successfully");
@@ -71,6 +72,12 @@ void CClusteredLightingPass::Resize(uint32_t width, uint32_t height) {
 }
 
 void CClusteredLightingPass::CreateBuffers(ID3D11Device* device) {
+    // Guard: Don't create zero-sized buffers
+    if (m_totalClusters == 0) {
+        CFFLog::Warning("[ClusteredLightingPass] CreateBuffers skipped - totalClusters is 0");
+        return;
+    }
+
     HRESULT hr;
 
     // Cluster AABB Buffer (SClusterAABB[totalClusters])
