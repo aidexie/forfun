@@ -7,7 +7,7 @@
 
 ---
 
-## 当前进度 (2025-11-25)
+## 当前进度 (2025-12-02)
 
 ### ✅ 已完成
 
@@ -41,9 +41,32 @@
 - **KTX2 集成**: libktx 库，跨平台纹理格式
 - **.ffasset 格式**: JSON 资源描述符
 
+#### Phase 1: 渲染基础完善 ✅
+- **PBR 材质完善**: Normal Map, Metallic-Roughness Map, Emissive, AO
+- **Alpha 模式**: Opaque, Mask (Alpha Test), Blend (Alpha Blend)
+- **材质编辑器**: Inspector 内嵌材质属性编辑
+
+#### Phase 2: 光照系统扩展 ✅
+- **Clustered Forward+ 渲染**: 支持大量动态光源，Compute Shader 光源剔除
+  - 3D Cluster Grid (16x16 tile, 16 depth slices)
+  - 异步光源 Culling
+- **Point Light**: 物理衰减 (1/d²)，范围软衰减
+- **Spot Light**: 内外锥角，方向衰减
+- **Reflection Probe 系统**:
+  - TextureCubeArray 统一管理 (最多 8 个 Probe)
+  - Per-object Probe 选择 (CPU 侧，基于物体中心位置)
+  - 编辑器 Bake 工具 (KTX2 输出)
+  - 默认 Fallback IBL (纯色，防止空 IBL)
+  - 全局/局部 Probe 分离管理
+
+#### 架构改进 ✅
+- **Hybrid Render Pipeline**: 统一的渲染管线架构，支持 Shadow/Main/Post-Processing 多阶段
+- **FFPath 路径管理**: 统一的路径规范化和资源定位
+- **IBLGenerator 移除**: BRDF LUT 迁移到 ReflectionProbeManager，简化架构
+
 ---
 
-## Phase 1: 渲染基础完善 (当前阶段，预计 2-3周)
+## Phase 1: 渲染基础完善 ✅ 已完成
 
 **目标**: 补全 PBR 材质系统，验证现有渲染功能的正确性
 
@@ -86,7 +109,7 @@ struct SMaterial {
 
 ---
 
-## Phase 2: 光照系统扩展 (预计 3-3.5周)
+## Phase 2: 光照系统扩展 ✅ 已完成
 
 **目标**: 构建完整的动态光照系统，支持多光源和局部 IBL
 
@@ -398,4 +421,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2025-11-27
+**Last Updated**: 2025-12-02

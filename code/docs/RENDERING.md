@@ -1231,6 +1231,335 @@ Lo ≈ (∫ Li(l) * (n·l) dl) * (∫ f(l,v) dl)
 
 ---
 
+## Reflection Probe System
+
+### Overview
+
+**实现日期**: 2025-12-01 (Phase 3.1)
+
+**架构**: TextureCubeArray-based Reflection Probes
+- **存储方式**: `TextureCubeArray` (所有 probe 打包到一个纹理数组)
+- **索引选择**: Per-Object (每个物体选择最近的 probe，避免像素级接缝)
+- **支持数量**: 最多 8 个 probes (1 global + 7 local)
+- **烘焙流程**: Editor-time baking (Inspector "Bake Now" 按钮)
+
+**设计理念**:
+- **Per-Object Selection**: 不像 per-pixel selection 会产生接缝，per-object 在整个物体上使用同一个 probe
+- **Global Fallback**: Index 0 始终是全局 IBL，物体不在任何 local probe 范围内时使用
+- **Lazy Loading**: Probe 数据仅在场景加载或手动 bake 时加载
+
+---
+
+### Component & Asset
+
+#### SReflectionProbe Component
+
+**位置**: `Engine/Components/ReflectionProbe.h`
+
+```cpp
+struct SReflectionProbe : public IComponent {
+    std::string assetPath;      // .ffasset 文件路径 (normalized relative)
+    float radius = 10.0f;       // Probe 影响半径
+    int resolution = 128;       // Cubemap 分辨率 (烘焙时使用)
+    bool isDirty = true;        // 是否需要重新烘焙
+
+    const char* GetTypeName() const override { return "ReflectionProbe"; }
+};
+```
+
+**参数说明**:
+- `assetPath`: 烘焙输出的 .ffasset 文件路径
+- `radius`: 物体中心在此半径内才使用该 probe
+- `resolution`: 烘焙时的 cubemap 分辨率 (128/256/512)
+- `isDirty`: 标记是否需要重新烘焙（位置变化后设为 true）
+
+#### Reflection Probe Asset (.ffasset)
+
+**位置**: `assets/probes/{probe_name}.ffasset`
+
+```json
+{
+  "type": "reflection_probe",
+  "version": "1.0",
+  "resolution": 128,
+  "environment": "env.ktx2",
+  "irradiance": "irradiance.ktx2",
+  "prefiltered": "prefiltered.ktx2"
+}
+```
+
+**目录结构**:
+```
+assets/probes/kitchen_probe/
+├── kitchen_probe.ffasset    # Asset manifest
+├── env.ktx2                 # Environment cubemap (128×128)
+├── irradiance.ktx2          # Diffuse irradiance (32×32)
+└── prefiltered.ktx2         # Specular prefiltered (128×128, 7 mips)
+```
+
+---
+
+### Architecture
+
+#### CReflectionProbeManager
+
+**位置**: `Engine/Rendering/ReflectionProbeManager.h/cpp`
+
+**职责**:
+- 管理 `TextureCubeArray` 资源 (irradiance + prefiltered)
+- 加载/卸载 probe 数据
+- 提供 probe 选择算法
+- 绑定到 shader
+
+**核心数据结构**:
+
+```cpp
+class CReflectionProbeManager {
+    // TextureCubeArray: 所有 probes 打包到一个纹理
+    ComPtr<ID3D11Texture2D> m_irradianceArray;      // 32×32, 1 mip, 8 slices
+    ComPtr<ID3D11Texture2D> m_prefilteredArray;     // 128×128, 7 mips, 8 slices
+
+    // Constant Buffer: Probe 位置和半径
+    struct CB_Probes {
+        struct ProbeData {
+            XMFLOAT3 position;
+            float radius;
+        } probes[MAX_PROBES];
+        int probeCount;
+    } m_probeData;
+
+    // Public API
+    void LoadProbesFromScene(CScene& scene, ...);
+    int SelectProbeForPosition(const XMFLOAT3& worldPos) const;
+    void Bind(ID3D11DeviceContext* context);
+};
+```
+
+**Probe 索引约定**:
+| Index | 用途 | 半径 |
+|-------|------|------|
+| 0 | Global IBL (skybox) | ∞ (1e10) |
+| 1-7 | Local probes | 用户定义 |
+
+#### CReflectionProbeBaker
+
+**位置**: `Engine/Rendering/ReflectionProbeBaker.h/cpp`
+
+**职责**:
+- 从指定位置渲染 6 个 cubemap 面
+- 生成 IBL maps (irradiance + prefiltered)
+- 导出到 KTX2 + .ffasset
+
+**烘焙流程**:
+
+```cpp
+bool CReflectionProbeBaker::BakeProbe(
+    const XMFLOAT3& position,    // Probe 位置
+    int resolution,              // Cubemap 分辨率
+    CScene& scene,               // 要渲染的场景
+    const std::string& outputAssetPath  // 输出 .ffasset 路径
+) {
+    // 1. 创建 Cubemap render target
+    createCubemapRenderTarget(resolution);
+
+    // 2. 渲染 6 个面
+    for (int face = 0; face < 6; ++face) {
+        SetupCameraForCubemapFace(camera, face, position);
+        m_pipeline->Render(renderCtx);  // 使用 FShowFlags::ReflectionProbe()
+    }
+
+    // 3. 生成 IBL maps
+    m_iblGenerator->GenerateIrradianceMap(envCubemap, 32);
+    m_iblGenerator->GeneratePreFilteredMap(envCubemap, 128, 7);
+
+    // 4. 导出 KTX2 文件
+    CKTXExporter::ExportCubemapToKTX2(envCubemap, envPath, 0);
+    CKTXExporter::ExportCubemapToKTX2(irradianceTexture, irrPath, 1);
+    CKTXExporter::ExportCubemapToKTX2(prefilteredTexture, prefPath, 7);
+
+    // 5. 生成 .ffasset
+    createAssetFile(outputAssetPath, resolution);
+}
+```
+
+---
+
+### Shader Integration
+
+#### Per-Object Probe Selection
+
+**CPU 端** (`Engine/Rendering/MainPass.cpp`):
+
+```cpp
+// 在渲染每个物体前，选择最近的 probe
+int probeIndex = m_probeManager.SelectProbeForPosition(objectWorldPos);
+
+// 传递给 shader
+cbObject.probeIndex = probeIndex;
+ctx->UpdateSubresource(m_cbObject, 0, nullptr, &cbObject, 0, 0);
+```
+
+**选择算法**:
+
+```cpp
+int CReflectionProbeManager::SelectProbeForPosition(const XMFLOAT3& worldPos) const {
+    int bestIndex = 0;  // Default: global IBL
+    float bestDistSq = 1e20f;
+
+    // 搜索 local probes (index 1+)
+    for (int i = 1; i < m_probeCount; i++) {
+        float dx = worldPos.x - m_probeData.probes[i].position.x;
+        float dy = worldPos.y - m_probeData.probes[i].position.y;
+        float dz = worldPos.z - m_probeData.probes[i].position.z;
+        float distSq = dx*dx + dy*dy + dz*dz;
+        float radiusSq = m_probeData.probes[i].radius * m_probeData.probes[i].radius;
+
+        // 在半径内且更近
+        if (distSq < radiusSq && distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+```
+
+#### Shader 采样
+
+**数据绑定** (`MainPass.ps.hlsl`):
+
+```hlsl
+// t3: Irradiance CubeArray
+TextureCubeArray<float4> g_irradianceArray : register(t3);
+
+// t4: Prefiltered CubeArray
+TextureCubeArray<float4> g_prefilteredArray : register(t4);
+
+// Per-object constant buffer
+cbuffer CB_Object : register(b1) {
+    // ... other data ...
+    int gProbeIndex;  // 当前物体使用的 probe 索引
+};
+```
+
+**采样代码**:
+
+```hlsl
+// Diffuse IBL
+float4 irradianceCoord = float4(N, gProbeIndex);
+float3 irradiance = g_irradianceArray.Sample(gSamp, irradianceCoord).rgb;
+
+// Specular IBL
+float mipLevel = roughness * 6.0;  // 7 mips (0-6)
+float4 prefilteredCoord = float4(R, gProbeIndex);
+float3 prefiltered = g_prefilteredArray.SampleLevel(gSamp, prefilteredCoord, mipLevel).rgb;
+```
+
+---
+
+### Editor Integration
+
+#### Inspector Panel
+
+**位置**: `Editor/InspectorPanel.cpp`
+
+**ReflectionProbe 组件 UI**:
+- `assetPath`: 文件路径选择器
+- `radius`: 拖动滑块
+- `resolution`: 下拉选择 (128/256/512)
+- **"Bake Now" 按钮**: 立即烘焙 probe
+
+**烘焙触发代码**:
+
+```cpp
+if (ImGui::Button("Bake Now", ImVec2(-1, 0))) {
+    static CReflectionProbeBaker baker;
+    if (!baker.Initialize()) {
+        CFFLog::Error("Failed to initialize baker");
+    } else {
+        bool success = baker.BakeProbe(
+            transform->position,
+            probeComp->resolution,
+            scene,
+            probeComp->assetPath
+        );
+        if (success) {
+            probeComp->isDirty = false;
+        }
+    }
+}
+```
+
+#### Scene Light Settings Panel
+
+**Global IBL 配置**:
+- Skybox asset path (.ffasset)
+- 修改后自动调用 `CScene::ReloadEnvironment()`
+
+---
+
+### Scene Lifecycle
+
+#### 初始化流程
+
+```cpp
+// 1. CScene::Initialize() - 仅创建 GPU 资源
+m_probeManager.Initialize();  // 创建 TextureCubeArray
+
+// 2. CScene::LoadFromFile() - 加载场景数据
+CSceneSerializer::LoadScene(scenePath, *this);
+
+// 3. CScene::ReloadProbesFromScene() - 加载 probe 数据
+m_probeManager.LoadProbesFromScene(*this, globalIrrPath, globalPrefPath);
+```
+
+#### 运行时更新
+
+```cpp
+// 切换 skybox 后更新全局 IBL
+CScene::ReloadEnvironment(newSkyboxAssetPath);
+
+// 重新加载所有 probes（场景结构变化后）
+CScene::ReloadProbesFromScene();
+```
+
+---
+
+### Performance Considerations
+
+**内存占用**:
+| 资源 | 分辨率 | Mips | Probes | 大小 |
+|------|--------|------|--------|------|
+| Irradiance Array | 32×32 | 1 | 8 | ~300 KB |
+| Prefiltered Array | 128×128 | 7 | 8 | ~16 MB |
+
+**GPU 开销**:
+- **Per-Object Selection**: 无额外 GPU 开销（CPU 选择，GPU 只采样一次）
+- **TextureCubeArray**: 与单个 Cubemap 采样相同开销
+
+**优化建议**:
+- 对于大场景，考虑空间划分（Octree）加速 probe 查找
+- 静态场景可预计算 object-probe 映射，避免每帧查询
+
+---
+
+### Known Limitations
+
+1. **无 Probe 混合**: 当前每个物体只使用一个 probe，不支持多 probe 混合
+   - **影响**: probe 边界可能有跳变
+   - **未来计划**: 实现基于距离的 2-probe 混合
+
+2. **无实时更新**: Probe 必须在编辑器中手动烘焙
+   - **影响**: 动态场景反射不会更新
+   - **未来计划**: 支持运行时 probe 更新（低分辨率、按需）
+
+3. **固定最大数量**: 最多 8 个 probes
+   - **影响**: 大场景可能不够用
+   - **未来计划**: 可配置数量，或分区域加载
+
+---
+
 ## IBL Debug UI
 
 **位置**: `Editor/Panels_IrradianceDebug.cpp`
@@ -1435,4 +1764,4 @@ if (gAlphaMode == 1 && alpha < gAlphaCutoff) {
 
 ---
 
-**Last Updated**: 2025-11-27
+**Last Updated**: 2025-12-02

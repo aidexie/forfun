@@ -102,11 +102,14 @@ timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test TestXXX
 - PBR (Cook-Torrance BRDF, physically-based)
 - CSM 阴影 (bounding sphere stabilization + texel snapping)
 - IBL (diffuse irradiance + specular pre-filtered map)
+- Reflection Probes (TextureCubeArray, per-object selection, editor baking)
+- Clustered Lighting (Point/Spot lights, 100+ lights @ 60 FPS)
 - 场景序列化 + 组件自动注册
 - Transform Gizmo (ImGuizmo: Translate/Rotate/Scale, Local/World, Grid snapping)
 - HDR Export 工具 (HDR → KTX2 + .ffasset)
 - KTX2 资源加载 (.ffasset → env/irr/prefilter)
 - 自动化测试框架 (命令行驱动，帧回调架构)
+- FFPath 统一路径管理 (自动规范化、绝对/相对路径转换)
 
 ---
 
@@ -146,6 +149,69 @@ cmake --build build --target forfun
 - Debug output: `E:/forfun/debug/{TestName}/`
 
 **Dependencies**: imgui_docking, cgltf, nlohmann/json, DirectX 11, KTX-Software (libktx)
+
+---
+
+## Path Management (FFPath)
+
+### 设计原则
+
+- **外部输入**: 灵活（绝对路径、相对路径、`/` 或 `\` 分隔符都可以）
+- **内部存储**: 统一使用标准化相对路径（`folder/file.ext`，无前导 `/`，使用 `/` 分隔符）
+- **文件操作**: 使用 `FFPath::GetAbsolutePath()` 转换为绝对路径
+
+### API 使用
+
+```cpp
+#include "Core/PathManager.h"  // FFPath namespace
+
+// 初始化（main.cpp 中调用一次）
+FFPath::Initialize("E:/forfun");
+
+// 主要 API（自动处理任意输入格式）
+std::string fullPath = FFPath::GetAbsolutePath("mat/wood.ffasset");
+// → "E:/forfun/assets/mat/wood.ffasset"
+
+std::string fullPath2 = FFPath::GetAbsolutePath("E:/forfun/assets/mat/wood.ffasset");
+// → "E:/forfun/assets/mat/wood.ffasset" (已经是绝对路径，直接返回)
+
+std::string normalized = FFPath::Normalize("E:\\forfun\\assets\\mat\\wood.ffasset");
+// → "mat/wood.ffasset"
+
+// 目录访问
+FFPath::GetAssetsDir();   // "E:/forfun/assets"
+FFPath::GetDebugDir();    // "E:/forfun/debug"
+FFPath::GetSourceDir();   // "E:/forfun/source/code"
+```
+
+### 强制规则
+
+1. **存储路径时**: 始终使用 `FFPath::Normalize()` 标准化
+   ```cpp
+   settings.skyboxAssetPath = FFPath::Normalize(userSelectedPath);
+   ```
+
+2. **读取文件时**: 始终使用 `FFPath::GetAbsolutePath()`
+   ```cpp
+   std::ifstream file(FFPath::GetAbsolutePath(settings.skyboxAssetPath));
+   ```
+
+3. **禁止硬编码路径**: 除了 `FFPath::Initialize()` 中的项目根路径，其他地方不允许出现 `E:/forfun`
+
+4. **Shader 路径**: 使用 `FFPath::GetSourceDir()` + 相对路径
+   ```cpp
+   std::wstring shaderPath = std::wstring(FFPath::GetSourceDir().begin(), FFPath::GetSourceDir().end())
+                           + L"/Shader/MyShader.hlsl";
+   ```
+
+### 路径格式示例
+
+| 输入 | `Normalize()` 结果 | `GetAbsolutePath()` 结果 |
+|------|-------------------|-------------------------|
+| `"mat/wood.ffasset"` | `"mat/wood.ffasset"` | `"E:/forfun/assets/mat/wood.ffasset"` |
+| `"E:/forfun/assets/mat/wood.ffasset"` | `"mat/wood.ffasset"` | `"E:/forfun/assets/mat/wood.ffasset"` |
+| `"mat\\wood.ffasset"` | `"mat/wood.ffasset"` | `"E:/forfun/assets/mat/wood.ffasset"` |
+| `"./mat/wood.ffasset"` | `"mat/wood.ffasset"` | `"E:/forfun/assets/mat/wood.ffasset"` |
 
 ---
 
@@ -324,4 +390,4 @@ REGISTER_COMPONENT(SPointLight)
 
 ---
 
-**Last Updated**: 2025-11-28
+**Last Updated**: 2025-12-02

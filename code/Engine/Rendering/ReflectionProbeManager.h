@@ -22,7 +22,7 @@ class CScene;
 // Texture Slots：
 // - t3: IrradianceArray (TextureCubeArray, 32x32, 8 slices)
 // - t4: PrefilteredArray (TextureCubeArray, 128x128, 8 slices)
-// - t5: BRDF LUT (不变)
+// - t5: BRDF LUT (2D texture, 512x512)
 // ============================================
 class CReflectionProbeManager
 {
@@ -66,13 +66,9 @@ public:
     // 清理资源
     void Shutdown();
 
-    // 从场景加载 Probe（全局 IBL + 局部 Probe）
-    // globalIrradiancePath/globalPrefilteredPath: 全局 IBL 的 KTX2 路径
-    void LoadProbesFromScene(
-        CScene& scene,
-        const std::string& globalIrradiancePath,
-        const std::string& globalPrefilteredPath
-    );
+    // 从场景加载局部 Probe (index 1-7)
+    // 全局 IBL (index 0) 由 Initialize() 设置默认值，或通过 LoadGlobalProbe() 更新
+    void LoadLocalProbesFromScene(CScene& scene);
 
     // 绑定资源到 Shader（每帧调用一次）
     // slot 3: IrradianceArray
@@ -83,8 +79,8 @@ public:
     // 加载/重载全局 Probe（index 0）
     bool LoadGlobalProbe(const std::string& irrPath, const std::string& prefPath);
 
-    // 热重载单个 Probe（用于 Bake 后更新）
-    bool ReloadProbe(int probeIndex, const std::string& irrPath, const std::string& prefPath);
+    // 加载 BRDF LUT（全局唯一，在 Initialize 后调用一次）
+    bool LoadBrdfLut(const std::string& brdfLutPath);
 
     // 获取 Probe 数量（用于调试）
     int GetProbeCount() const { return m_probeCount; }
@@ -93,9 +89,10 @@ public:
     // Returns probe index (0 = global fallback, 1-7 = local probes)
     int SelectProbeForPosition(const DirectX::XMFLOAT3& worldPos) const;
 
-    // 获取 SRV（用于调试）
+    // 获取 SRV（用于调试和渲染）
     ID3D11ShaderResourceView* GetIrradianceArraySRV() const { return m_irradianceArraySRV.Get(); }
     ID3D11ShaderResourceView* GetPrefilteredArraySRV() const { return m_prefilteredArraySRV.Get(); }
+    ID3D11ShaderResourceView* GetBrdfLutSRV() const { return m_brdfLutSRV.Get(); }
 
 private:
     // ============================================
@@ -124,6 +121,9 @@ private:
         bool isIrradiance  // true = irradiance, false = prefiltered
     );
 
+    // 创建默认纯色 fallback cubemap 并填充到指定 slice
+    void fillSliceWithSolidColor(int sliceIndex, float r, float g, float b);
+
     // ============================================
     // Data
     // ============================================
@@ -133,6 +133,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_prefilteredArray;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_irradianceArraySRV;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_prefilteredArraySRV;
+
+    // BRDF LUT (2D texture, shared across all probes)
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brdfLutSRV;
 
     // 常量缓冲区
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbProbes;

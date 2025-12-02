@@ -206,9 +206,8 @@ void bindGlobalResources(
         context->PSSetShaderResources(2, 1, &shadowData->shadowMapArray);
     }
 
-    // t5: BRDF LUT (still from global IBL generator)
-    CIBLGenerator& iblGen = CScene::Instance().GetIBLGenerator();
-    ID3D11ShaderResourceView* brdfLutSRV = iblGen.GetBrdfLutSRV();
+    // t5: BRDF LUT (now from ReflectionProbeManager)
+    ID3D11ShaderResourceView* brdfLutSRV = CScene::Instance().GetProbeManager().GetBrdfLutSRV();
     context->PSSetShaderResources(5, 1, &brdfLutSRV);
 }
 

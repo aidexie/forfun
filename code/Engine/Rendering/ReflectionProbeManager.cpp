@@ -8,9 +8,11 @@
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
+#include <DirectXPackedVector.h>
 #include <filesystem>
 
 using namespace DirectX;
+using namespace DirectX::PackedVector;
 using Microsoft::WRL::ComPtr;
 
 // ============================================
@@ -31,8 +33,20 @@ bool CReflectionProbeManager::Initialize()
         return false;
     }
 
+    // 设置默认全局 IBL (index 0) - 纯灰色 fallback
+    // 防止没有加载 skybox 时 IBL 为空
+    fillSliceWithSolidColor(0, 0.2f, 0.2f, 0.2f);  // 灰色环境光
+    m_probeData.probes[0].position = { 0, 0, 0 };
+    m_probeData.probes[0].radius = 1e10f;  // 无限大 (fallback)
+    m_probeCount = 1;
+    m_probeData.probeCount = 1;
+
+    // 更新常量缓冲区
+    auto* context = CDX11Context::Instance().GetContext();
+    context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
+
     m_initialized = true;
-    CFFLog::Info("[ReflectionProbeManager] Initialized (max %d probes)", MAX_PROBES);
+    CFFLog::Info("[ReflectionProbeManager] Initialized (max %d probes, default fallback IBL set)", MAX_PROBES);
     return true;
 }
 
@@ -42,40 +56,25 @@ void CReflectionProbeManager::Shutdown()
     m_prefilteredArray.Reset();
     m_irradianceArraySRV.Reset();
     m_prefilteredArraySRV.Reset();
+    m_brdfLutSRV.Reset();
     m_cbProbes.Reset();
     m_probeCount = 0;
     m_initialized = false;
 }
 
-void CReflectionProbeManager::LoadProbesFromScene(
-    CScene& scene,
-    const std::string& globalIrradiancePath,
-    const std::string& globalPrefilteredPath)
+void CReflectionProbeManager::LoadLocalProbesFromScene(CScene& scene)
 {
     if (!m_initialized) {
         CFFLog::Error("[ReflectionProbeManager] Not initialized");
         return;
     }
 
-    // 重置 Probe 数据
-    m_probeCount = 0;
-    memset(&m_probeData, 0, sizeof(m_probeData));
-
-    // ============================================
-    // Index 0: 全局 IBL
-    // ============================================
-    m_probeData.probes[0].position = { 0, 0, 0 };
-    m_probeData.probes[0].radius = 1e10f;  // 无限大（fallback）
-
-    if (!globalIrradiancePath.empty() && !globalPrefilteredPath.empty()) {
-        if (loadAndCopyToArray(globalIrradiancePath, 0, true) &&
-            loadAndCopyToArray(globalPrefilteredPath, 0, false)) {
-            m_probeCount = 1;
-            CFFLog::Info("[ReflectionProbeManager] Loaded global IBL at index 0");
-        } else {
-            CFFLog::Warning("[ReflectionProbeManager] Failed to load global IBL");
-        }
+    // 保留全局 IBL (index 0)，只重置局部 Probe 数据 (index 1-7)
+    // 全局 IBL 由 Initialize() 设置默认值，或通过 LoadGlobalProbe() 更新
+    for (int i = 1; i < MAX_PROBES; i++) {
+        m_probeData.probes[i] = {};
     }
+    m_probeCount = 1;  // 保留全局 probe
 
     // ============================================
     // Index 1-7: 局部 Probe
@@ -211,30 +210,23 @@ bool CReflectionProbeManager::LoadGlobalProbe(const std::string& irrPath, const 
     return true;
 }
 
-bool CReflectionProbeManager::ReloadProbe(int probeIndex, const std::string& irrPath, const std::string& prefPath)
+bool CReflectionProbeManager::LoadBrdfLut(const std::string& brdfLutPath)
 {
     if (!m_initialized) {
         CFFLog::Error("[ReflectionProbeManager] Not initialized");
         return false;
     }
 
-    if (probeIndex < 0 || probeIndex >= MAX_PROBES) {
-        CFFLog::Error("[ReflectionProbeManager] Invalid probe index: %d", probeIndex);
+    // Load BRDF LUT using KTXLoader
+    m_brdfLutSRV.Reset();
+    m_brdfLutSRV = CKTXLoader::Load2DTextureSRVFromKTX2(brdfLutPath);
+
+    if (!m_brdfLutSRV) {
+        CFFLog::Error("[ReflectionProbeManager] Failed to load BRDF LUT: %s", brdfLutPath.c_str());
         return false;
     }
 
-    // Load probe at specified index
-    if (!loadAndCopyToArray(irrPath, probeIndex, true)) {
-        CFFLog::Error("[ReflectionProbeManager] Failed to reload probe %d irradiance", probeIndex);
-        return false;
-    }
-
-    if (!loadAndCopyToArray(prefPath, probeIndex, false)) {
-        CFFLog::Error("[ReflectionProbeManager] Failed to reload probe %d prefiltered", probeIndex);
-        return false;
-    }
-
-    CFFLog::Info("[ReflectionProbeManager] Probe %d reloaded", probeIndex);
+    CFFLog::Info("[ReflectionProbeManager] Loaded BRDF LUT: %s", brdfLutPath.c_str());
     return true;
 }
 
@@ -403,4 +395,133 @@ bool CReflectionProbeManager::loadAndCopyToArray(
 
     cubemap->Release();
     return success;
+}
+
+void CReflectionProbeManager::fillSliceWithSolidColor(int sliceIndex, float r, float g, float b)
+{
+    auto* device = CDX11Context::Instance().GetDevice();
+    auto* context = CDX11Context::Instance().GetContext();
+    if (!device || !context) return;
+
+    // ============================================
+    // 填充 Irradiance Array (32x32, 1 mip)
+    // ============================================
+    {
+        // 创建临时 staging texture
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = IRRADIANCE_SIZE;
+        desc.Height = IRRADIANCE_SIZE;
+        desc.MipLevels = 1;
+        desc.ArraySize = 6;  // 6 faces
+        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_STAGING;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        desc.MiscFlags = 0;  // Staging 不需要 TEXTURECUBE flag
+
+        ComPtr<ID3D11Texture2D> stagingTex;
+        HRESULT hr = device->CreateTexture2D(&desc, nullptr, &stagingTex);
+        if (FAILED(hr)) {
+            CFFLog::Error("[ReflectionProbeManager] Failed to create irradiance staging texture");
+            return;
+        }
+
+        // 填充每个 face
+        for (int face = 0; face < 6; face++) {
+            D3D11_MAPPED_SUBRESOURCE mapped;
+            hr = context->Map(stagingTex.Get(), face, D3D11_MAP_WRITE, 0, &mapped);
+            if (SUCCEEDED(hr)) {
+                // R16G16B16A16_FLOAT: 每像素 8 bytes (4 * 2 bytes)
+                uint16_t* pixels = reinterpret_cast<uint16_t*>(mapped.pData);
+
+                // 转换 float 到 half (简化版，使用 DirectX 的转换)
+                uint16_t hr16 = XMConvertFloatToHalf(r);
+                uint16_t hg16 = XMConvertFloatToHalf(g);
+                uint16_t hb16 = XMConvertFloatToHalf(b);
+                uint16_t ha16 = XMConvertFloatToHalf(1.0f);
+
+                for (int y = 0; y < IRRADIANCE_SIZE; y++) {
+                    uint16_t* row = reinterpret_cast<uint16_t*>(
+                        reinterpret_cast<uint8_t*>(mapped.pData) + y * mapped.RowPitch);
+                    for (int x = 0; x < IRRADIANCE_SIZE; x++) {
+                        row[x * 4 + 0] = hr16;
+                        row[x * 4 + 1] = hg16;
+                        row[x * 4 + 2] = hb16;
+                        row[x * 4 + 3] = ha16;
+                    }
+                }
+                context->Unmap(stagingTex.Get(), face);
+            }
+        }
+
+        // 拷贝到目标 array
+        for (int face = 0; face < 6; face++) {
+            UINT srcSubresource = D3D11CalcSubresource(0, face, 1);
+            UINT dstSubresource = D3D11CalcSubresource(0, sliceIndex * 6 + face, 1);
+            context->CopySubresourceRegion(
+                m_irradianceArray.Get(), dstSubresource, 0, 0, 0,
+                stagingTex.Get(), srcSubresource, nullptr);
+        }
+    }
+
+    // ============================================
+    // 填充 Prefiltered Array (128x128, 7 mips)
+    // ============================================
+    {
+        for (int mip = 0; mip < PREFILTERED_MIP_COUNT; mip++) {
+            int mipSize = PREFILTERED_SIZE >> mip;
+            if (mipSize < 1) mipSize = 1;
+
+            // 创建临时 staging texture (每个 mip 单独创建)
+            D3D11_TEXTURE2D_DESC desc = {};
+            desc.Width = mipSize;
+            desc.Height = mipSize;
+            desc.MipLevels = 1;
+            desc.ArraySize = 6;
+            desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            desc.SampleDesc.Count = 1;
+            desc.Usage = D3D11_USAGE_STAGING;
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+            desc.MiscFlags = 0;
+
+            ComPtr<ID3D11Texture2D> stagingTex;
+            HRESULT hr = device->CreateTexture2D(&desc, nullptr, &stagingTex);
+            if (FAILED(hr)) continue;
+
+            uint16_t hr16 = XMConvertFloatToHalf(r);
+            uint16_t hg16 = XMConvertFloatToHalf(g);
+            uint16_t hb16 = XMConvertFloatToHalf(b);
+            uint16_t ha16 = XMConvertFloatToHalf(1.0f);
+
+            for (int face = 0; face < 6; face++) {
+                D3D11_MAPPED_SUBRESOURCE mapped;
+                hr = context->Map(stagingTex.Get(), face, D3D11_MAP_WRITE, 0, &mapped);
+                if (SUCCEEDED(hr)) {
+                    for (int y = 0; y < mipSize; y++) {
+                        uint16_t* row = reinterpret_cast<uint16_t*>(
+                            reinterpret_cast<uint8_t*>(mapped.pData) + y * mapped.RowPitch);
+                        for (int x = 0; x < mipSize; x++) {
+                            row[x * 4 + 0] = hr16;
+                            row[x * 4 + 1] = hg16;
+                            row[x * 4 + 2] = hb16;
+                            row[x * 4 + 3] = ha16;
+                        }
+                    }
+                    context->Unmap(stagingTex.Get(), face);
+                }
+            }
+
+            // 拷贝到目标 array
+            for (int face = 0; face < 6; face++) {
+                UINT srcSubresource = D3D11CalcSubresource(0, face, 1);
+                UINT dstSubresource = D3D11CalcSubresource(mip, sliceIndex * 6 + face, PREFILTERED_MIP_COUNT);
+                context->CopySubresourceRegion(
+                    m_prefilteredArray.Get(), dstSubresource, 0, 0, 0,
+                    stagingTex.Get(), srcSubresource, nullptr);
+            }
+        }
+    }
+
+    CFFLog::Info("[ReflectionProbeManager] Filled slice %d with solid color (%.2f, %.2f, %.2f)",
+                sliceIndex, r, g, b);
 }

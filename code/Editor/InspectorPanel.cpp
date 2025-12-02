@@ -304,6 +304,10 @@ void Panels::DrawInspector(CScene& scene) {
                             if (success) {
                                 CFFLog::Info("Reflection Probe baked successfully!");
                                 rp->isDirty = false;
+
+                                // Reload probes to update TextureCubeArray with new data
+                                scene.ReloadProbesFromScene();
+                                CFFLog::Info("Scene probes reloaded");
                             } else {
                                 CFFLog::Error("Failed to bake Reflection Probe");
                             }

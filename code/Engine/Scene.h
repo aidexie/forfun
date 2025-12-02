@@ -3,7 +3,6 @@
 #include <string>
 #include "World.h"
 #include "Rendering/Skybox.h"
-#include "Rendering/IBLGenerator.h"
 #include "Rendering/ReflectionProbeManager.h"
 #include "SceneLightSettings.h"
 #include "Camera.h"
@@ -33,18 +32,12 @@ public:
     bool SaveToFile(const std::string& scenePath);
 
     // === Environment Resource Management ===
-    // Reload skybox display cubemap only
-    bool ReloadSkybox(const std::string& envKtxPath);
-    // Reload global IBL (irradiance + prefiltered)
-    bool ReloadIBL(const std::string& irrPath, const std::string& prefilterPath);
-    // Convenience: reload both skybox and IBL from .ffasset
+    // Reload skybox + global IBL from .ffasset
     bool ReloadEnvironment(const std::string& ffassetPath);
 
     // === Reflection Probe Management ===
     // Reload all probes from scene's ReflectionProbe components
     void ReloadProbesFromScene();
-    // Hot-reload single probe (after baking)
-    bool ReloadProbe(int probeIndex, const std::string& assetPath);
 
     // CWorld access
     CWorld& GetWorld() { return m_world; }
@@ -62,10 +55,6 @@ public:
     // Skybox access
     CSkybox& GetSkybox() { return m_skybox; }
     const CSkybox& GetSkybox() const { return m_skybox; }
-
-    // IBL access
-    CIBLGenerator& GetIBLGenerator() { return m_iblGen; }
-    const CIBLGenerator& GetIBLGenerator() const { return m_iblGen; }
 
     // Reflection Probe Manager access
     CReflectionProbeManager& GetProbeManager() { return m_probeManager; }
@@ -101,7 +90,6 @@ private:
     int m_selected = -1;
     std::string m_filePath;  // Current scene file path
     CSkybox m_skybox;
-    CIBLGenerator m_iblGen;
     CReflectionProbeManager m_probeManager;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
