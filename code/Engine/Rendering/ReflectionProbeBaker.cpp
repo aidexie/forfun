@@ -4,6 +4,7 @@
 #include "ShowFlags.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include "Core/ReflectionProbeAsset.h"
 #include "Core/Exporter/KTXExporter.h"
 #include "Core/RenderDocCapture.h"
@@ -156,7 +157,7 @@ bool CReflectionProbeBaker::BakeProbe(
     renderToCubemap(position, resolution, scene, m_cubemapRT.Get());
 
     // 3. 构建输出路径
-    std::string fullAssetPath = "E:/forfun/assets/" + outputAssetPath;
+    std::string fullAssetPath = FFPath::GetAbsolutePath(outputAssetPath);
     std::filesystem::path assetPath(fullAssetPath);
     std::string basePath = assetPath.parent_path().string();
 

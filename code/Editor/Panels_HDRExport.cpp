@@ -1,5 +1,6 @@
 #include "Panels.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include "imgui.h"
 #include <string>
 #include <iostream>
@@ -33,7 +34,10 @@ static std::string OpenFileDialog(const char* filter) {
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-    ofn.lpstrInitialDir = "E:\\forfun\\assets";
+
+    // Use FFPath for initial directory
+    std::string assetsDir = FFPath::GetAssetsDir();
+    ofn.lpstrInitialDir = assetsDir.c_str();
 
     if (GetOpenFileNameA(&ofn)) {
         return std::string(filename);

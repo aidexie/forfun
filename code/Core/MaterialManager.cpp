@@ -1,6 +1,7 @@
 #include "MaterialManager.h"
 #include "FFLog.h"
 #include "DebugPaths.h"
+#include "PathManager.h"
 
 CMaterialManager& CMaterialManager::Instance() {
     static CMaterialManager instance;
@@ -77,7 +78,5 @@ void CMaterialManager::Clear() {
 }
 
 std::string CMaterialManager::ResolveFullPath(const std::string& relativePath) const {
-    // Resolve relative to assets directory
-    // E.g., "materials/wood.mat" -> "E:/forfun/assets/materials/wood.mat"
-    return std::string("E:/forfun/assets/") + relativePath;
+    return FFPath::GetAbsolutePath(relativePath);
 }

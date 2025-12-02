@@ -35,6 +35,7 @@
 #include "Components/DirectionalLight.h"
 #include "DebugPaths.h"  // Debug output directories
 #include "FFLog.h"  // Logging system
+#include "PathManager.h"  // Unified path management
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -303,7 +304,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UpdateWindow(hwnd);
     CFFLog::Info("Window created: %dx%d", initW, initH);
 
-    // 2) DX11 初始化（仅DX）
+    // 2) FFPath initialization
+    FFPath::Initialize("E:/forfun");
+
+    // 3) DX11 初始化（仅DX）
     if (!CDX11Context::Instance().Initialize(hwnd, initW, initH)) {
         CFFLog::Error("Failed to initialize DX11 context!");
         exitCode = -2;
@@ -352,7 +356,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 7) Load default scene (if not in test mode)
     if (!activeTest)
     {
-        CScene::Instance().LoadFromFile("E:\\forfun\\assets\\assets\\scenes\\simple.scene");
+        // Use FFPath to resolve path (accepts relative or absolute)
+        std::string scenePath = FFPath::GetAbsolutePath("scenes/simple.scene");
+        CScene::Instance().LoadFromFile(scenePath);
     }
 
     // 6) 主循环

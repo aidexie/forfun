@@ -2,6 +2,7 @@
 #include "Core/Testing/TestRegistry.h"
 #include "Core/Testing/Screenshot.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include "Engine/Scene.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
@@ -40,7 +41,7 @@ public:
             mat->alphaMode = EAlphaMode::Mask;  // Enable alpha test
             mat->alphaCutoff = 0.5f;  // Cutoff threshold
             std::string matPath = "generated/GrassAlphaTest.ffasset";
-            mat->SaveToFile("E:/forfun/assets/" + matPath);
+            mat->SaveToFile(FFPath::GetAbsolutePath(matPath));
             delete mat;
 
             // Create grass object

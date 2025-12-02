@@ -1,18 +1,18 @@
 #include "TestCase.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include <cstdio>
 #include <cmath>
 #include <filesystem>
 
 // Helper functions for test paths
 std::string GetTestDebugDir(const char* testName) {
-    char buf[256];
-    snprintf(buf, sizeof(buf), "E:/forfun/debug/%s", testName);
+    std::string path = FFPath::GetDebugDir() + "/" + testName;
 
     // Create directory if it doesn't exist
-    std::filesystem::create_directories(buf);
+    std::filesystem::create_directories(path);
 
-    return buf;
+    return path;
 }
 
 std::string GetTestLogPath(const char* testName) {

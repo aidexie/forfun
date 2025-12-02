@@ -1,6 +1,7 @@
 #include "Scene.h"
 #include "Core/Loader/FFAssetLoader.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
@@ -26,7 +27,7 @@ bool CScene::Initialize() {
     }
 
     // Load BRDF LUT (shared across all environments)
-    std::string brdfLutPath = "E:/forfun/assets/skybox/brdf_lut.ktx2";
+    std::string brdfLutPath = FFPath::GetAbsolutePath("skybox/brdf_lut.ktx2");
     if (!m_iblGen.LoadBrdfLutFromKTX2(brdfLutPath)) {
         CFFLog::Error("Failed to load BRDF LUT from %s", brdfLutPath.c_str());
         return false;
@@ -128,11 +129,9 @@ bool CScene::ReloadIBL(const std::string& irrPath, const std::string& prefilterP
 bool CScene::ReloadEnvironment(const std::string& ffassetPath) {
     CFFLog::Info("Scene: Reloading environment from %s", ffassetPath.c_str());
 
-    // Build full path (add E:/forfun/assets/ prefix if relative)
-    std::string fullPath = ffassetPath;
-    if (!std::filesystem::path(ffassetPath).is_absolute()) {
-        fullPath = "E:/forfun/assets/" + ffassetPath;
-    }
+    // Normalize and resolve to absolute path
+    std::string normalizedPath = FFPath::Normalize(ffassetPath);
+    std::string fullPath = FFPath::GetAbsolutePath(ffassetPath);
 
     // Parse .ffasset file
     CFFAssetLoader::SkyboxAsset skyboxAsset;
@@ -151,8 +150,8 @@ bool CScene::ReloadEnvironment(const std::string& ffassetPath) {
         return false;
     }
 
-    // Update lightSettings
-    m_lightSettings.skyboxAssetPath = ffassetPath;
+    // Update lightSettings (store normalized relative path)
+    m_lightSettings.skyboxAssetPath = normalizedPath;
 
     // Reload global probe (index 0) with new IBL
     m_probeManager.LoadGlobalProbe(skyboxAsset.irrPath, skyboxAsset.prefilterPath);
@@ -169,11 +168,8 @@ void CScene::ReloadProbesFromScene() {
     // Get global IBL paths from current environment
     std::string globalIrrPath, globalPrefPath;
     if (!m_lightSettings.skyboxAssetPath.empty()) {
-        // Build full path (add E:/forfun/assets/ prefix if relative)
-        std::string fullPath = m_lightSettings.skyboxAssetPath;
-        if (!std::filesystem::path(fullPath).is_absolute()) {
-            fullPath = "E:/forfun/assets/" + fullPath;
-        }
+        // skyboxAssetPath is already normalized relative path
+        std::string fullPath = FFPath::GetAbsolutePath(m_lightSettings.skyboxAssetPath);
 
         CFFAssetLoader::SkyboxAsset skyboxAsset;
         if (CFFAssetLoader::LoadSkyboxAsset(fullPath, skyboxAsset)) {
@@ -189,9 +185,12 @@ void CScene::ReloadProbesFromScene() {
 bool CScene::ReloadProbe(int probeIndex, const std::string& assetPath) {
     CFFLog::Info("Scene: Reloading probe %d from %s", probeIndex, assetPath.c_str());
 
+    // Normalize and resolve path
+    std::string fullPath = FFPath::GetAbsolutePath(assetPath);
+
     // Parse probe .ffasset
     CFFAssetLoader::SkyboxAsset probeAsset;
-    if (!CFFAssetLoader::LoadSkyboxAsset(assetPath, probeAsset)) {
+    if (!CFFAssetLoader::LoadSkyboxAsset(fullPath, probeAsset)) {
         CFFLog::Error("Failed to load probe asset!");
         return false;
     }

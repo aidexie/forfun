@@ -3,6 +3,7 @@
 #include "Engine/Scene.h"
 #include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include <windows.h>
 #include <commdlg.h>
 
@@ -45,16 +46,9 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
             ofn.lpstrTitle = "Select Skybox Asset";
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
             if (GetOpenFileNameA(&ofn)) {
-                // Convert absolute path to relative path if possible
-                std::string selectedPath = fileName;
-
-                // Simple relative path conversion (assumes asset is in E:/forfun/assets)
-                size_t pos = selectedPath.find("assets");
-                if (pos != std::string::npos) {
-                    selectedPath = selectedPath.substr(pos + 7); // Skip "assets/"
-                }
-
-                settings.skyboxAssetPath = selectedPath;
+                // Normalize path using FFPath
+                std::string normalizedPath = FFPath::Normalize(fileName);
+                settings.skyboxAssetPath = normalizedPath;
 
                 // Apply immediately: reload environment (skybox + IBL)
                 CScene::Instance().ReloadEnvironment(settings.skyboxAssetPath);

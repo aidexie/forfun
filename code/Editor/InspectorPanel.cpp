@@ -12,6 +12,7 @@
 #include "Components/ReflectionProbe.h"
 #include "Rendering/ReflectionProbeBaker.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include <string>
 #include <windows.h>
 #include <commdlg.h>
@@ -155,16 +156,14 @@ public:
             ofn.lpstrFile = filename;
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-            ofn.lpstrInitialDir = "E:\\forfun\\assets";
+
+            // Use FFPath for initial directory
+            std::string assetsDir = FFPath::GetAssetsDir();
+            ofn.lpstrInitialDir = assetsDir.c_str();
 
             if (GetOpenFileNameA(&ofn)) {
-                std::string fullPath = filename;
-                std::string assetsPath = "E:\\forfun\\assets\\";
-                if (fullPath.find(assetsPath) == 0) {
-                    value = fullPath.substr(assetsPath.length());
-                } else {
-                    value = fullPath;
-                }
+                // Normalize path to relative format
+                value = FFPath::Normalize(filename);
             }
         }
         if (ImGui::IsItemHovered()) {

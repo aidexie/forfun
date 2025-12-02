@@ -1,6 +1,7 @@
 // Editor/DiagnosticLog.cpp
 #include "FFLog.h"
 #include "Console.h"
+#include "PathManager.h"  // FFPath namespace
 #include <ctime>
 #include <cstdarg>
 #include <fstream>
@@ -12,8 +13,15 @@
 
 using namespace DirectX;
 
-// Static runtime log path (default: global, can be overridden for test mode)
-static std::string s_runtimeLogPath = "E:/forfun/debug/logs/runtime.log";
+// Static runtime log path (initialized lazily after FFPath::Initialize)
+static std::string s_runtimeLogPath;
+
+static const std::string& GetRuntimeLogPathInternal() {
+    if (s_runtimeLogPath.empty() && FFPath::IsInitialized()) {
+        s_runtimeLogPath = FFPath::GetDebugDir() + "/logs/runtime.log";
+    }
+    return s_runtimeLogPath;
+}
 
 void CFFLog::SetRuntimeLogPath(const char* path) {
     s_runtimeLogPath = path;
@@ -27,7 +35,7 @@ void CFFLog::SetRuntimeLogPath(const char* path) {
 }
 
 const char* CFFLog::GetRuntimeLogPath() {
-    return s_runtimeLogPath.c_str();
+    return GetRuntimeLogPathInternal().c_str();
 }
 
 void CFFLog::BeginSession(const char* sessionType, const char* sessionName) {
@@ -265,7 +273,7 @@ void CFFLog::Info(const char* format, ...) {
     std::string logLine = std::string("[") + timestamp + "] [INFO] " + buffer;
 
     // Append to runtime log file
-    std::ofstream file(s_runtimeLogPath.c_str(), std::ios::app);
+    std::ofstream file(GetRuntimeLogPathInternal().c_str(), std::ios::app);
     if (file.is_open()) {
         file << logLine << "\n";
         file.close();
@@ -294,7 +302,7 @@ void CFFLog::Warning(const char* format, ...) {
 
     std::string logLine = std::string("[") + timestamp + "] [WARNING] " + buffer;
 
-    std::ofstream file(s_runtimeLogPath.c_str(), std::ios::app);
+    std::ofstream file(GetRuntimeLogPathInternal().c_str(), std::ios::app);
     if (file.is_open()) {
         file << logLine << "\n";
         file.close();
@@ -322,7 +330,7 @@ void CFFLog::Error(const char* format, ...) {
 
     std::string logLine = std::string("[") + timestamp + "] [ERROR] " + buffer;
 
-    std::ofstream file(s_runtimeLogPath.c_str(), std::ios::app);
+    std::ofstream file(GetRuntimeLogPathInternal().c_str(), std::ios::app);
     if (file.is_open()) {
         file << logLine << "\n";
         file.close();

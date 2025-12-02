@@ -7,6 +7,7 @@
 #include "Core/Loader/KTXLoader.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include <filesystem>
 
 using namespace DirectX;
@@ -99,7 +100,7 @@ void CReflectionProbeManager::LoadProbesFromScene(
         }
 
         // 构建 KTX2 路径
-        std::string assetFullPath = "E:/forfun/assets/" + probeComp->assetPath;
+        std::string assetFullPath = FFPath::GetAbsolutePath(probeComp->assetPath);
         CReflectionProbeAsset asset;
         if (!asset.LoadFromFile(assetFullPath)) {
             CFFLog::Warning("Failed to load probe asset: %s", assetFullPath.c_str());

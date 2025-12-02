@@ -2,6 +2,7 @@
 #include "DX11Context.h"
 #include "FFLog.h"
 #include "DebugPaths.h"
+#include "PathManager.h"
 #include "Loader/TextureLoader.h"
 #include <codecvt>
 #include <locale>
@@ -100,7 +101,7 @@ void CTextureManager::CreateDefaultTextures() {
 }
 
 std::string CTextureManager::ResolveFullPath(const std::string& relativePath) const {
-    return std::string("E:/forfun/assets/") + relativePath;
+    return FFPath::GetAbsolutePath(relativePath);
 }
 
 bool CTextureManager::LoadTextureFromFile(const std::string& fullPath, bool srgb, ComPtr<ID3D11ShaderResourceView>& outSRV) {

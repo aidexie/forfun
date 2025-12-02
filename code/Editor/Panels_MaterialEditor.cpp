@@ -3,6 +3,7 @@
 #include "Core/MaterialAsset.h"
 #include "Core/MaterialManager.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include "PropertyVisitor.h"
 #include <string>
 #include <windows.h>
@@ -96,16 +97,14 @@ public:
             ofn.lpstrFile = filename;
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-            ofn.lpstrInitialDir = "E:\\forfun\\assets";
+
+            // Use FFPath for initial directory
+            std::string assetsDir = FFPath::GetAssetsDir();
+            ofn.lpstrInitialDir = assetsDir.c_str();
 
             if (GetOpenFileNameA(&ofn)) {
-                std::string fullPath = filename;
-                std::string assetsPath = "E:\\forfun\\assets\\";
-                if (fullPath.find(assetsPath) == 0) {
-                    value = fullPath.substr(assetsPath.length());
-                } else {
-                    value = fullPath;
-                }
+                // Normalize path to relative format
+                value = FFPath::Normalize(filename);
             }
         }
 
@@ -144,7 +143,7 @@ void Panels::DrawMaterialEditor() {
 
         // Buttons: Save and Close
         if (ImGui::Button("Save", ImVec2(120, 0))) {
-            std::string fullPath = "E:/forfun/assets/" + s_EditingMaterialPath;
+            std::string fullPath = FFPath::GetAbsolutePath(s_EditingMaterialPath);
             if (s_EditingMaterial->SaveToFile(fullPath)) {
                 CFFLog::Info(("Material saved: " + s_EditingMaterialPath).c_str());
             } else {

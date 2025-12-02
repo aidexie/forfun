@@ -1,6 +1,7 @@
 #include "ClusteredLightingPass.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"  // FFPath namespace
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
@@ -268,9 +269,13 @@ void CClusteredLightingPass::CreateShaders(ID3D11Device* device) {
     ComPtr<ID3DBlob> csBlob;
     ComPtr<ID3DBlob> errorBlob;
 
+    // Build shader path
+    std::wstring shaderPath = std::wstring(FFPath::GetSourceDir().begin(), FFPath::GetSourceDir().end())
+                            + L"/Shader/ClusteredLighting.compute.hlsl";
+
     // Build Cluster Grid Compute Shader
     hr = D3DCompileFromFile(
-        L"E:/forfun/source/code/Shader/ClusteredLighting.compute.hlsl",
+        shaderPath.c_str(),
         nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
         "CSBuildClusterGrid", "cs_5_0",
         compileFlags, 0,
@@ -294,7 +299,7 @@ void CClusteredLightingPass::CreateShaders(ID3D11Device* device) {
 
     // Cull Lights Compute Shader
     hr = D3DCompileFromFile(
-        L"E:/forfun/source/code/Shader/ClusteredLighting.compute.hlsl",
+        shaderPath.c_str(),
         nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
         "CSCullLights", "cs_5_0",
         compileFlags, 0,
