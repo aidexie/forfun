@@ -1,6 +1,7 @@
 #include "SceneRenderer.h"
 #include "ShadowPass.h"
 #include "ShowFlags.h"
+#include "ReflectionProbeManager.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
@@ -42,6 +43,7 @@ struct RenderItem {
     ID3D11ShaderResourceView* emissiveSRV;
     bool hasRealMetallicRoughnessTexture;
     bool hasRealEmissiveMap;
+    int probeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
 };
 
 // 加载 Shader 源文件
@@ -117,7 +119,8 @@ struct alignas(16) CB_Object {
     int hasEmissiveMap;
     int alphaMode;
     float alphaCutoff;
-    XMFLOAT3 _pad;
+    int probeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
+    XMFLOAT2 _padObj;
 };
 
 struct alignas(16) CB_ClusteredParams {
@@ -190,7 +193,8 @@ void updateFrameConstants(
     context->UpdateSubresource(cbFrame, 0, nullptr, &cf, 0, 0);
 }
 
-// 绑定全局资源（Shadow, IBL）
+// 绑定全局资源（Shadow, BRDF LUT）
+// Note: IBL binding moved to ReflectionProbeManager::Bind() (t3, t4, b4)
 void bindGlobalResources(
     ID3D11DeviceContext* context,
     const CShadowPass::Output* shadowData)
@@ -202,13 +206,10 @@ void bindGlobalResources(
         context->PSSetShaderResources(2, 1, &shadowData->shadowMapArray);
     }
 
+    // t5: BRDF LUT (still from global IBL generator)
     CIBLGenerator& iblGen = CScene::Instance().GetIBLGenerator();
-    ID3D11ShaderResourceView* iblSRVs[3] = {
-        iblGen.GetIrradianceMapSRV(),
-        iblGen.GetPreFilteredMapSRV(),
-        iblGen.GetBrdfLutSRV()
-    };
-    context->PSSetShaderResources(3, 3, iblSRVs);
+    ID3D11ShaderResourceView* brdfLutSRV = iblGen.GetBrdfLutSRV();
+    context->PSSetShaderResources(5, 1, &brdfLutSRV);
 }
 
 // 更新物体常量
@@ -228,15 +229,18 @@ void updateObjectConstants(
     co.hasEmissiveMap = item.hasRealEmissiveMap ? 1 : 0;
     co.alphaMode = static_cast<int>(item.material->alphaMode);
     co.alphaCutoff = item.material->alphaCutoff;
+    co.probeIndex = item.probeIndex;  // Per-object probe selection
     context->UpdateSubresource(cbObj, 0, nullptr, &co, 0, 0);
 }
 
 // 收集并分类渲染项
+// Per-object probe selection via CReflectionProbeManager::SelectProbeForPosition()
 void collectRenderItems(
     CScene& scene,
     XMVECTOR eye,
     std::vector<RenderItem>& opaqueItems,
-    std::vector<RenderItem>& transparentItems)
+    std::vector<RenderItem>& transparentItems,
+    const CReflectionProbeManager* probeManager)
 {
     for (auto& objPtr : scene.GetWorld().Objects()) {
         auto* obj = objPtr.get();
@@ -271,6 +275,14 @@ void collectRenderItems(
         XMVECTOR delta = XMVectorSubtract(objPos, eye);
         float distance = XMVectorGetX(XMVector3Length(delta));
 
+        // Per-object probe selection (using object center position)
+        int probeIndex = 0;  // Default: global IBL
+        if (probeManager) {
+            XMFLOAT3 objPosF;
+            XMStoreFloat3(&objPosF, objPos);
+            probeIndex = probeManager->SelectProbeForPosition(objPosF);
+        }
+
         for (auto& gpuMesh : meshRenderer->meshes) {
             if (!gpuMesh) continue;
 
@@ -288,6 +300,7 @@ void collectRenderItems(
             item.emissiveSRV = emissiveSRV;
             item.hasRealMetallicRoughnessTexture = hasRealMetallicRoughnessTexture;
             item.hasRealEmissiveMap = hasRealEmissiveMap;
+            item.probeIndex = probeIndex;
 
             if (item.material->alphaMode == EAlphaMode::Blend) {
                 transparentItems.push_back(item);
@@ -306,6 +319,7 @@ void collectRenderItems(
 }
 
 // 渲染不透明Pass
+// Note: Reflection Probe binding is now via ReflectionProbeManager::Bind() (once per frame)
 void renderOpaquePass(
     ID3D11DeviceContext* context,
     const std::vector<RenderItem>& opaqueItems,
@@ -352,6 +366,7 @@ void renderOpaquePass(
 }
 
 // 渲染透明Pass
+// Note: Reflection Probe binding is now via ReflectionProbeManager::Bind() (once per frame)
 void renderTransparentPass(
     ID3D11DeviceContext* context,
     const std::vector<RenderItem>& transparentItems,
@@ -486,10 +501,15 @@ void CSceneRenderer::Render(
     context->PSSetConstantBuffers(3, 1, m_cbClusteredParams.GetAddressOf());
     m_clusteredLighting.BindToMainPass(context);
 
-    // Collect render items
+    // Bind Reflection Probe TextureCubeArray (t3, t4, b4)
+    // ProbeManager is initialized and loaded in CScene::Initialize()
+    auto& probeManager = scene.GetProbeManager();
+    probeManager.Bind(context);
+
+    // Collect render items (with per-object probe selection)
     std::vector<RenderItem> opaqueItems;
     std::vector<RenderItem> transparentItems;
-    collectRenderItems(scene, eye, opaqueItems, transparentItems);
+    collectRenderItems(scene, eye, opaqueItems, transparentItems, &probeManager);
 
     // Render Opaque
     { CScopedDebugEvent evt(context, L"Opaque Pass");

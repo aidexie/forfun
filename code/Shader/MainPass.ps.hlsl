@@ -6,8 +6,8 @@
 Texture2D gAlbedo : register(t0);
 Texture2D gNormal : register(t1);
 Texture2DArray gShadowMaps : register(t2);  // CSM: Texture2DArray
-TextureCube gIrradianceMap : register(t3);  // IBL: Diffuse irradiance
-TextureCube gPreFilteredMap : register(t4);  // IBL: Specular pre-filtered environment
+TextureCubeArray gIrradianceArray : register(t3);   // IBL: Irradiance (32x32, 8 probes)
+TextureCubeArray gPrefilteredArray : register(t4);  // IBL: Prefiltered (128x128, 8 probes)
 Texture2D gBrdfLUT : register(t5);  // IBL: BRDF lookup table
 Texture2D gMetallicRoughness : register(t6);  // G=Roughness, B=Metallic (glTF 2.0 standard)
 Texture2D gEmissiveMap : register(t7);  // Emissive texture (sRGB)
@@ -44,7 +44,24 @@ cbuffer CB_Object : register(b1) {
     int gHasEmissiveMap;
     int gAlphaMode;  // 0=Opaque, 1=Mask, 2=Blend
     float gAlphaCutoff;
-    float3 _padObj;
+    int gProbeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
+    float2 _padObj;
+}
+
+// ============================================
+// Reflection Probe Data
+// ============================================
+#define MAX_PROBES 8
+
+struct ProbeInfo {
+    float3 position;
+    float radius;
+};
+
+cbuffer CB_Probes : register(b4) {
+    ProbeInfo gProbes[MAX_PROBES];
+    int gProbeCount;
+    float3 _padProbes;
 }
 
 struct PSIn {
@@ -64,6 +81,9 @@ struct PSIn {
 // ============================================
 // Note: BRDF functions (DistributionGGX, GeometrySmith, FresnelSchlick, etc.)
 // are now in Common.hlsl (included via ClusteredShading.hlsl)
+
+// Note: Probe selection moved to CPU (per-object) via gProbeIndex in CB_Object
+// CB_Probes is kept for potential future use (blending, debug visualization)
 
 // ============================================
 // Shadow Functions
@@ -247,18 +267,21 @@ float4 main(PSIn i) : SV_Target {
 
 
     // ============================================
-    // IBL (Image-Based Lighting)
+    // IBL (Image-Based Lighting) - TextureCubeArray
     // ============================================
     // Calculate reflection vector for specular IBL
     float3 R = reflect(-V, N);
 
-    // Diffuse IBL: Sample irradiance map
-    float3 irradiance = gIrradianceMap.Sample(gSamp, N).rgb;
-    float3 diffuseIBL = irradiance * albedo;
+    // Per-object probe selection (from CB_Object, set by CPU)
+    float probeIdxF = float(gProbeIndex);  // 0 = global, 1-7 = local probes
 
-    // Specular IBL: Sample pre-filtered map based on roughness
+    // Sample from TextureCubeArray
     const float MAX_REFLECTION_LOD = 6.0;  // 7 mip levels (0-6)
-    float3 prefilteredColor = gPreFilteredMap.SampleLevel(gSamp, R, roughness * MAX_REFLECTION_LOD).rgb;
+    float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
+    float3 prefilteredColor = gPrefilteredArray.SampleLevel(gSamp, float4(R, probeIdxF), roughness * MAX_REFLECTION_LOD).rgb;
+
+    // Diffuse IBL
+    float3 diffuseIBL = irradiance * albedo;
 
     // Sample BRDF LUT (X: NdotV, Y: roughness)
     float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;

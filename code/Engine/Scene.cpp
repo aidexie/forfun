@@ -66,6 +66,15 @@ bool CScene::Initialize(const std::string& skybox_path) {
         }
 
         CFFLog::Info("Scene: Pre-baked IBL loaded successfully!");
+
+        // Initialize Reflection Probe Manager
+        if (!m_probeManager.Initialize()) {
+            CFFLog::Error("Failed to initialize ReflectionProbeManager!");
+            return false;
+        }
+
+        // Load probes (global IBL + local probes from scene)
+        m_probeManager.LoadProbesFromScene(*this, skyboxAsset.irrPath, skyboxAsset.prefilterPath);
     }
     CFFLog::Info("Scene: Initialization complete!");
     CFFLog::Info("Note: Debug visualization can be enabled via IBL Debug window.");
@@ -75,6 +84,7 @@ bool CScene::Initialize(const std::string& skybox_path) {
 
 void CScene::Shutdown() {
     CFFLog::Info("Scene: Shutting down...");
+    m_probeManager.Shutdown();
     m_skybox.Shutdown();
     m_iblGen.Shutdown();
     m_initialized = false;

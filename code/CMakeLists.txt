@@ -77,6 +77,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestSimplePointLight.cpp
     ${CODE_PATH}/Tests/TestSpotLight.cpp
     ${CODE_PATH}/Tests/TestCopyPaste.cpp
+    ${CODE_PATH}/Tests/TestReflectionProbe.cpp
 )
 
 add_executable(forfun WIN32
@@ -146,6 +147,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeBaker.h
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeBaker.cpp
+    ${CODE_PATH}/Engine/Rendering/ReflectionProbeManager.h
+    ${CODE_PATH}/Engine/Rendering/ReflectionProbeManager.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h

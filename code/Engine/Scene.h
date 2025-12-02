@@ -4,8 +4,9 @@
 #include "World.h"
 #include "Rendering/Skybox.h"
 #include "Rendering/IBLGenerator.h"
+#include "Rendering/ReflectionProbeManager.h"
 #include "SceneLightSettings.h"
-#include "Camera.h"  // ✅ 新增：编辑器相机
+#include "Camera.h"
 
 // CScene singleton - manages CWorld, skybox, and IBL resources
 class CScene {
@@ -47,6 +48,10 @@ public:
     CIBLGenerator& GetIBLGenerator() { return m_iblGen; }
     const CIBLGenerator& GetIBLGenerator() const { return m_iblGen; }
 
+    // Reflection Probe Manager access
+    CReflectionProbeManager& GetProbeManager() { return m_probeManager; }
+    const CReflectionProbeManager& GetProbeManager() const { return m_probeManager; }
+
     // Light settings access
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
@@ -78,10 +83,10 @@ private:
     std::string m_filePath;  // Current scene file path
     CSkybox m_skybox;
     CIBLGenerator m_iblGen;
+    CReflectionProbeManager m_probeManager;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
 
-    // ✅ 编辑器相机（Scene 负责管理逻辑数据）
     CCamera m_editorCamera;
 };
 
