@@ -10,7 +10,9 @@
 #include "Components/PointLight.h"
 #include "Components/SpotLight.h"
 #include "Components/ReflectionProbe.h"
+#include "Components/LightProbe.h"
 #include "Rendering/ReflectionProbeBaker.h"
+#include "Rendering/LightProbeBaker.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"  // FFPath namespace
 #include <string>
@@ -329,6 +331,74 @@ void Panels::DrawInspector(CScene& scene) {
         } else {
             if (ImGui::Button("Add ReflectionProbe")) {
                 sel->AddComponent<SReflectionProbe>();
+            }
+        }
+
+        // LightProbe component
+        if (auto* lp = sel->GetComponent<SLightProbe>()) {
+            if (ImGui::CollapsingHeader("LightProbe", ImGuiTreeNodeFlags_DefaultOpen)) {
+                lp->VisitProperties(visitor);
+
+                ImGui::Separator();
+
+                // Bake Now button
+                if (ImGui::Button("Bake Light Probe", ImVec2(-1, 0))) {
+                    // Get probe position from Transform
+                    auto* tr = sel->GetComponent<STransform>();
+                    if (!tr) {
+                        CFFLog::Error("LightProbe requires Transform component");
+                    } else {
+                        // Create baker
+                        static CLightProbeBaker baker;
+                        if (!baker.Initialize()) {
+                            CFFLog::Error("Failed to initialize LightProbeBaker");
+                        } else {
+                            // Bake the probe
+                            CFFLog::Info("Baking Light Probe at (%.1f, %.1f, %.1f)...",
+                                        tr->position.x, tr->position.y, tr->position.z);
+                            bool success = baker.BakeProbe(
+                                *lp,
+                                tr->position,
+                                scene
+                            );
+
+                            if (success) {
+                                CFFLog::Info("Light Probe baked successfully!");
+                                lp->isDirty = false;
+                            } else {
+                                CFFLog::Error("Failed to bake Light Probe");
+                            }
+                        }
+                    }
+                }
+
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Bake light probe SH coefficients from scene lighting");
+                }
+
+                // Show dirty status
+                if (lp->isDirty) {
+                    ImGui::TextColored(ImVec4(1, 0.8f, 0, 1), "Status: Needs Rebake");
+                } else {
+                    ImGui::TextColored(ImVec4(0, 1, 0, 1), "Status: Up to Date");
+                }
+
+                // Display SH coefficients (read-only, for debugging)
+                ImGui::Separator();
+                ImGui::Text("SH Coefficients (L0-L2):");
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.15f, 0.15f, 0.15f, 0.5f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+                for (int i = 0; i < 9; i++) {
+                    char label[32];
+                    snprintf(label, sizeof(label), "SH[%d]", i);
+                    float arr[3] = { lp->shCoeffs[i].x, lp->shCoeffs[i].y, lp->shCoeffs[i].z };
+                    ImGui::InputFloat3(label, arr, "%.4f", ImGuiInputTextFlags_ReadOnly);
+                }
+                ImGui::PopStyleColor(2);
+            }
+        } else {
+            if (ImGui::Button("Add LightProbe")) {
+                sel->AddComponent<SLightProbe>();
             }
         }
 

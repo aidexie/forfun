@@ -6,7 +6,17 @@
       "Bash(cmake --build:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(cat:*)",
+      "Bash(timeout 20 E:/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(timeout 20 ./build/Debug/forfun.exe:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(dir /b/s E:forfunassets*.ffasset)",
+      "Bash(cmake:*)",
+      "Bash(timeout 15 E:/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(timeout 10 E:/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(dir /b E:forfundebug)"
     ],
     "deny": [],
     "ask": []

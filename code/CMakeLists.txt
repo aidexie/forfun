@@ -48,6 +48,11 @@ if (MSVC)
 endif()
 
 file(GLOB_RECURSE CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
+# Explicitly list SphericalHarmonics for visibility
+set(CORE_SRC ${CORE_SRC}
+    ${CODE_PATH}/Core/SphericalHarmonics.h
+    ${CODE_PATH}/Core/SphericalHarmonics.cpp
+)
 file(GLOB ENGINE_SRC ${CODE_PATH}/Engine/*.cpp ${CODE_PATH}/Engine/*.h)
 set(EDITOR_SRC
     ${CODE_PATH}/Editor/EditorContext.h
@@ -78,6 +83,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestSpotLight.cpp
     ${CODE_PATH}/Tests/TestCopyPaste.cpp
     ${CODE_PATH}/Tests/TestReflectionProbe.cpp
+    ${CODE_PATH}/Tests/TestLightProbeSH.cpp
 )
 
 add_executable(forfun WIN32
@@ -130,6 +136,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Components/DirectionalLight.h
     ${CODE_PATH}/Engine/Components/PointLight.h
     ${CODE_PATH}/Engine/Components/SpotLight.h
+    ${CODE_PATH}/Engine/Components/LightProbe.h
+    ${CODE_PATH}/Engine/Components/ReflectionProbe.h
     # ✅ New Rendering Architecture
     ${CODE_PATH}/Engine/Rendering/ShowFlags.h
     ${CODE_PATH}/Engine/Rendering/RenderPipeline.h
@@ -149,6 +157,10 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeBaker.cpp
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeManager.h
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeManager.cpp
+    ${CODE_PATH}/Engine/Rendering/LightProbeManager.h
+    ${CODE_PATH}/Engine/Rendering/LightProbeManager.cpp
+    ${CODE_PATH}/Engine/Rendering/LightProbeBaker.h
+    ${CODE_PATH}/Engine/Rendering/LightProbeBaker.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h

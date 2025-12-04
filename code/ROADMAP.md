@@ -254,9 +254,9 @@ struct SReflectionProbe : public IComponent {
 
 **测试场景**: 室内走廊，金属门把手
 
-### 2.4 Light Probe (球谐光照) - 可选，3-4天
+### 2.4 Light Probe (球谐光照) - 🚧 进行中，3-4天
 
-**优先级**: ⚠️ **低优先级，建议Phase 2先跳过**
+**优先级**: ⚠️ **低优先级，但用户选择实现**
 
 **原因**:
 - 实现复杂（SH编码/解码，数学密集）
@@ -268,27 +268,35 @@ struct SReflectionProbe : public IComponent {
 - 大型开放世界（需要per-region环境光）
 - 完整GI解决方案
 
-**如果实现**:
+**数学前置知识** (详见下方 Math Prerequisites 章节):
+1. 球坐标系 (Spherical Coordinates)
+2. 勒让德多项式 (Legendre Polynomials)
+3. 球谐函数 (Spherical Harmonics)
+4. 球面积分 (Spherical Integration)
+5. 正交基函数 (Orthogonal Basis Functions)
 
 **组件**:
 ```cpp
 struct SLightProbe : public IComponent {
-    float sh[9 * 3];  // 9个球谐系数 × RGB (L0-L2)
-    XMFLOAT3 boxMin, boxMax;
+    float sh[9][3];  // 9个球谐系数 × RGB (L0-L2)
+    XMFLOAT3 boxMin{-5, -5, -5};
+    XMFLOAT3 boxMax{5, 5, 5};
     float blendDistance = 1.0f;
 };
 ```
 
 **核心技术**:
 1. **SH Encoding** - 将cubemap投影到球谐基函数
-2. **SH Decoding in Shader**
-3. **Probe Blending**
+2. **SH Decoding in Shader** - 从SH系数重建辐照度
+3. **Probe Blending** - 多Probe基于距离的权重混合
 
 **与 Reflection Probe 区别**:
 - **Reflection Probe**: 镜面反射（高频），cubemap，用于金属
 - **Light Probe**: 漫反射（低频），球谐，用于非金属
 
 **验收标准**: TestLightProbe 通过
+- 场景：红墙（左）+ 蓝墙（右）+ 白色漫反射球体（中间）
+- VISUAL_EXPECTATION: 球体左侧偏红，右侧偏蓝，中间平滑过渡
 
 ### 2.5 Deferred 渲染 - ❌ 不推荐实现
 
@@ -304,11 +312,136 @@ struct SLightProbe : public IComponent {
 
 **决策**: Phase 2跳过，Forward+作为主渲染路径
 
-**时间估计**: Phase 2 总计 3-3.5 周
+### 2.6 渲染优化：Batching & Instancing - 2-3天
+
+**目标**: 减少 Draw Call，提升大量物体渲染性能
+
+**优先级**: 中等（性能优化）
+
+**核心技术**:
+
+1. **Static Batching（静态合批）**
+   - 合并静态物体的 Mesh 到单个 VB/IB
+   - 适用场景：建筑、地形装饰、静态道具
+   - 限制：物体不能移动，共享材质
+
+2. **GPU Instancing（GPU 实例化）**
+   - 单次 Draw Call 渲染多个相同 Mesh 的实例
+   - 使用 `DrawIndexedInstanced()`
+   - Per-instance 数据：Transform Matrix, Material ID
+
+   ```hlsl
+   // Vertex Shader
+   struct InstanceData {
+       float4x4 worldMatrix;
+       uint materialID;
+   };
+   StructuredBuffer<InstanceData> gInstanceData : register(t10);
+
+   VSOutput main(VSInput input, uint instanceID : SV_InstanceID) {
+       InstanceData inst = gInstanceData[instanceID];
+       float4 worldPos = mul(float4(input.position, 1.0), inst.worldMatrix);
+       // ...
+   }
+   ```
+
+3. **Dynamic Batching（动态合批，可选）**
+   - 运行时合并小 Mesh（< 300 顶点）
+   - CPU 开销较大，需谨慎使用
+
+**实现步骤**:
+1. 添加 `SInstancedMeshRenderer` 组件
+2. 修改 MainPass 支持 Instanced Draw Call
+3. 实现 Instance Data Buffer 管理
+4. 添加材质兼容性检查（相同材质才能合批）
+
+**验收标准**: TestInstancing 通过
+- 场景：1000 个相同的立方体（不同位置/旋转）
+- 性能：Draw Call 从 1000 降低到 1
+- ASSERT: Draw Call Count == 1
+
+**测试场景**: 森林（大量树木）、城市（重复建筑）
+
+### 2.7 Lightmap 支持 - 3-4天
+
+**目标**: 烘焙静态光照到纹理，提升静态场景性能和视觉质量
+
+**优先级**: 中等（静态场景优化）
+
+**核心技术**:
+
+1. **UV2 生成（Lightmap UV）**
+   - 独立的 UV 通道（不重叠，均匀分布）
+   - 工具：手动展 UV 或使用 xatlas 库自动生成
+
+   ```cpp
+   struct Vertex {
+       XMFLOAT3 position;
+       XMFLOAT3 normal;
+       XMFLOAT2 uv;        // 原始 UV（用于 Albedo 等纹理）
+       XMFLOAT2 lightmapUV; // Lightmap UV（用于烘焙光照）
+   };
+   ```
+
+2. **Lightmap Baking（编辑器工具）**
+   - 对每个静态物体，渲染其 Lightmap UV 空间的光照
+   - 输入：场景中所有光源（Directional, Point, Spot）
+   - 输出：Lightmap 纹理（HDR 格式，如 R16G16B16A16_FLOAT）
+   - 算法：光线追踪或光栅化（简化版可用 Shadow Map）
+
+3. **Shader 集成**
+   ```hlsl
+   // MainPass.ps.hlsl
+   Texture2D gLightmap : register(t5);
+
+   float4 PSMain(PSInput input) : SV_Target {
+       // 采样 Lightmap
+       float3 bakedLighting = gLightmap.Sample(gSampler, input.lightmapUV).rgb;
+
+       // 混合动态光照和烘焙光照
+       float3 dynamicLighting = CalculateDynamicLights(...);
+       float3 finalColor = albedo * (bakedLighting + dynamicLighting);
+
+       return float4(finalColor, 1.0);
+   }
+   ```
+
+4. **组件支持**
+   ```cpp
+   struct SMeshRenderer : public IComponent {
+       std::string meshPath;
+       std::string materialPath;
+       bool isStatic = false;           // 是否参与 Lightmap 烘焙
+       std::string lightmapPath;        // 烘焙后的 Lightmap 纹理路径
+       XMFLOAT4 lightmapScaleOffset;    // Lightmap UV 的缩放和偏移（支持 Atlas）
+   };
+   ```
+
+**实现步骤**:
+1. 扩展 Vertex 结构，添加 `lightmapUV`
+2. 实现 Lightmap Baking 工具（编辑器 Panel）
+3. 修改 Shader 支持 Lightmap 采样
+4. 添加 Lightmap Atlas 管理（多个物体共享一张大纹理）
+
+**验收标准**: TestLightmap 通过
+- 场景：静态房间 + 1 个 Directional Light + 2 个 Point Light
+- 烘焙后：关闭动态光源，场景仍然正确显示光照和阴影
+- VISUAL_EXPECTATION: 烘焙光照与动态光照视觉一致
+
+**测试场景**: 室内场景（静态墙壁、地板、家具）
+
+**与 Light Probe 的区别**:
+- **Lightmap**: 静态物体的烘焙光照（高分辨率纹理）
+- **Light Probe**: 动态物体的环境光（低频球谐系数）
+- **配合使用**: Lightmap 用于静态场景，Light Probe 用于动态角色
+
+**时间估计**: Phase 2 总计 4-5 周
 - Point Light + Forward+: 1-1.5周
 - Spot Light: 3-4天
 - Reflection Probe: 1周
-- Light Probe (可选): 跳过或3-4天
+- Light Probe: 3-4天
+- Batching & Instancing: 2-3天
+- Lightmap: 3-4天
 
 ---
 
