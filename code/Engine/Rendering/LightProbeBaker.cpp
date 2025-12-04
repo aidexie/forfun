@@ -4,159 +4,14 @@
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
 #include "Core/SphericalHarmonics.h"
-#include "Core/PathManager.h"
-#include "Core/RenderDocCapture.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Camera.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/LightProbe.h"
-#include <DirectXPackedVector.h>
-#include <wincodec.h>
-#include <wrl/client.h>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
-using namespace DirectX::PackedVector;
-
-// ============================================
-// Debug Helper: Save cubemap faces to PNG files
-// ============================================
-static void SaveCubemapFacesToPNG(ID3D11Texture2D* cubemap, const XMFLOAT3& position)
-{
-    auto* device = CDX11Context::Instance().GetDevice();
-    auto* context = CDX11Context::Instance().GetContext();
-
-    // Get cubemap description
-    D3D11_TEXTURE2D_DESC desc;
-    cubemap->GetDesc(&desc);
-
-    // Create staging texture for CPU readback
-    D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
-
-    ComPtr<ID3D11Texture2D> stagingTexture;
-    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeBaker] Failed to create staging texture for debug output");
-        return;
-    }
-
-    // Copy cubemap to staging texture
-    context->CopyResource(stagingTexture.Get(), cubemap);
-
-    // Initialize WIC
-    ComPtr<IWICImagingFactory> wicFactory;
-    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wicFactory));
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeBaker] Failed to create WIC factory");
-        return;
-    }
-
-    // Face names for output files
-    const char* faceNames[] = { "PosX", "NegX", "PosY", "NegY", "PosZ", "NegZ" };
-
-    // Save each face
-    for (int face = 0; face < 6; face++)
-    {
-        // Map staging texture
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        UINT subresource = D3D11CalcSubresource(0, face, 1);
-        hr = context->Map(stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
-        if (FAILED(hr)) {
-            CFFLog::Error("[LightProbeBaker] Failed to map staging texture face %d", face);
-            continue;
-        }
-
-        // Convert RGBA16F to RGBA8 for PNG output
-        int width = desc.Width;
-        int height = desc.Height;
-        std::vector<uint8_t> rgba8Data(width * height * 4);
-
-        const uint16_t* src = (const uint16_t*)mapped.pData;
-        for (int y = 0; y < height; y++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                int srcIdx = (y * (mapped.RowPitch / sizeof(uint16_t))) + x * 4;
-                int dstIdx = (y * width + x) * 4;
-
-                // Convert float16 to float32 to uint8 (simple tone mapping)
-                for (int c = 0; c < 4; c++)
-                {
-                    float value = XMConvertHalfToFloat(src[srcIdx + c]);
-                    value = std::min(1.0f, std::max(0.0f, value)); // Clamp to [0, 1]
-                    rgba8Data[dstIdx + c] = (uint8_t)(value * 255.0f);
-                }
-            }
-        }
-
-        context->Unmap(stagingTexture.Get(), subresource);
-
-        // Create output filename
-        std::stringstream ss;
-        ss << FFPath::GetDebugDir() << "/lightprobe_"
-           << std::fixed << std::setprecision(1)
-           << position.x << "_" << position.y << "_" << position.z
-           << "_" << faceNames[face] << ".png";
-        std::string filename = ss.str();
-
-        // Convert to wide string for WIC
-        std::wstring wfilename(filename.begin(), filename.end());
-
-        // Create WIC stream
-        ComPtr<IWICStream> stream;
-        hr = wicFactory->CreateStream(&stream);
-        if (FAILED(hr)) continue;
-
-        hr = stream->InitializeFromFilename(wfilename.c_str(), GENERIC_WRITE);
-        if (FAILED(hr)) {
-            CFFLog::Error("[LightProbeBaker] Failed to create output file: %s", filename.c_str());
-            continue;
-        }
-
-        // Create PNG encoder
-        ComPtr<IWICBitmapEncoder> encoder;
-        hr = wicFactory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder);
-        if (FAILED(hr)) continue;
-
-        hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
-        if (FAILED(hr)) continue;
-
-        // Create frame
-        ComPtr<IWICBitmapFrameEncode> frame;
-        hr = encoder->CreateNewFrame(&frame, nullptr);
-        if (FAILED(hr)) continue;
-
-        hr = frame->Initialize(nullptr);
-        if (FAILED(hr)) continue;
-
-        hr = frame->SetSize(width, height);
-        if (FAILED(hr)) continue;
-
-        WICPixelFormatGUID format = GUID_WICPixelFormat32bppRGBA;
-        hr = frame->SetPixelFormat(&format);
-        if (FAILED(hr)) continue;
-
-        // Write pixels
-        hr = frame->WritePixels(height, width * 4, (UINT)rgba8Data.size(), rgba8Data.data());
-        if (FAILED(hr)) continue;
-
-        hr = frame->Commit();
-        if (FAILED(hr)) continue;
-
-        hr = encoder->Commit();
-        if (FAILED(hr)) continue;
-
-        CFFLog::Info("[LightProbeBaker] Saved debug image: %s", filename.c_str());
-    }
-}
 
 // ============================================
 // Helper: Setup camera for cubemap face rendering
@@ -274,9 +129,6 @@ bool CLightProbeBaker::BakeProbe(
     // 1. 渲染 Cubemap
     renderToCubemap(position, scene, m_cubemapRT.Get());
 
-    // DEBUG: Save cubemap faces to PNG files
-    SaveCubemapFacesToPNG(m_cubemapRT.Get(), position);
-
     // 2. 投影到 SH 系数
     if (!projectCubemapToSH(m_cubemapRT.Get(), probe.shCoeffs)) {
         CFFLog::Error("[LightProbeBaker] Failed to project cubemap to SH");
@@ -335,13 +187,6 @@ void CLightProbeBaker::renderToCubemap(
     auto* context = CDX11Context::Instance().GetContext();
 
     // RenderDoc 捕获：自动捕获第一个面的渲染
-    // 这样你可以在 RenderDoc 中查看烘焙时的渲染状态
-    static bool s_captureFirstFace = true;
-    if (s_captureFirstFace)
-    {
-        CRenderDocCapture::BeginFrameCapture();
-        s_captureFirstFace = false; // 只捕获一次
-    }
     // 为每个 face 创建 RTV
     ComPtr<ID3D11RenderTargetView> faceRTVs[6];
     for (int face = 0; face < 6; face++)
@@ -383,8 +228,6 @@ void CLightProbeBaker::renderToCubemap(
     ID3D11RenderTargetView* nullRTV = nullptr;
     ID3D11DepthStencilView* nullDSV = nullptr;
     context->OMSetRenderTargets(1, &nullRTV, nullDSV);
-    // 在所有 6 个面渲染完成后结束 RenderDoc 捕获
-    CRenderDocCapture::EndFrameCapture();
 }
 
 void CLightProbeBaker::renderCubemapFace(
