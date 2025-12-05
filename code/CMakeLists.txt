@@ -84,6 +84,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestCopyPaste.cpp
     ${CODE_PATH}/Tests/TestReflectionProbe.cpp
     ${CODE_PATH}/Tests/TestLightProbeSH.cpp
+    ${CODE_PATH}/Tests/TestLightProbeIntegration.cpp
 )
 
 add_executable(forfun WIN32

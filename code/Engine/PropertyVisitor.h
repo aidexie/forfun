@@ -25,6 +25,15 @@ public:
     // Math types
     virtual void VisitFloat3(const char* name, DirectX::XMFLOAT3& value) = 0;
 
+    // Float3 array (for SH coefficients, etc.)
+    // Default implementation: visit each element as "name[i]"
+    virtual void VisitFloat3Array(const char* name, DirectX::XMFLOAT3* values, int count) {
+        for (int i = 0; i < count; i++) {
+            std::string elemName = std::string(name) + "[" + std::to_string(i) + "]";
+            VisitFloat3(elemName.c_str(), values[i]);
+        }
+    }
+
     // Float3 read-only (for display only, cannot be edited)
     virtual void VisitFloat3ReadOnly(const char* name, const DirectX::XMFLOAT3& value) {
         // Fallback: do nothing (read-only fields are optional for serialization)

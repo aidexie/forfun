@@ -2,6 +2,7 @@
 // PBR rendering with CSM shadow mapping
 
 #include "ClusteredShading.hlsl"  // Clustered point light support
+#include "LightProbe.hlsl"        // Light Probe SH support
 
 Texture2D gAlbedo : register(t0);
 Texture2D gNormal : register(t1);
@@ -277,11 +278,23 @@ float4 main(PSIn i) : SV_Target {
 
     // Sample from TextureCubeArray
     const float MAX_REFLECTION_LOD = 6.0;  // 7 mip levels (0-6)
-    float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
     float3 prefilteredColor = gPrefilteredArray.SampleLevel(gSamp, float4(R, probeIdxF), roughness * MAX_REFLECTION_LOD).rgb;
 
-    // Diffuse IBL
-    float3 diffuseIBL = irradiance * albedo;
+    // Diffuse IBL: Light Probe (SH) or Fallback to Global IBL
+    // Light Probe provides localized diffuse environment lighting using Spherical Harmonics
+    // If no Light Probe coverage, fallback to global Reflection Probe's irradiance map
+    bool hasLightProbe;
+    float3 lightProbeIrradiance = SampleLightProbes(i.posWS, N, hasLightProbe);
+
+    float3 diffuseIBL;
+    if (hasLightProbe) {
+        // Use Light Probe SH (localized diffuse lighting)
+        diffuseIBL = lightProbeIrradiance * albedo;
+    } else {
+        // Fallback to global IBL (Reflection Probe's irradiance)
+        float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
+        diffuseIBL = irradiance * albedo;
+    }
 
     // Sample BRDF LUT (X: NdotV, Y: roughness)
     float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;

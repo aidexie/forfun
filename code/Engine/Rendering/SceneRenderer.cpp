@@ -505,6 +505,11 @@ void CSceneRenderer::Render(
     auto& probeManager = scene.GetProbeManager();
     probeManager.Bind(context);
 
+    // Bind Light Probe StructuredBuffer (t15, b5)
+    // LightProbeManager provides SH coefficients for diffuse IBL
+    auto& lightProbeManager = scene.GetLightProbeManager();
+    lightProbeManager.Bind(context);
+
     // Collect render items (with per-object probe selection)
     std::vector<RenderItem> opaqueItems;
     std::vector<RenderItem> transparentItems;

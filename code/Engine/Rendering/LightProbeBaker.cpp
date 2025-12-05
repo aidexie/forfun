@@ -4,12 +4,21 @@
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
 #include "Core/SphericalHarmonics.h"
+#include "Core/RenderDocCapture.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Camera.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/LightProbe.h"
+#include <memory>
+#include <vector>
+#include <array>
+#include <DirectXMath.h>
+#include <DirectXPackedVector.h>
+#include <fstream>
+#include "Core/PathManager.h"
 
+#include "stb_image_write.h"
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
@@ -37,11 +46,11 @@ static void SetupCameraForCubemapFace(CCamera& camera, int face, const XMFLOAT3&
         break;
     case 2: // +Y (Up)
         target = XMFLOAT3(position.x, position.y + 1.0f, position.z);
-        up = XMFLOAT3(0, 0, -1);
+        up = XMFLOAT3(0, 0, -1);  // 左手坐标系: up = -Z
         break;
     case 3: // -Y (Down)
         target = XMFLOAT3(position.x, position.y - 1.0f, position.z);
-        up = XMFLOAT3(0, 0, 1);
+        up = XMFLOAT3(0, 0, 1);   // 左手坐标系: up = +Z
         break;
     case 4: // +Z (Forward)
         target = XMFLOAT3(position.x, position.y, position.z + 1.0f);
@@ -56,10 +65,7 @@ static void SetupCameraForCubemapFace(CCamera& camera, int face, const XMFLOAT3&
     camera.SetLookAt(position, target, up);
 }
 
-CLightProbeBaker::CLightProbeBaker()
-    : m_pipeline(nullptr)
-{
-}
+CLightProbeBaker::CLightProbeBaker() = default;
 
 CLightProbeBaker::~CLightProbeBaker()
 {
@@ -74,11 +80,10 @@ bool CLightProbeBaker::Initialize()
     }
 
     // 创建 rendering pipeline
-    m_pipeline = new CForwardRenderPipeline();
+    m_pipeline = std::make_unique<CForwardRenderPipeline>();
     if (!m_pipeline->Initialize()) {
         CFFLog::Error("[LightProbeBaker] Failed to initialize ForwardRenderPipeline");
-        delete m_pipeline;
-        m_pipeline = nullptr;
+        m_pipeline.reset();
         return false;
     }
 
@@ -86,8 +91,7 @@ bool CLightProbeBaker::Initialize()
     if (!createCubemapRenderTarget()) {
         CFFLog::Error("[LightProbeBaker] Failed to create cubemap render target");
         m_pipeline->Shutdown();
-        delete m_pipeline;
-        m_pipeline = nullptr;
+        m_pipeline.reset();
         return false;
     }
 
@@ -106,8 +110,7 @@ void CLightProbeBaker::Shutdown()
 
     if (m_pipeline) {
         m_pipeline->Shutdown();
-        delete m_pipeline;
-        m_pipeline = nullptr;
+        m_pipeline.reset();
     }
 
     m_initialized = false;
@@ -126,8 +129,18 @@ bool CLightProbeBaker::BakeProbe(
     CFFLog::Info("[LightProbeBaker] Baking probe at (%.1f, %.1f, %.1f)...",
                 position.x, position.y, position.z);
 
+                
+    // RenderDoc 捕获：自动捕获第一个面的渲染
+    // 这样你可以在 RenderDoc 中查看烘焙时的渲染状态
+    static bool s_captureFirstFace = true;
+    if (s_captureFirstFace) {
+        CRenderDocCapture::BeginFrameCapture();
+        s_captureFirstFace = false;  // 只捕获一次
+    }
     // 1. 渲染 Cubemap
     renderToCubemap(position, scene, m_cubemapRT.Get());
+    // 在所有 6 个面渲染完成后结束 RenderDoc 捕获
+    CRenderDocCapture::EndFrameCapture();
 
     // 2. 投影到 SH 系数
     if (!projectCubemapToSH(m_cubemapRT.Get(), probe.shCoeffs)) {
@@ -293,9 +306,9 @@ bool CLightProbeBaker::projectCubemapToSH(
     // 拷贝 cubemap 到 staging texture（用于 CPU 读取）
     context->CopyResource(m_stagingTexture.Get(), cubemap);
 
-    // 读取 6 个面的像素数据
-    const XMFLOAT4* cubemapData[6];
-    XMFLOAT4* faceBuffers[6];
+    // 读取 6 个面的像素数据 - 使用 std::array<std::vector> 管理内存
+    const int pixelCount = CUBEMAP_RESOLUTION * CUBEMAP_RESOLUTION;
+    std::array<std::vector<XMFLOAT4>, 6> cubemapData;
 
     for (int face = 0; face < 6; face++)
     {
@@ -305,33 +318,72 @@ bool CLightProbeBaker::projectCubemapToSH(
         HRESULT hr = context->Map(m_stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
         if (FAILED(hr)) {
             CFFLog::Error("[LightProbeBaker] Failed to map staging texture face %d", face);
-            // 清理已分配的 buffer
-            for (int i = 0; i < face; i++) {
-                delete[] faceBuffers[i];
-            }
             return false;
         }
 
         // 拷贝数据到临时 buffer（因为 Unmap 后数据会失效）
-        int pixelCount = CUBEMAP_RESOLUTION * CUBEMAP_RESOLUTION;
-        faceBuffers[face] = new XMFLOAT4[pixelCount];
+        // 注意：DXGI_FORMAT_R16G16B16A16_FLOAT 是 4 个 16-bit float (HALF)
+        cubemapData[face].resize(pixelCount);
 
-        const XMFLOAT4* src = (const XMFLOAT4*)mapped.pData;
-        for (int i = 0; i < pixelCount; i++) {
-            faceBuffers[face][i] = src[i];
+        const uint16_t* src = (const uint16_t*)mapped.pData;
+        const int rowPitch = mapped.RowPitch / sizeof(uint16_t);
+
+        for (int y = 0; y < CUBEMAP_RESOLUTION; y++) {
+            for (int x = 0; x < CUBEMAP_RESOLUTION; x++) {
+                int srcIdx = y * rowPitch + x * 4;  // 4 channels (RGBA)
+                int dstIdx = y * CUBEMAP_RESOLUTION + x;
+
+                // 将 HALF (16-bit float) 转换为 FLOAT (32-bit float)
+                cubemapData[face][dstIdx].x = PackedVector::XMConvertHalfToFloat(src[srcIdx + 0]);
+                cubemapData[face][dstIdx].y = PackedVector::XMConvertHalfToFloat(src[srcIdx + 1]);
+                cubemapData[face][dstIdx].z = PackedVector::XMConvertHalfToFloat(src[srcIdx + 2]);
+                cubemapData[face][dstIdx].w = PackedVector::XMConvertHalfToFloat(src[srcIdx + 3]);
+            }
         }
-
-        cubemapData[face] = faceBuffers[face];
 
         context->Unmap(m_stagingTexture.Get(), subresource);
     }
 
-    // 投影到 SH
-    SphericalHarmonics::ProjectCubemapToSH(cubemapData, CUBEMAP_RESOLUTION, outCoeffs);
+    // // DEBUG: Export cubemap faces as PNG for verification
+    // {
+    //     static const char* faceNames[] = { "pos_x", "neg_x", "pos_y", "neg_y", "pos_z", "neg_z" };
+    //     std::string debugDir = FFPath::GetDebugDir() + "/lightprobe_cubemap";
+        
+    //     // 创建目录
+    //     std::string mkdirCmd = "mkdir -p \"" + debugDir + "\"";
+    //     system(mkdirCmd.c_str());
+        
+    //     for (int face = 0; face < 6; face++) {
+    //         std::vector<uint8_t> pixels(CUBEMAP_RESOLUTION * CUBEMAP_RESOLUTION * 3);
+    //         for (int i = 0; i < CUBEMAP_RESOLUTION * CUBEMAP_RESOLUTION; i++) {
+    //             // Tone mapping: 简单的 Reinhard
+    //             float r = cubemapData[face][i].x / (1.0f + cubemapData[face][i].x);
+    //             float g = cubemapData[face][i].y / (1.0f + cubemapData[face][i].y);
+    //             float b = cubemapData[face][i].z / (1.0f + cubemapData[face][i].z);
+                
+    //             // Gamma correction
+    //             r = std::pow(r, 1.0f / 2.2f);
+    //             g = std::pow(g, 1.0f / 2.2f);
+    //             b = std::pow(b, 1.0f / 2.2f);
+                
+    //             pixels[i * 3 + 0] = (uint8_t)(std::min(r, 1.0f) * 255.0f);
+    //             pixels[i * 3 + 1] = (uint8_t)(std::min(g, 1.0f) * 255.0f);
+    //             pixels[i * 3 + 2] = (uint8_t)(std::min(b, 1.0f) * 255.0f);
+    //         }
+            
+    //         std::string filename = debugDir + "/" + faceNames[face] + ".png";
+    //         stbi_write_png(filename.c_str(), CUBEMAP_RESOLUTION, CUBEMAP_RESOLUTION, 3, pixels.data(), CUBEMAP_RESOLUTION * 3);
+    //         CFFLog::Info("[LightProbeBaker] Exported cubemap face: %s", filename.c_str());
+    //     }
+    // }
 
-    // 清理临时 buffer
-    for (int face = 0; face < 6; face++) {
-        delete[] faceBuffers[face];
+    // 投影到 SH - 使用 std::array 包装输出
+    std::array<XMFLOAT3, 9> shCoeffs;
+    SphericalHarmonics::ProjectCubemapToSH(cubemapData, CUBEMAP_RESOLUTION, shCoeffs);
+
+    // 拷贝结果到输出数组
+    for (int i = 0; i < 9; i++) {
+        outCoeffs[i] = shCoeffs[i];
     }
 
     return true;

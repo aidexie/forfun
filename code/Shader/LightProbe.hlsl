@@ -5,7 +5,8 @@
 //
 // 使用方式：
 // #include "LightProbe.hlsl"
-// float3 diffuseIBL = SampleLightProbes(worldPos, normal);
+// bool hasProbe;
+// float3 diffuseIBL = SampleLightProbes(worldPos, normal, hasProbe);
 // ============================================
 
 #ifndef LIGHT_PROBE_HLSL
@@ -133,10 +134,15 @@ float3 EvaluateSH(float3 normal, float3 shCoeffs[9])
 // ============================================
 // 距离权重混合最近的 4 个 Probe
 // 输入：worldPos（世界坐标），normal（归一化法线）
-// 输出：混合后的 RGB 辐照度
+// 输出：混合后的 RGB 辐照度，hasProbe 表示是否有 Probe 覆盖
+//
+// 注意：即使 irradiance 计算结果为 0（如朝向暗处），hasProbe 仍为 true
+// 这样可以正确区分"没有 Probe 覆盖"和"Probe 覆盖但 irradiance 为 0"
 
-float3 SampleLightProbes(float3 worldPos, float3 normal)
+float3 SampleLightProbes(float3 worldPos, float3 normal, out bool hasProbe)
 {
+    hasProbe = false;
+
     // 没有 probe → 返回 0（Shader 外部会 fallback 到全局 IBL）
     if (g_lightProbeCount == 0) {
         return float3(0, 0, 0);
@@ -196,6 +202,9 @@ float3 SampleLightProbes(float3 worldPos, float3 normal)
     if (candidateCount == 0) {
         return float3(0, 0, 0);
     }
+
+    // 有 probe 覆盖
+    hasProbe = true;
 
     // ============================================
     // 3. 计算距离权重

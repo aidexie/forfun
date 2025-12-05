@@ -1,5 +1,7 @@
 #pragma once
 #include <DirectXMath.h>
+#include <array>
+#include <vector>
 
 // ============================================
 // SphericalHarmonics - L2 球谐函数工具类
@@ -23,8 +25,8 @@ namespace SphericalHarmonics
     // ============================================
     // 计算给定方向的 L2 球谐基函数值
     // 输入：dir - 归一化方向向量
-    // 输出：basis[9] - 9 个基函数的值（标量）
-    void EvaluateBasis(const DirectX::XMFLOAT3& dir, float basis[9]);
+    // 输出：basis - 9 个基函数的值（标量）
+    void EvaluateBasis(const DirectX::XMFLOAT3& dir, std::array<float, 9>& basis);
 
     // ============================================
     // Cubemap Utilities
@@ -48,11 +50,11 @@ namespace SphericalHarmonics
     // 从 Cubemap 投影到 L2 球谐系数
     // cubemapData: 6 个面的像素数据（RGBA float，行优先）
     // size: cubemap 分辨率（假设正方形）
-    // outCoeffs[9]: 输出的 L2 球谐系数（RGB）
+    // outCoeffs: 输出的 L2 球谐系数（RGB，9 个）
     void ProjectCubemapToSH(
-        const DirectX::XMFLOAT4* cubemapData[6],
+        const std::array<std::vector<DirectX::XMFLOAT4>, 6>& cubemapData,
         int size,
-        DirectX::XMFLOAT3 outCoeffs[9]
+        std::array<DirectX::XMFLOAT3, 9>& outCoeffs
     );
 
     // ============================================
@@ -60,11 +62,11 @@ namespace SphericalHarmonics
     // ============================================
 
     // 从 L2 球谐系数重建给定方向的辐照度
-    // coeffs[9]: L2 球谐系数（RGB）
+    // coeffs: L2 球谐系数（RGB，9 个）
     // dir: 归一化方向向量
     // 返回：重建的 RGB 辐照度
     DirectX::XMFLOAT3 EvaluateSH(
-        const DirectX::XMFLOAT3 coeffs[9],
+        const std::array<DirectX::XMFLOAT3, 9>& coeffs,
         const DirectX::XMFLOAT3& dir
     );
 

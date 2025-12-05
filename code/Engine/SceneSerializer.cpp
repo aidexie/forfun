@@ -48,6 +48,17 @@ public:
         m_json[name] = { value.x, value.y, value.z };
     }
 
+    void VisitFloat3Array(const char* name, DirectX::XMFLOAT3* values, int count) override {
+        // Store as flat array: [x0,y0,z0, x1,y1,z1, ...]
+        json arr = json::array();
+        for (int i = 0; i < count; i++) {
+            arr.push_back(values[i].x);
+            arr.push_back(values[i].y);
+            arr.push_back(values[i].z);
+        }
+        m_json[name] = arr;
+    }
+
     void VisitEnum(const char* name, int& value, const std::vector<const char*>& options) override {
         m_json[name] = value;
     }
@@ -92,6 +103,20 @@ public:
             value.x = m_json[name][0].get<float>();
             value.y = m_json[name][1].get<float>();
             value.z = m_json[name][2].get<float>();
+        }
+    }
+
+    void VisitFloat3Array(const char* name, DirectX::XMFLOAT3* values, int count) override {
+        if (m_json.contains(name) && m_json[name].is_array()) {
+            const auto& arr = m_json[name];
+            int expectedSize = count * 3;
+            if (arr.size() >= expectedSize) {
+                for (int i = 0; i < count; i++) {
+                    values[i].x = arr[i * 3 + 0].get<float>();
+                    values[i].y = arr[i * 3 + 1].get<float>();
+                    values[i].z = arr[i * 3 + 2].get<float>();
+                }
+            }
         }
     }
 

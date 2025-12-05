@@ -64,20 +64,18 @@ private:
 
         // 创建纯红色 Cubemap (32x32)
         const int size = 32;
-        const XMFLOAT4* cubemapData[6];
-        XMFLOAT4* tempData[6];
+        std::array<std::vector<XMFLOAT4>, 6> cubemapData;
         for (int face = 0; face < 6; face++)
         {
-            tempData[face] = new XMFLOAT4[size * size];
+            cubemapData[face].resize(size * size);
             for (int i = 0; i < size * size; i++)
             {
-                tempData[face][i] = XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f);  // 纯红色
+                cubemapData[face][i] = XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f);  // 纯红色
             }
-            cubemapData[face] = tempData[face];
         }
 
         // 投影到 SH
-        XMFLOAT3 shCoeffs[9];
+        std::array<XMFLOAT3, 9> shCoeffs;
         SphericalHarmonics::ProjectCubemapToSH(cubemapData, size, shCoeffs);
 
         // 验证：L0 系数应该接近 (1, 0, 0) * 0.282095
@@ -97,12 +95,6 @@ private:
                            "Higher order coefficients should be near zero");
         }
 
-        // 清理
-        for (int face = 0; face < 6; face++)
-        {
-            delete[] cubemapData[face];
-        }
-
         CFFLog::Info("[TestLightProbeSH] Test 1 passed: L0=%.3f,%.3f,%.3f",
                     shCoeffs[0].x, shCoeffs[0].y, shCoeffs[0].z);
     }
@@ -114,11 +106,10 @@ private:
 
         // 创建从上到下的渐变 Cubemap
         const int size = 32;
-        const XMFLOAT4* cubemapData[6];
-        XMFLOAT4* tempData[6];
+        std::array<std::vector<XMFLOAT4>, 6> cubemapData;
         for (int face = 0; face < 6; face++)
         {
-            tempData[face] = new XMFLOAT4[size * size];
+            cubemapData[face].resize(size * size);
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
@@ -130,14 +121,13 @@ private:
                     float brightness = (dir.y > 0) ? 1.0f : 0.0f;
 
                     int idx = y * size + x;
-                    tempData[face][idx] = XMFLOAT4(brightness, brightness, brightness, 1.0f);
+                    cubemapData[face][idx] = XMFLOAT4(brightness, brightness, brightness, 1.0f);
                 }
             }
-            cubemapData[face] = tempData[face];
         }
 
         // 投影到 SH
-        XMFLOAT3 shCoeffs[9];
+        std::array<XMFLOAT3, 9> shCoeffs;
         SphericalHarmonics::ProjectCubemapToSH(cubemapData, size, shCoeffs);
 
         // 验证：L1 Y 分量应该为正（上半球亮）
@@ -152,12 +142,6 @@ private:
 
         // 上方应该比下方亮
         ASSERT(ctx, topColor.x > bottomColor.x, "Top should be brighter than bottom");
-
-        // 清理
-        for (int face = 0; face < 6; face++)
-        {
-            delete[] tempData[face];
-        }
 
         CFFLog::Info("[TestLightProbeSH] Test 2 passed: Top=%.3f, Bottom=%.3f",
                     topColor.x, bottomColor.x);
@@ -185,7 +169,7 @@ private:
             );
 
             // 计算基函数
-            float basis[9];
+            std::array<float, 9> basis;
             SphericalHarmonics::EvaluateBasis(dir, basis);
 
             // 累加点积

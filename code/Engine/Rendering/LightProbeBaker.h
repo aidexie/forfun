@@ -3,7 +3,7 @@
 #include <string>
 #include <d3d11.h>
 #include <wrl/client.h>
-
+#include <memory>
 // Forward declarations
 class CScene;
 class CForwardRenderPipeline;
@@ -123,7 +123,7 @@ private:
 
     static const int CUBEMAP_RESOLUTION = 32;  // Light Probe 使用低分辨率
 
-    CForwardRenderPipeline* m_pipeline;   // Rendering pipeline (owned)
+    std::unique_ptr<CForwardRenderPipeline> m_pipeline;   // Rendering pipeline (owned)
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cubemapRT;      // Cubemap render target
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthBuffer;    // Depth buffer for cubemap rendering

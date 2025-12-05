@@ -26,6 +26,12 @@ bool CScene::Initialize() {
         return false;
     }
 
+    // Initialize Light Probe Manager (creates StructuredBuffer for SH data)
+    if (!m_lightProbeManager.Initialize()) {
+        CFFLog::Error("Failed to initialize LightProbeManager!");
+        return false;
+    }
+
     // Load BRDF LUT (shared across all environments, managed by ProbeManager)
     std::string brdfLutPath = FFPath::GetAbsolutePath("skybox/brdf_lut.ktx2");
     if (!m_probeManager.LoadBrdfLut(brdfLutPath)) {
@@ -69,7 +75,10 @@ bool CScene::LoadFromFile(const std::string& scenePath) {
     // 4. Load reflection probes (now GameObjects exist)
     ReloadProbesFromScene();
 
-    // 5. Record file path
+    // 5. Load light probes (now GameObjects exist)
+    ReloadLightProbesFromScene();
+
+    // 6. Record file path
     m_filePath = scenePath;
 
     CFFLog::Info("Scene: Loaded successfully!");
@@ -132,8 +141,17 @@ void CScene::ReloadProbesFromScene() {
     CFFLog::Info("Scene: Local probes reloaded!");
 }
 
+// === Light Probe Management ===
+
+void CScene::ReloadLightProbesFromScene() {
+    CFFLog::Info("Scene: Reloading light probes from scene...");
+    m_lightProbeManager.LoadProbesFromScene(*this);
+    CFFLog::Info("Scene: Light probes reloaded! (%d probes)", m_lightProbeManager.GetProbeCount());
+}
+
 void CScene::Shutdown() {
     CFFLog::Info("Scene: Shutting down...");
+    m_lightProbeManager.Shutdown();
     m_probeManager.Shutdown();
     m_skybox.Shutdown();
     m_initialized = false;

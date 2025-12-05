@@ -363,6 +363,7 @@ void Panels::DrawInspector(CScene& scene) {
                             );
 
                             if (success) {
+                                scene.ReloadLightProbesFromScene();
                                 CFFLog::Info("Light Probe baked successfully!");
                                 lp->isDirty = false;
                             } else {

@@ -11,7 +11,7 @@ namespace SphericalHarmonics
     // 使用直角坐标形式（更适合实现）
     // 参考：Sloan, "Stupid Spherical Harmonics Tricks"
 
-    void EvaluateBasis(const XMFLOAT3& dir, float basis[9])
+    void EvaluateBasis(const XMFLOAT3& dir, std::array<float, 9>& basis)
     {
         float x = dir.x;
         float y = dir.y;
@@ -37,7 +37,7 @@ namespace SphericalHarmonics
     // Cubemap Utilities
     // ============================================
 
-    XMFLOAT3 CubemapTexelToDirection(int face, int x, int y, int size)
+    XMFLOAT3  CubemapTexelToDirection(int face, int x, int y, int size)
     {
         // 将 texel 坐标转换为 UV [-1, 1]
         float u = ((float)x + 0.5f) / (float)size * 2.0f - 1.0f;
@@ -80,12 +80,16 @@ namespace SphericalHarmonics
         return dir;
     }
 
-    float ComputeSolidAngleWeight(float u, float v)
+    float ComputeSolidAngle(float u, float v, int size)
     {
-        // 立体角权重公式（从 Cubemap 参数化推导）
-        // dω = du · dv / (1 + u² + v²)^(3/2)
+        // 立体角公式: dω = (du * dv) / (1 + u² + v²)^(3/2)
+        // u, v ∈ [-1, 1]，所以 du = dv = 2/size
         float temp = 1.0f + u * u + v * v;
-        return 4.0f / (temp * std::sqrt(temp));
+        float dOmega_per_dudv = 1.0f / (temp * std::sqrt(temp));
+
+        // 乘以实际的 du*dv
+        float texelSize = 2.0f / size;
+        return dOmega_per_dudv * texelSize * texelSize;
     }
 
     // ============================================
@@ -93,9 +97,9 @@ namespace SphericalHarmonics
     // ============================================
 
     void ProjectCubemapToSH(
-        const XMFLOAT4* cubemapData[6],
+        const std::array<std::vector<XMFLOAT4>, 6>& cubemapData,
         int size,
-        XMFLOAT3 outCoeffs[9])
+        std::array<XMFLOAT3, 9>& outCoeffs)
     {
         // 初始化系数为 0
         for (int i = 0; i < 9; i++)
@@ -103,22 +107,20 @@ namespace SphericalHarmonics
             outCoeffs[i] = XMFLOAT3(0, 0, 0);
         }
 
-        float totalWeight = 0.0f;
-
         // 遍历 6 个面
         for (int face = 0; face < 6; face++)
         {
-            const XMFLOAT4* faceData = cubemapData[face];
+            const std::vector<XMFLOAT4>& faceData = cubemapData[face];
 
             // 遍历该面的所有像素
             for (int y = 0; y < size; y++)
             {
                 for (int x = 0; x < size; x++)
                 {
-                    // 1. 计算 UV 和立体角权重
+                    // 1. 计算 UV 和立体角
                     float u = ((float)x + 0.5f) / (float)size * 2.0f - 1.0f;
                     float v = ((float)y + 0.5f) / (float)size * 2.0f - 1.0f;
-                    float weight = ComputeSolidAngleWeight(u, v);
+                    float solidAngle = ComputeSolidAngle(u, v, size);
 
                     // 2. 计算方向向量
                     XMFLOAT3 dir = CubemapTexelToDirection(face, x, y, size);
@@ -126,38 +128,26 @@ namespace SphericalHarmonics
                     // 3. 采样颜色
                     int pixelIndex = y * size + x;
                     XMFLOAT3 color(
-                        faceData[pixelIndex].x,
-                        faceData[pixelIndex].y,
-                        faceData[pixelIndex].z
+                        std::min(faceData[pixelIndex].x,2.0f),
+                        std::min(faceData[pixelIndex].y,2.0f),
+                        std::min(faceData[pixelIndex].z,2.0f)
                     );
-
                     // 4. 计算 SH 基函数
-                    float basis[9];
+                    std::array<float, 9> basis;
                     EvaluateBasis(dir, basis);
 
                     // 5. 累加到 SH 系数（Riemann 求和）
+                    // c_i = ∫ f(ω) * Y_i(ω) dω ≈ Σ f * Y * dω
                     for (int i = 0; i < 9; i++)
                     {
-                        outCoeffs[i].x += color.x * basis[i] * weight;
-                        outCoeffs[i].y += color.y * basis[i] * weight;
-                        outCoeffs[i].z += color.z * basis[i] * weight;
+                        outCoeffs[i].x += color.x * basis[i] * solidAngle;
+                        outCoeffs[i].y += color.y * basis[i] * solidAngle;
+                        outCoeffs[i].z += color.z * basis[i] * solidAngle;
                     }
-
-                    totalWeight += weight;
                 }
             }
         }
-
-        // 6. 归一化
-        if (totalWeight > 0.0f)
-        {
-            for (int i = 0; i < 9; i++)
-            {
-                outCoeffs[i].x /= totalWeight;
-                outCoeffs[i].y /= totalWeight;
-                outCoeffs[i].z /= totalWeight;
-            }
-        }
+        // 不需要额外归一化，因为 solidAngle 已经是正确的 dω
     }
 
     // ============================================
@@ -165,11 +155,11 @@ namespace SphericalHarmonics
     // ============================================
 
     XMFLOAT3 EvaluateSH(
-        const XMFLOAT3 coeffs[9],
+        const std::array<XMFLOAT3, 9>& coeffs,
         const XMFLOAT3& dir)
     {
         // 计算 SH 基函数
-        float basis[9];
+        std::array<float, 9> basis;
         EvaluateBasis(dir, basis);
 
         // 重建辐照度

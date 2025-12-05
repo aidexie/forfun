@@ -71,13 +71,8 @@ struct SLightProbe : public CComponent
         // Influence Settings
         visitor.VisitFloat("radius", radius);
 
-        // SH Coefficients (序列化为 27 个 float)
-        // 注意：PropertyVisitor 需要支持 float array
-        // 如果不支持，可以展开为 27 个独立字段（shCoeff0_r, shCoeff0_g, ...）
-        // 或者在 JSON 序列化时特殊处理
-
-        // 简化方案：暂时不通过 VisitProperties 序列化 SH 系数
-        // 在 SceneSerializer 中特殊处理 LightProbe 的 shCoeffs 字段
+        // SH Coefficients (9 x RGB = 27 floats, stored as flat array)
+        visitor.VisitFloat3Array("shCoeffs", shCoeffs, 9);
 
         // 注意：isDirty 不序列化（运行时状态）
     }

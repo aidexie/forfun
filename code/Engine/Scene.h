@@ -4,6 +4,7 @@
 #include "World.h"
 #include "Rendering/Skybox.h"
 #include "Rendering/ReflectionProbeManager.h"
+#include "Rendering/LightProbeManager.h"
 #include "SceneLightSettings.h"
 #include "Camera.h"
 
@@ -39,6 +40,10 @@ public:
     // Reload all probes from scene's ReflectionProbe components
     void ReloadProbesFromScene();
 
+    // === Light Probe Management ===
+    // Reload all light probes from scene's LightProbe components
+    void ReloadLightProbesFromScene();
+
     // CWorld access
     CWorld& GetWorld() { return m_world; }
     const CWorld& GetWorld() const { return m_world; }
@@ -60,11 +65,15 @@ public:
     CReflectionProbeManager& GetProbeManager() { return m_probeManager; }
     const CReflectionProbeManager& GetProbeManager() const { return m_probeManager; }
 
+    // Light Probe Manager access
+    CLightProbeManager& GetLightProbeManager() { return m_lightProbeManager; }
+    const CLightProbeManager& GetLightProbeManager() const { return m_lightProbeManager; }
+
     // Light settings access
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
 
-    // ✅ 编辑器相机访问（相机现在属于 Scene 逻辑层）
+    // Editor camera access
     CCamera& GetEditorCamera() { return m_editorCamera; }
     const CCamera& GetEditorCamera() const { return m_editorCamera; }
 
@@ -91,11 +100,9 @@ private:
     std::string m_filePath;  // Current scene file path
     CSkybox m_skybox;
     CReflectionProbeManager m_probeManager;
+    CLightProbeManager m_lightProbeManager;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
 
     CCamera m_editorCamera;
 };
-
-
-
