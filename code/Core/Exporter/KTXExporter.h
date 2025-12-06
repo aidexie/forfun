@@ -1,6 +1,9 @@
 #pragma once
 #include <d3d11.h>
 #include <string>
+#include <array>
+#include <vector>
+#include <DirectXMath.h>
 #include <ktx.h>
 
 // Helper class to export D3D11 textures to KTX2 format
@@ -21,6 +24,18 @@ public:
         ID3D11Texture2D* texture,
         const std::string& filepath,
         int numMipLevels = 0
+    );
+
+    // Export CPU cubemap data (XMFLOAT4, 6 faces) to KTX2 file
+    // cubemapData: Array of 6 faces, each face is a vector of RGBA pixels
+    // size: Width/Height of each face
+    // filepath: Output KTX2 file path
+    // hdr: If true, export as R16G16B16A16_FLOAT; if false, R8G8B8A8_UNORM
+    static bool ExportCubemapFromCPUData(
+        const std::array<std::vector<DirectX::XMFLOAT4>, 6>& cubemapData,
+        int size,
+        const std::string& filepath,
+        bool hdr = true
     );
 
 private:

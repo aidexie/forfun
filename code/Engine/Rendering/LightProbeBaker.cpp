@@ -381,6 +381,32 @@ bool CLightProbeBaker::projectCubemapToSH(
     std::array<XMFLOAT3, 9> shCoeffs;
     SphericalHarmonics::ProjectCubemapToSH(cubemapData, CUBEMAP_RESOLUTION, shCoeffs);
 
+    // // DEBUG: 从 SH 重建 cubemap 并导出为 KTX2
+    // // 用于验证 SH 投影和重建的正确性
+    // {
+    //     std::string debugDir = FFPath::GetDebugDir() + "/sh_debug";
+        
+    //     // L1 重建 (4 coeffs) - 最低精度
+    //     std::array<XMFLOAT3, 4> shCoeffsL1;
+    //     SphericalHarmonics::ProjectCubemapToSH_L1(cubemapData, CUBEMAP_RESOLUTION, shCoeffsL1);
+    //     SphericalHarmonics::DebugExportSHAsCubemap_L1(shCoeffsL1, 64, debugDir, "sh_reconstructed_L1");
+        
+    //     // L2 重建 (9 coeffs) - 实际使用的
+    //     SphericalHarmonics::DebugExportSHAsCubemap(shCoeffs, 64, debugDir, "sh_reconstructed_L2");
+        
+    //     // L3 重建 (16 coeffs) - 用于对比
+    //     std::array<XMFLOAT3, 16> shCoeffsL3;
+    //     SphericalHarmonics::ProjectCubemapToSH_L3(cubemapData, CUBEMAP_RESOLUTION, shCoeffsL3);
+    //     SphericalHarmonics::DebugExportSHAsCubemap_L3(shCoeffsL3, 64, debugDir, "sh_reconstructed_L3");
+        
+    //     // L4 重建 (25 coeffs) - 用于对比，精度更高
+    //     std::array<XMFLOAT3, 25> shCoeffsL4;
+    //     SphericalHarmonics::ProjectCubemapToSH_L4(cubemapData, CUBEMAP_RESOLUTION, shCoeffsL4);
+    //     SphericalHarmonics::DebugExportSHAsCubemap_L4(shCoeffsL4, 64, debugDir, "sh_reconstructed_L4");
+        
+    //     CFFLog::Info("[LightProbeBaker] DEBUG: Exported SH L1/L2/L3/L4 cubemaps to: %s", debugDir.c_str());
+    // }
+
     // 拷贝结果到输出数组
     for (int i = 0; i < 9; i++) {
         outCoeffs[i] = shCoeffs[i];

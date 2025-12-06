@@ -47,13 +47,81 @@ if (MSVC)
     target_compile_options(imguizmo PRIVATE /utf-8)
 endif()
 
-file(GLOB_RECURSE CORE_SRC ${CODE_PATH}/Core/*.cpp ${CODE_PATH}/Core/*.h)
-# Explicitly list SphericalHarmonics for visibility
-set(CORE_SRC ${CORE_SRC}
-    ${CODE_PATH}/Core/SphericalHarmonics.h
+# Core sources - explicitly listed (no GLOB)
+set(CORE_SRC
+    # Root
+    ${CODE_PATH}/Core/Console.cpp
+    ${CODE_PATH}/Core/Console.h
+    ${CODE_PATH}/Core/DebugEvent.cpp
+    ${CODE_PATH}/Core/DebugEvent.h
+    ${CODE_PATH}/Core/DebugPaths.h
+    ${CODE_PATH}/Core/DX11Context.cpp
+    ${CODE_PATH}/Core/DX11Context.h
+    ${CODE_PATH}/Core/FFLog.cpp
+    ${CODE_PATH}/Core/FFLog.h
+    ${CODE_PATH}/Core/GpuMeshResource.h
+    ${CODE_PATH}/Core/MaterialAsset.cpp
+    ${CODE_PATH}/Core/MaterialAsset.h
+    ${CODE_PATH}/Core/MaterialManager.cpp
+    ${CODE_PATH}/Core/MaterialManager.h
+    ${CODE_PATH}/Core/Mesh.cpp
+    ${CODE_PATH}/Core/Mesh.h
+    ${CODE_PATH}/Core/MeshResourceManager.cpp
+    ${CODE_PATH}/Core/MeshResourceManager.h
+    ${CODE_PATH}/Core/Offscreen.cpp
+    ${CODE_PATH}/Core/Offscreen.h
+    ${CODE_PATH}/Core/PathManager.cpp
+    ${CODE_PATH}/Core/PathManager.h
+    ${CODE_PATH}/Core/ReflectionProbeAsset.cpp
+    ${CODE_PATH}/Core/ReflectionProbeAsset.h
+    ${CODE_PATH}/Core/RenderData.h
+    ${CODE_PATH}/Core/RenderDocCapture.cpp
+    ${CODE_PATH}/Core/RenderDocCapture.h
     ${CODE_PATH}/Core/SphericalHarmonics.cpp
+    ${CODE_PATH}/Core/SphericalHarmonics.h
+    ${CODE_PATH}/Core/TextureManager.cpp
+    ${CODE_PATH}/Core/TextureManager.h
+    # Exporter
+    ${CODE_PATH}/Core/Exporter/KTXExporter.cpp
+    ${CODE_PATH}/Core/Exporter/KTXExporter.h
+    # Loader
+    ${CODE_PATH}/Core/Loader/FFAssetLoader.cpp
+    ${CODE_PATH}/Core/Loader/FFAssetLoader.h
+    ${CODE_PATH}/Core/Loader/GltfLoader.cpp
+    ${CODE_PATH}/Core/Loader/GltfLoader.h
+    ${CODE_PATH}/Core/Loader/HdrLoader.cpp
+    ${CODE_PATH}/Core/Loader/HdrLoader.h
+    ${CODE_PATH}/Core/Loader/KTXLoader.cpp
+    ${CODE_PATH}/Core/Loader/KTXLoader.h
+    ${CODE_PATH}/Core/Loader/ObjLoader.cpp
+    ${CODE_PATH}/Core/Loader/ObjLoader.h
+    ${CODE_PATH}/Core/Loader/TextureLoader.cpp
+    ${CODE_PATH}/Core/Loader/TextureLoader.h
+    # Testing
+    ${CODE_PATH}/Core/Testing/RenderStats.h
+    ${CODE_PATH}/Core/Testing/Screenshot.cpp
+    ${CODE_PATH}/Core/Testing/Screenshot.h
+    ${CODE_PATH}/Core/Testing/TestCase.cpp
+    ${CODE_PATH}/Core/Testing/TestCase.h
+    ${CODE_PATH}/Core/Testing/TestRegistry.h
 )
-file(GLOB ENGINE_SRC ${CODE_PATH}/Engine/*.cpp ${CODE_PATH}/Engine/*.h)
+
+# Engine root sources - explicitly listed (no GLOB)
+set(ENGINE_SRC
+    ${CODE_PATH}/Engine/Camera.cpp
+    ${CODE_PATH}/Engine/Camera.h
+    ${CODE_PATH}/Engine/Component.h
+    ${CODE_PATH}/Engine/ComponentRegistry.h
+    ${CODE_PATH}/Engine/GameObject.h
+    ${CODE_PATH}/Engine/JsonPropertyVisitor.h
+    ${CODE_PATH}/Engine/PropertyVisitor.h
+    ${CODE_PATH}/Engine/Scene.cpp
+    ${CODE_PATH}/Engine/Scene.h
+    ${CODE_PATH}/Engine/SceneLightSettings.h
+    ${CODE_PATH}/Engine/SceneSerializer.cpp
+    ${CODE_PATH}/Engine/SceneSerializer.h
+    ${CODE_PATH}/Engine/World.h
+)
 set(EDITOR_SRC
     ${CODE_PATH}/Editor/EditorContext.h
     ${CODE_PATH}/Editor/EditorContext.cpp

@@ -3,6 +3,8 @@
 #include "DX11Context.h"
 #include <iostream>
 #include <vector>
+#include <DirectXPackedVector.h>
+#include <filesystem>
 
 uint32_t CKTXExporter::DXGIFormatToVkFormat(DXGI_FORMAT format) {
     switch (format) {
@@ -312,5 +314,114 @@ bool CKTXExporter::Export2DTextureToKTX2(
 
     ktxTexture2_Destroy(ktxTex);
     CFFLog::Info("KTXExporter: Successfully exported 2D texture to %s" , filepath);
+    return true;
+}
+
+bool CKTXExporter::ExportCubemapFromCPUData(
+    const std::array<std::vector<DirectX::XMFLOAT4>, 6>& cubemapData,
+    int size,
+    const std::string& filepath,
+    bool hdr)
+{
+    using namespace DirectX;
+    using namespace DirectX::PackedVector;
+
+    // Ensure output directory exists
+    std::filesystem::path path(filepath);
+    std::filesystem::create_directories(path.parent_path());
+
+    // Create KTX texture
+    ktxTextureCreateInfo createInfo = {};
+    createInfo.glInternalformat = 0;  // Not using OpenGL
+    createInfo.vkFormat = hdr ? 97 : 37;  // VK_FORMAT_R16G16B16A16_SFLOAT or VK_FORMAT_R8G8B8A8_UNORM
+    createInfo.baseWidth = size;
+    createInfo.baseHeight = size;
+    createInfo.baseDepth = 1;
+    createInfo.numDimensions = 2;
+    createInfo.numLevels = 1;  // No mipmaps for debug output
+    createInfo.numLayers = 1;
+    createInfo.numFaces = 6;  // Cubemap
+    createInfo.isArray = KTX_FALSE;
+    createInfo.generateMipmaps = KTX_FALSE;
+
+    ktxTexture2* ktxTex = nullptr;
+    KTX_error_code result = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &ktxTex);
+    if (result != KTX_SUCCESS) {
+        CFFLog::Error("[KTXExporter] Failed to create KTX texture: %d", result);
+        return false;
+    }
+
+    // Write each face
+    for (int face = 0; face < 6; ++face) {
+        const std::vector<XMFLOAT4>& faceData = cubemapData[face];
+
+        if (faceData.size() != (size_t)(size * size)) {
+            CFFLog::Error("[KTXExporter] Face %d data size mismatch: expected %d, got %zu",
+                         face, size * size, faceData.size());
+            ktxTexture2_Destroy(ktxTex);
+            return false;
+        }
+
+        if (hdr) {
+            // Convert XMFLOAT4 to R16G16B16A16_FLOAT
+            std::vector<XMHALF4> halfData(size * size);
+            for (int i = 0; i < size * size; ++i) {
+                // Convert float to half
+                halfData[i].x = XMConvertFloatToHalf(faceData[i].x);
+                halfData[i].y = XMConvertFloatToHalf(faceData[i].y);
+                halfData[i].z = XMConvertFloatToHalf(faceData[i].z);
+                halfData[i].w = XMConvertFloatToHalf(faceData[i].w);
+            }
+
+            result = ktxTexture_SetImageFromMemory(
+                ktxTexture(ktxTex),
+                0, 0, face,
+                (const ktx_uint8_t*)halfData.data(),
+                halfData.size() * sizeof(XMHALF4)
+            );
+        } else {
+            // Convert XMFLOAT4 to R8G8B8A8_UNORM with tone mapping
+            std::vector<uint8_t> byteData(size * size * 4);
+            for (int i = 0; i < size * size; ++i) {
+                // Simple Reinhard tone mapping + gamma correction
+                float r = faceData[i].x / (1.0f + faceData[i].x);
+                float g = faceData[i].y / (1.0f + faceData[i].y);
+                float b = faceData[i].z / (1.0f + faceData[i].z);
+                
+                r = std::pow(r, 1.0f / 2.2f);
+                g = std::pow(g, 1.0f / 2.2f);
+                b = std::pow(b, 1.0f / 2.2f);
+
+                byteData[i * 4 + 0] = (uint8_t)(std::min(r, 1.0f) * 255.0f);
+                byteData[i * 4 + 1] = (uint8_t)(std::min(g, 1.0f) * 255.0f);
+                byteData[i * 4 + 2] = (uint8_t)(std::min(b, 1.0f) * 255.0f);
+                byteData[i * 4 + 3] = 255;  // Alpha = 1
+            }
+
+            result = ktxTexture_SetImageFromMemory(
+                ktxTexture(ktxTex),
+                0, 0, face,
+                byteData.data(),
+                byteData.size()
+            );
+        }
+
+        if (result != KTX_SUCCESS) {
+            CFFLog::Error("[KTXExporter] Failed to set image data for face %d: %d", face, result);
+            ktxTexture2_Destroy(ktxTex);
+            return false;
+        }
+    }
+
+    // Write to file
+    result = ktxTexture_WriteToNamedFile(ktxTexture(ktxTex), filepath.c_str());
+    if (result != KTX_SUCCESS) {
+        CFFLog::Error("[KTXExporter] Failed to write KTX file: %d", result);
+        ktxTexture2_Destroy(ktxTex);
+        return false;
+    }
+
+    ktxTexture2_Destroy(ktxTex);
+    CFFLog::Info("[KTXExporter] Successfully exported CPU cubemap to %s", filepath.c_str());
     return true;
 }
