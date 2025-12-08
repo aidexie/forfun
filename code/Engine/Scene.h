@@ -5,6 +5,7 @@
 #include "Rendering/Skybox.h"
 #include "Rendering/ReflectionProbeManager.h"
 #include "Rendering/LightProbeManager.h"
+#include "Rendering/VolumetricLightmap.h"
 #include "SceneLightSettings.h"
 #include "Camera.h"
 
@@ -69,6 +70,10 @@ public:
     CLightProbeManager& GetLightProbeManager() { return m_lightProbeManager; }
     const CLightProbeManager& GetLightProbeManager() const { return m_lightProbeManager; }
 
+    // Volumetric Lightmap access
+    CVolumetricLightmap& GetVolumetricLightmap() { return m_volumetricLightmap; }
+    const CVolumetricLightmap& GetVolumetricLightmap() const { return m_volumetricLightmap; }
+
     // Light settings access
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
@@ -101,6 +106,7 @@ private:
     CSkybox m_skybox;
     CReflectionProbeManager m_probeManager;
     CLightProbeManager m_lightProbeManager;
+    CVolumetricLightmap m_volumetricLightmap;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
 

@@ -1,8 +1,9 @@
 // MainPass Pixel Shader
 // PBR rendering with CSM shadow mapping
 
-#include "ClusteredShading.hlsl"  // Clustered point light support
-#include "LightProbe.hlsl"        // Light Probe SH support
+#include "ClusteredShading.hlsl"      // Clustered point light support
+#include "LightProbe.hlsl"            // Light Probe SH support
+#include "VolumetricLightmap.hlsl"    // Volumetric Lightmap (Per-Pixel GI)
 
 Texture2D gAlbedo : register(t0);
 Texture2D gNormal : register(t1);
@@ -280,22 +281,44 @@ float4 main(PSIn i) : SV_Target {
     const float MAX_REFLECTION_LOD = 6.0;  // 7 mip levels (0-6)
     float3 prefilteredColor = gPrefilteredArray.SampleLevel(gSamp, float4(R, probeIdxF), roughness * MAX_REFLECTION_LOD).rgb;
 
-    // Diffuse IBL: Light Probe (SH) or Fallback to Global IBL
-    // Light Probe provides localized diffuse environment lighting using Spherical Harmonics
-    // If no Light Probe coverage, fallback to global Reflection Probe's irradiance map
-    bool hasLightProbe;
-    float3 lightProbeIrradiance = SampleLightProbes(i.posWS, N, hasLightProbe);
 
+    // ============================================
+    // Diffuse IBL: Priority Order
+    // 1. Volumetric Lightmap (Per-Pixel, highest quality)
+    // 2. Light Probe (Per-Object fallback)
+    // 3. Global IBL (Reflection Probe's irradiance)
+    // ============================================
     float3 diffuseIBL;
-    if (hasLightProbe) {
-        // Use Light Probe SH (localized diffuse lighting)
-        diffuseIBL = lightProbeIrradiance * albedo;
-    } else {
-        // Fallback to global IBL (Reflection Probe's irradiance)
-        float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
-        diffuseIBL = irradiance * albedo;
-    }
 
+    // Try Volumetric Lightmap first (Per-Pixel sampling)
+    if (IsVolumetricLightmapEnabled()) {
+        float3 vlIrradiance = GetVolumetricLightmapDiffuse(i.posWS, N);
+        if (any(vlIrradiance > 0.0f)) {
+            // Volumetric Lightmap available - use it
+            diffuseIBL = vlIrradiance * albedo;
+            // return float4(diffuseIBL, 1.0);  // Early return for performance
+        } else {
+            // Position outside VL volume - fallback to Light Probe / Global IBL
+            bool hasLightProbe;
+            float3 lightProbeIrradiance = SampleLightProbes(i.posWS, N, hasLightProbe);
+            if (hasLightProbe) {
+                diffuseIBL = lightProbeIrradiance * albedo;
+            } else {
+                float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
+                diffuseIBL = irradiance * albedo;
+            }
+        }
+    } else {
+        // No Volumetric Lightmap - use Light Probe or Global IBL
+        bool hasLightProbe;
+        float3 lightProbeIrradiance = SampleLightProbes(i.posWS, N, hasLightProbe);
+        if (hasLightProbe) {
+            diffuseIBL = lightProbeIrradiance * albedo;
+        } else {
+            float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
+            diffuseIBL = irradiance * albedo;
+        }
+    }
     // Sample BRDF LUT (X: NdotV, Y: roughness)
     float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;
 

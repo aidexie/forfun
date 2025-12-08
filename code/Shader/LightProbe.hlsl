@@ -1,7 +1,7 @@
 // ============================================
 // LightProbe.hlsl - Light Probe Shader Utilities
 // ============================================
-// 提供 Light Probe 的 SH 解码和混合功能
+// 提供 Light Probe 的 SH 解码和采样功能
 //
 // 使用方式：
 // #include "LightProbe.hlsl"
@@ -15,7 +15,6 @@
 // ============================================
 // Constants
 // ============================================
-#define MAX_BLEND_PROBES 4
 #define SH_COEFF_COUNT 9
 
 // ============================================
@@ -26,8 +25,8 @@
 struct LightProbeData
 {
     float3 position;    // Probe 位置
-    float radius;       // 影响半径
-    float3 shCoeffs[9]; // L2 球谐系数（9 bands，每个是 RGB）
+    float radius;       // 影响半径（暂未使用）
+    float3 shCoeffs[9]; // L2 球谐系数（9 个，每个是 RGB）
 };
 
 // ============================================
@@ -40,200 +39,90 @@ StructuredBuffer<LightProbeData> g_lightProbes : register(t15);
 // b5: Light Probe Parameters
 cbuffer CB_LightProbeParams : register(b5)
 {
-    int g_lightProbeCount;      // 当前场景中的 Probe 数量
-    float g_lightProbeBlendFalloff; // 权重衰减指数（默认 2.0）
+    int g_lightProbeCount;          // 当前场景中的 Probe 数量
+    float g_lightProbeBlendFalloff; // 预留参数（暂未使用）
     float2 _lightProbePad;
 };
 
 // ============================================
-// Spherical Harmonics L2 Basis Functions
-// ============================================
-// 使用直角坐标形式（更适合 shader）
-// 参考：Stupid Spherical Harmonics Tricks (Sloan, GDC 2008)
-
-// L0 (1 个系数)
-float SH_Y00()
-{
-    return 0.282095;  // 1 / (2 * sqrt(π))
-}
-
-// L1 (3 个系数)
-float SH_Y1m1(float3 n)
-{
-    return 0.488603 * n.y;  // sqrt(3 / (4π)) * y
-}
-
-float SH_Y10(float3 n)
-{
-    return 0.488603 * n.z;  // sqrt(3 / (4π)) * z
-}
-
-float SH_Y11(float3 n)
-{
-    return 0.488603 * n.x;  // sqrt(3 / (4π)) * x
-}
-
-// L2 (5 个系数)
-float SH_Y2m2(float3 n)
-{
-    return 1.092548 * n.x * n.y;  // sqrt(15 / (4π)) * x * y
-}
-
-float SH_Y2m1(float3 n)
-{
-    return 1.092548 * n.y * n.z;  // sqrt(15 / (4π)) * y * z
-}
-
-float SH_Y20(float3 n)
-{
-    return 0.315392 * (3.0 * n.z * n.z - 1.0);  // sqrt(5 / (16π)) * (3z² - 1)
-}
-
-float SH_Y21(float3 n)
-{
-    return 1.092548 * n.x * n.z;  // sqrt(15 / (4π)) * x * z
-}
-
-float SH_Y22(float3 n)
-{
-    return 0.546274 * (n.x * n.x - n.y * n.y);  // sqrt(15 / (16π)) * (x² - y²)
-}
-
-// ============================================
-// SH Decoding (Reconstruction)
+// SH Decoding (L2)
 // ============================================
 // 从 SH 系数重建辐照度
-// 输入：normal（归一化方向），shCoeffs（9 个 float3）
+// 输入：n（归一化方向），shCoeffs（9 个 float3）
 // 输出：RGB 辐照度
 
-float3 EvaluateSH(float3 normal, float3 shCoeffs[9])
+float3 EvaluateSH(float3 n, float3 shCoeffs[9])
 {
     float3 result = 0;
 
-    // L0 (band 0)
-    result += shCoeffs[0] * SH_Y00();
+    // L0 (1 个系数)
+    result += shCoeffs[0] * 0.282095;
 
-    // L1 (bands 1-3)
-    result += shCoeffs[1] * SH_Y1m1(normal);
-    result += shCoeffs[2] * SH_Y10(normal);
-    result += shCoeffs[3] * SH_Y11(normal);
+    // L1 (3 个系数)
+    result += shCoeffs[1] * 0.488603 * n.y;
+    result += shCoeffs[2] * 0.488603 * n.z;
+    result += shCoeffs[3] * 0.488603 * n.x;
 
-    // L2 (bands 4-8)
-    result += shCoeffs[4] * SH_Y2m2(normal);
-    result += shCoeffs[5] * SH_Y2m1(normal);
-    result += shCoeffs[6] * SH_Y20(normal);
-    result += shCoeffs[7] * SH_Y21(normal);
-    result += shCoeffs[8] * SH_Y22(normal);
+    // L2 (5 个系数)
+    result += shCoeffs[4] * 1.092548 * n.x * n.y;
+    result += shCoeffs[5] * 1.092548 * n.y * n.z;
+    result += shCoeffs[6] * 0.315392 * (3.0 * n.z * n.z - 1.0);
+    result += shCoeffs[7] * 1.092548 * n.x * n.z;
+    result += shCoeffs[8] * 0.546274 * (n.x * n.x - n.y * n.y);
 
     // Clamp 负值（SH ringing artifact）
     return max(result, 0.0);
 }
 
 // ============================================
-// Light Probe Blending
+// Light Probe Sampling
 // ============================================
-// 距离权重混合最近的 4 个 Probe
-// 输入：worldPos（世界坐标），normal（归一化法线）
-// 输出：混合后的 RGB 辐照度，hasProbe 表示是否有 Probe 覆盖
+// 当前实现：最简单的"最近一个 Probe"
 //
-// 注意：即使 irradiance 计算结果为 0（如朝向暗处），hasProbe 仍为 true
-// 这样可以正确区分"没有 Probe 覆盖"和"Probe 覆盖但 irradiance 为 0"
+// TODO: 后续改进为四面体插值
+// - CPU 端构建 Delaunay 四面体网格
+// - CPU 端查找四面体并计算重心坐标
+// - CPU 端混合 4 个 Probe 的 SH
+// - 传混合后的 SH 给 Shader
+// ============================================
 
 float3 SampleLightProbes(float3 worldPos, float3 normal, out bool hasProbe)
 {
     hasProbe = false;
 
-    // 没有 probe → 返回 0（Shader 外部会 fallback 到全局 IBL）
-    if (g_lightProbeCount == 0) {
+    if (g_lightProbeCount == 0)
+    {
         return float3(0, 0, 0);
     }
 
     // ============================================
-    // 1. 收集附近的 probe（在 radius 范围内）
+    // 查找最近的 Probe
     // ============================================
-    struct ProbeCandidate {
-        int index;
-        float distance;
-        float weight;
-    };
+    int nearestIndex = -1;
+    float nearestDist = 1e10;
 
-    ProbeCandidate candidates[MAX_BLEND_PROBES];
-    int candidateCount = 0;
-
-    for (int i = 0; i < g_lightProbeCount && candidateCount < MAX_BLEND_PROBES; i++)
+    for (int i = 0; i < g_lightProbeCount; i++)
     {
-        LightProbeData probe = g_lightProbes[i];
-        float3 delta = worldPos - probe.position;
+        float3 delta = worldPos - g_lightProbes[i].position;
         float dist = length(delta);
 
-        // 在 radius 范围内
-        if (dist < probe.radius)
+        if (dist < nearestDist)
         {
-            // 插入排序（按距离从近到远）
-            int insertPos = candidateCount;
-            for (int j = 0; j < candidateCount; j++) {
-                if (dist < candidates[j].distance) {
-                    insertPos = j;
-                    break;
-                }
-            }
-
-            // 移动后面的元素
-            for (int j = candidateCount; j > insertPos; j--) {
-                if (j < MAX_BLEND_PROBES) {
-                    candidates[j] = candidates[j - 1];
-                }
-            }
-
-            // 插入新元素
-            if (insertPos < MAX_BLEND_PROBES) {
-                candidates[insertPos].index = i;
-                candidates[insertPos].distance = dist;
-                candidates[insertPos].weight = 0;  // 稍后计算
-            }
-
-            candidateCount = min(candidateCount + 1, MAX_BLEND_PROBES);
+            nearestDist = dist;
+            nearestIndex = i;
         }
     }
 
     // ============================================
-    // 2. Fallback：没有 probe 覆盖 → 返回 0
+    // 采样最近的 Probe
     // ============================================
-    if (candidateCount == 0) {
-        return float3(0, 0, 0);
-    }
-
-    // 有 probe 覆盖
-    hasProbe = true;
-
-    // ============================================
-    // 3. 计算距离权重
-    // ============================================
-    float totalWeight = 0.0;
-    for (int i = 0; i < candidateCount; i++)
+    if (nearestIndex >= 0)
     {
-        float dist = candidates[i].distance;
-        float weight = 1.0 / pow(dist + 0.1, g_lightProbeBlendFalloff);  // 逆平方衰减
-        candidates[i].weight = weight;
-        totalWeight += weight;
+        hasProbe = true;
+        return EvaluateSH(normal, g_lightProbes[nearestIndex].shCoeffs);
     }
 
-    // ============================================
-    // 4. 混合 SH 系数并解码
-    // ============================================
-    float3 result = 0;
-
-    for (int i = 0; i < candidateCount; i++)
-    {
-        LightProbeData probe = g_lightProbes[candidates[i].index];
-        float weight = candidates[i].weight / totalWeight;  // 归一化权重
-
-        // 解码 SH 并累加
-        float3 irradiance = EvaluateSH(normal, probe.shCoeffs);
-        result += irradiance * weight;
-    }
-
-    return result;
+    return float3(0, 0, 0);
 }
 
 #endif // LIGHT_PROBE_HLSL

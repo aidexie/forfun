@@ -510,6 +510,11 @@ void CSceneRenderer::Render(
     auto& lightProbeManager = scene.GetLightProbeManager();
     lightProbeManager.Bind(context);
 
+    // Bind Volumetric Lightmap (t20-t24, b6)
+    // VolumetricLightmap provides per-pixel SH sampling (highest quality GI)
+    auto& volumetricLightmap = scene.GetVolumetricLightmap();
+    volumetricLightmap.Bind(context);
+
     // Collect render items (with per-object probe selection)
     std::vector<RenderItem> opaqueItems;
     std::vector<RenderItem> transparentItems;

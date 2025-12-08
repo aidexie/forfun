@@ -4,6 +4,7 @@
 #include "GameObject.h"
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
+#include "VolumetricLightmap.h"
 
 using namespace DirectX;
 
@@ -15,6 +16,9 @@ CDebugRenderSystem& CDebugRenderSystem::Instance() {
 void CDebugRenderSystem::CollectAndRender(CScene& scene, CDebugLinePass& linePass) {
     // 收集各类 debug geometry
     CollectAABBs(scene, linePass);
+
+    // Volumetric Lightmap 八叉树可视化
+    CollectVolumetricLightmapOctree(scene, linePass);
 
     // 未来扩展：
     // CollectRays(scene, linePass);
@@ -38,4 +42,10 @@ void CDebugRenderSystem::CollectAABBs(CScene& scene, CDebugLinePass& linePass) {
             }
         }
     }
+}
+
+void CDebugRenderSystem::CollectVolumetricLightmapOctree(CScene& scene, CDebugLinePass& linePass) {
+    // 委托给 VolumetricLightmap 绘制
+    auto& vl = scene.GetVolumetricLightmap();
+    vl.DrawOctreeDebug(linePass);
 }

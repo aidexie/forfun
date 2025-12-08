@@ -126,8 +126,8 @@ bool CLightProbeBaker::BakeProbe(
         return false;
     }
 
-    CFFLog::Info("[LightProbeBaker] Baking probe at (%.1f, %.1f, %.1f)...",
-                position.x, position.y, position.z);
+    // CFFLog::Info("[LightProbeBaker] Baking probe at (%.1f, %.1f, %.1f)...",
+    //             position.x, position.y, position.z);
 
                 
     // RenderDoc 捕获：自动捕获第一个面的渲染
@@ -151,8 +151,8 @@ bool CLightProbeBaker::BakeProbe(
     // 3. 标记为已烘焙
     probe.isDirty = false;
 
-    CFFLog::Info("[LightProbeBaker] Probe baked successfully. SH L0=%.3f,%.3f,%.3f",
-                probe.shCoeffs[0].x, probe.shCoeffs[0].y, probe.shCoeffs[0].z);
+    // CFFLog::Info("[LightProbeBaker] Probe baked successfully. SH L0=%.3f,%.3f,%.3f",
+    //             probe.shCoeffs[0].x, probe.shCoeffs[0].y, probe.shCoeffs[0].z);
 
     return true;
 }

@@ -23,4 +23,7 @@ private:
 
     // 收集 AABB 包围盒
     void CollectAABBs(CScene& scene, CDebugLinePass& linePass);
+
+    // 收集 Volumetric Lightmap 八叉树调试可视化
+    void CollectVolumetricLightmapOctree(CScene& scene, CDebugLinePass& linePass);
 };
