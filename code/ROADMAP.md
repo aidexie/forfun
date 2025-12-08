@@ -7,7 +7,7 @@
 
 ---
 
-## 当前进度 (2025-12-02)
+## 当前进度 (2025-12-09)
 
 ### ✅ 已完成
 
@@ -58,11 +58,60 @@
   - 编辑器 Bake 工具 (KTX2 输出)
   - 默认 Fallback IBL (纯色，防止空 IBL)
   - 全局/局部 Probe 分离管理
+- **Light Probe 系统**:
+  - L2 球谐 (SH9) 编码/解码
+  - CPU 烘焙 (Cubemap → SH 投影)
+  - Per-object 采样 (基于位置)
+
+#### Phase 2.5: Volumetric Lightmap ✅ (2025-12-09)
+- **核心架构**:
+  - 自适应八叉树 Brick 系统（基于场景几何密度）
+  - 两级 GPU 查找：World Position → Indirection Texture → Brick Atlas
+  - L1 球谐编码 (SH9, 9 coefficients × RGB)
+  - 硬件 Trilinear 插值实现 Per-Pixel 采样
+- **烘焙系统**:
+  - Overlap Baking 消除 Brick 边缘接缝（边缘体素采样相同世界位置）
+  - 自动派生参数（maxLevel, indirectionResolution, brickAtlasSize）
+  - 详细进度日志 + ETA 估算
+- **Diffuse GI 模式**:
+  - `EDiffuseGIMode` 枚举：VolumetricLightmap / GlobalIBL / None
+  - 场景级别设置（CB_Frame b0），独立于 VL 系统
+  - 编辑器 UI 支持模式切换
+- **调试功能**:
+  - Octree Brick 线框可视化（颜色编码不同层级）
+  - Show Octree Debug 开关
 
 #### 架构改进 ✅
 - **Hybrid Render Pipeline**: 统一的渲染管线架构，支持 Shadow/Main/Post-Processing 多阶段
 - **FFPath 路径管理**: 统一的路径规范化和资源定位
 - **IBLGenerator 移除**: BRDF LUT 迁移到 ReflectionProbeManager，简化架构
+
+---
+
+## 🐛 已知问题 (Known Issues)
+
+### Volumetric Lightmap
+
+1. **室内边缘漏光 (Light Leaking)**
+   - **现象**: 室内墙壁边缘有室外光线渗入
+   - **原因**: 当前只烘焙直接光，没有遮挡信息
+   - **解决方案**: 需要实现 Visibility/Occlusion 烘焙（光线追踪或预计算可见性）
+
+2. **室外场景亮度过高**
+   - **现象**: VL 模式下室外比 Global IBL 模式亮很多
+   - **原因**: SH 编码/解码的强度标定问题，或烘焙时 intensity 累加过多
+   - **解决方案**: 检查 SH 投影公式中的归一化系数，对比 reference 实现
+
+3. **仅支持直接光烘焙**
+   - **现象**: 室内只有直接光照射到的地方有亮度，无间接光反弹
+   - **原因**: 当前 `LightProbeBaker` 只烘焙直接光
+   - **解决方案**: 实现多 Bounce GI（Path Tracing 或 Radiosity）
+
+### 其他
+
+- **无 Probe 混合**: Reflection Probe 边界有跳变
+- **无实时更新**: Probe 必须手动烘焙
+- **Alpha Test 阴影**: Shadow pass 不支持 alpha test
 
 ---
 
