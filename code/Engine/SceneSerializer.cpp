@@ -6,6 +6,7 @@
 
 #include "SceneSerializer.h"
 #include "Scene.h"
+#include "SceneLightSettings.h"  // EDiffuseGIMode
 #include "World.h"
 #include "GameObject.h"
 #include "Component.h"
@@ -200,6 +201,16 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
         // Serialize light settings
         json settingsJson;
         settingsJson["skyboxAssetPath"] = scene.GetLightSettings().skyboxAssetPath;
+        settingsJson["diffuseGIMode"] = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
+
+        // Serialize Volumetric Lightmap config
+        const auto& vlConfig = scene.GetLightSettings().volumetricLightmap;
+        json vlJson;
+        vlJson["volumeMin"] = { vlConfig.volumeMin.x, vlConfig.volumeMin.y, vlConfig.volumeMin.z };
+        vlJson["volumeMax"] = { vlConfig.volumeMax.x, vlConfig.volumeMax.y, vlConfig.volumeMax.z };
+        vlJson["minBrickWorldSize"] = vlConfig.minBrickWorldSize;
+        vlJson["enabled"] = vlConfig.enabled;
+        settingsJson["volumetricLightmap"] = vlJson;
         j["lightSettings"] = settingsJson;
 
         // Write to file
@@ -249,6 +260,32 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
             const auto& settingsJson = j["lightSettings"];
             if (settingsJson.contains("skyboxAssetPath")) {
                 scene.GetLightSettings().skyboxAssetPath = settingsJson["skyboxAssetPath"].get<std::string>();
+            }
+            if (settingsJson.contains("diffuseGIMode")) {
+                scene.GetLightSettings().diffuseGIMode = static_cast<EDiffuseGIMode>(settingsJson["diffuseGIMode"].get<int>());
+            }
+
+            // Load Volumetric Lightmap config
+            if (settingsJson.contains("volumetricLightmap")) {
+                const auto& vlJson = settingsJson["volumetricLightmap"];
+                auto& vlConfig = scene.GetLightSettings().volumetricLightmap;
+
+                if (vlJson.contains("volumeMin") && vlJson["volumeMin"].is_array() && vlJson["volumeMin"].size() == 3) {
+                    vlConfig.volumeMin.x = vlJson["volumeMin"][0].get<float>();
+                    vlConfig.volumeMin.y = vlJson["volumeMin"][1].get<float>();
+                    vlConfig.volumeMin.z = vlJson["volumeMin"][2].get<float>();
+                }
+                if (vlJson.contains("volumeMax") && vlJson["volumeMax"].is_array() && vlJson["volumeMax"].size() == 3) {
+                    vlConfig.volumeMax.x = vlJson["volumeMax"][0].get<float>();
+                    vlConfig.volumeMax.y = vlJson["volumeMax"][1].get<float>();
+                    vlConfig.volumeMax.z = vlJson["volumeMax"][2].get<float>();
+                }
+                if (vlJson.contains("minBrickWorldSize")) {
+                    vlConfig.minBrickWorldSize = vlJson["minBrickWorldSize"].get<float>();
+                }
+                if (vlJson.contains("enabled")) {
+                    vlConfig.enabled = vlJson["enabled"].get<bool>();
+                }
             }
         }
 

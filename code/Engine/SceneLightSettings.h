@@ -3,6 +3,16 @@
 #include <DirectXMath.h>
 
 // ============================================
+// Diffuse GI Mode - 漫反射全局光照模式
+// ============================================
+enum class EDiffuseGIMode : int
+{
+    VolumetricLightmap = 0,  // 使用 Volumetric Lightmap（需要烘焙数据）
+    GlobalIBL = 1,           // 使用 Global IBL（Skybox Irradiance）
+    None = 2                 // 禁用漫反射 GI（烘焙首次/调试用）
+};
+
+// ============================================
 // Volumetric Lightmap 配置
 // ============================================
 struct SVolumetricLightmapConfig
@@ -26,6 +36,9 @@ class CSceneLightSettings {
 public:
     // Environment / Skybox
     std::string skyboxAssetPath = "";
+
+    // Diffuse GI Mode
+    EDiffuseGIMode diffuseGIMode = EDiffuseGIMode::GlobalIBL;
 
     // Volumetric Lightmap
     SVolumetricLightmapConfig volumetricLightmap;

@@ -107,7 +107,8 @@ struct alignas(16) CB_Frame {
     XMFLOAT3 camPosWS; float _pad3;
     float shadowBias;
     float iblIntensity;
-    XMFLOAT2 _pad4;
+    int diffuseGIMode;  // EDiffuseGIMode: 0=VL, 1=GlobalIBL, 2=None
+    float _pad4;
 };
 
 struct alignas(16) CB_Object {
@@ -140,7 +141,8 @@ void updateFrameConstants(
     const XMMATRIX& proj,
     const XMFLOAT3& camPos,
     SDirectionalLight* dirLight,
-    const CShadowPass::Output* shadowData)
+    const CShadowPass::Output* shadowData,
+    int diffuseGIMode)
 {
     CB_Frame cf{};
     cf.view = XMMatrixTranspose(view);
@@ -190,6 +192,7 @@ void updateFrameConstants(
     }
 
     cf.camPosWS = camPos;
+    cf.diffuseGIMode = diffuseGIMode;
     context->UpdateSubresource(cbFrame, 0, nullptr, &cf, 0, 0);
 }
 
@@ -481,8 +484,9 @@ void CSceneRenderer::Render(
         if (dirLight) break;
     }
 
-    // Update frame constants
-    updateFrameConstants(context, m_cbFrame.Get(), view, proj, camera.position, dirLight, shadowData);
+    // Update frame constants (includes diffuseGIMode from scene settings)
+    int diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
+    updateFrameConstants(context, m_cbFrame.Get(), view, proj, camera.position, dirLight, shadowData, diffuseGIMode);
     bindGlobalResources(context, shadowData);
 
     // Clustered lighting setup

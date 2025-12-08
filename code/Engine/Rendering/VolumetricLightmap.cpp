@@ -61,6 +61,7 @@ void CVolumetricLightmap::Shutdown()
     m_constantBuffer.Reset();
     m_brickInfoBuffer.Reset();
     m_brickInfoSRV.Reset();
+    m_sampler.Reset();
 
     m_initialized = false;
     m_enabled = false;
@@ -406,73 +407,73 @@ bool CVolumetricLightmap::allocateBrickInAtlas(SBrick& brick)
 
 void CVolumetricLightmap::BakeAllBricks(CScene& scene)
 {
-    if (m_bricks.empty()) {
-        CFFLog::Warning("[VolumetricLightmap] No bricks to bake! Call BuildOctree first.");
-        return;
-    }
+   if (m_bricks.empty()) {
+       CFFLog::Warning("[VolumetricLightmap] No bricks to bake! Call BuildOctree first.");
+       return;
+   }
 
-    // 创建 Baker
-    CLightProbeBaker baker;
-    if (!baker.Initialize()) {
-        CFFLog::Error("[VolumetricLightmap] Failed to initialize baker!");
-        return;
-    }
+   // 创建 Baker
+   CLightProbeBaker baker;
+   if (!baker.Initialize()) {
+       CFFLog::Error("[VolumetricLightmap] Failed to initialize baker!");
+       return;
+   }
 
-    int totalBricks = (int)m_bricks.size();
-    int totalVoxels = totalBricks * VL_BRICK_VOXEL_COUNT;
-    int bakedVoxels = 0;
+   int totalBricks = (int)m_bricks.size();
+   int totalVoxels = totalBricks * VL_BRICK_VOXEL_COUNT;
+   int bakedVoxels = 0;
 
-    // 计算合适的进度打印间隔
-    // 对于小数量的 Brick，每个都打印；对于大数量，按百分比打印
-    int progressInterval = std::max(1, totalBricks / 20);  // 最多打印约 20 次进度
+   // 计算合适的进度打印间隔
+   // 对于小数量的 Brick，每个都打印；对于大数量，按百分比打印
+   int progressInterval = std::max(1, totalBricks / 20);  // 最多打印约 20 次进度
 
-    CFFLog::Info("[VolumetricLightmap] ========================================");
-    CFFLog::Info("[VolumetricLightmap] Starting bake...");
-    CFFLog::Info("[VolumetricLightmap]   Total Bricks: %d", totalBricks);
-    CFFLog::Info("[VolumetricLightmap]   Total Voxels: %d (%d per brick)", totalVoxels, VL_BRICK_VOXEL_COUNT);
-    CFFLog::Info("[VolumetricLightmap]   Volume: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
-                 m_config.volumeMin.x, m_config.volumeMin.y, m_config.volumeMin.z,
-                 m_config.volumeMax.x, m_config.volumeMax.y, m_config.volumeMax.z);
-    CFFLog::Info("[VolumetricLightmap] ========================================");
+   CFFLog::Info("[VolumetricLightmap] ========================================");
+   CFFLog::Info("[VolumetricLightmap] Starting bake...");
+   CFFLog::Info("[VolumetricLightmap]   Total Bricks: %d", totalBricks);
+   CFFLog::Info("[VolumetricLightmap]   Total Voxels: %d (%d per brick)", totalVoxels, VL_BRICK_VOXEL_COUNT);
+   CFFLog::Info("[VolumetricLightmap]   Volume: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
+                m_config.volumeMin.x, m_config.volumeMin.y, m_config.volumeMin.z,
+                m_config.volumeMax.x, m_config.volumeMax.y, m_config.volumeMax.z);
+   CFFLog::Info("[VolumetricLightmap] ========================================");
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-    auto lastProgressTime = startTime;
+   auto startTime = std::chrono::high_resolution_clock::now();
+   auto lastProgressTime = startTime;
 
-    for (size_t i = 0; i < m_bricks.size(); i++)
-    {
-        bakeBrick(m_bricks[i], scene, baker);
-        bakedVoxels += VL_BRICK_VOXEL_COUNT;
+   for (size_t i = 0; i < m_bricks.size(); i++)
+   {
+       bakeBrick(m_bricks[i], scene, baker);
+       bakedVoxels += VL_BRICK_VOXEL_COUNT;
 
-        // 进度日志
-        bool shouldPrint = (i + 1) % progressInterval == 0 || i == m_bricks.size() - 1;
-        if (shouldPrint)
-        {
-            auto now = std::chrono::high_resolution_clock::now();
-            float elapsedSec = std::chrono::duration<float>(now - startTime).count();
-            float progressPercent = 100.0f * (i + 1) / totalBricks;
+       // 进度日志
+       bool shouldPrint = (i + 1) % progressInterval == 0 || i == m_bricks.size() - 1;
+       if (shouldPrint)
+       {
+           auto now = std::chrono::high_resolution_clock::now();
+           float elapsedSec = std::chrono::duration<float>(now - startTime).count();
+           float progressPercent = 100.0f * (i + 1) / totalBricks;
 
-            // 估算剩余时间
-            float estimatedTotalTime = (elapsedSec / (i + 1)) * totalBricks;
-            float remainingSec = estimatedTotalTime - elapsedSec;
+           // 估算剩余时间
+           float estimatedTotalTime = (elapsedSec / (i + 1)) * totalBricks;
+           float remainingSec = estimatedTotalTime - elapsedSec;
 
-            CFFLog::Info("[VolumetricLightmap] Progress: %d/%d bricks (%.1f%%) | Elapsed: %.1fs | ETA: %.1fs",
-                         (int)(i + 1), totalBricks, progressPercent, elapsedSec, remainingSec);
-        }
-    }
+           CFFLog::Info("[VolumetricLightmap] Progress: %d/%d bricks (%.1f%%) | Elapsed: %.1fs | ETA: %.1fs",
+                        (int)(i + 1), totalBricks, progressPercent, elapsedSec, remainingSec);
+       }
+   }
 
-    auto endTime = std::chrono::high_resolution_clock::now();
-    float totalElapsedSec = std::chrono::duration<float>(endTime - startTime).count();
+   auto endTime = std::chrono::high_resolution_clock::now();
+   float totalElapsedSec = std::chrono::duration<float>(endTime - startTime).count();
 
-    baker.Shutdown();
+   baker.Shutdown();
 
-    CFFLog::Info("[VolumetricLightmap] ========================================");
-    CFFLog::Info("[VolumetricLightmap] Bake complete!");
-    CFFLog::Info("[VolumetricLightmap]   Bricks baked: %d", totalBricks);
-    CFFLog::Info("[VolumetricLightmap]   Voxels baked: %d", totalVoxels);
-    CFFLog::Info("[VolumetricLightmap]   Total time: %.2f seconds", totalElapsedSec);
-    CFFLog::Info("[VolumetricLightmap]   Avg per brick: %.3f ms", (totalElapsedSec * 1000.0f) / totalBricks);
-    CFFLog::Info("[VolumetricLightmap]   Avg per voxel: %.3f ms", (totalElapsedSec * 1000.0f) / totalVoxels);
-    CFFLog::Info("[VolumetricLightmap] ========================================");
+   CFFLog::Info("[VolumetricLightmap] ========================================");
+   CFFLog::Info("[VolumetricLightmap] Bake complete!");
+   CFFLog::Info("[VolumetricLightmap]   Bricks baked: %d", totalBricks);
+   CFFLog::Info("[VolumetricLightmap]   Voxels baked: %d", totalVoxels);
+   CFFLog::Info("[VolumetricLightmap]   Total time: %.2f seconds", totalElapsedSec);
+   CFFLog::Info("[VolumetricLightmap]   Avg per brick: %.3f ms", (totalElapsedSec * 1000.0f) / totalBricks);
+   CFFLog::Info("[VolumetricLightmap]   Avg per voxel: %.3f ms", (totalElapsedSec * 1000.0f) / totalVoxels);
+   CFFLog::Info("[VolumetricLightmap] ========================================");
 }
 
 void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CLightProbeBaker& baker)
@@ -484,14 +485,19 @@ void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CLightProbeBak
     };
 
     // 对每个体素位置烘焙 SH
+    // 使用 Overlap Baking：voxel[0] brick 边缘，voxel[3] 在另一边缘
+    // 这样相邻 Brick 的边缘体素采样同一个世界位置，实现 C0 连续性
     for (int z = 0; z < VL_BRICK_SIZE; z++)
     for (int y = 0; y < VL_BRICK_SIZE; y++)
     for (int x = 0; x < VL_BRICK_SIZE; x++)
     {
-        // 计算体素中心的世界坐标
-        float tx = (x + 0.5f) / VL_BRICK_SIZE;
-        float ty = (y + 0.5f) / VL_BRICK_SIZE;
-        float tz = (z + 0.5f) / VL_BRICK_SIZE;
+        // Overlap Baking: 体素位置从边缘到边缘
+        // voxel[0] -> t=0.0 (brick.worldMin)
+        // voxel[3] -> t=1.0 (brick.worldMax)
+        // 中间体素均匀分布
+        float tx = (float)x / (VL_BRICK_SIZE - 1);  // 0, 1/3, 2/3, 1
+        float ty = (float)y / (VL_BRICK_SIZE - 1);
+        float tz = (float)z / (VL_BRICK_SIZE - 1);
 
         XMFLOAT3 voxelPos = {
             brick.worldMin.x + tx * brickSize.x,
@@ -512,6 +518,7 @@ void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CLightProbeBak
         }
     }
 }
+
 
 // ============================================
 // GPU 数据构建
@@ -553,6 +560,7 @@ void CVolumetricLightmap::buildIndirectionData()
             entry.brickIndex = (uint16_t)brickIndex;
             entry.level = (uint8_t)m_bricks[brickIndex].level;
         } else {
+            CFFLog::Error("[VolumetricLightmap] brickIndex error!");
             entry = SIndirectionEntry::Invalid();
         }
         entry.padding = 0;
@@ -842,6 +850,28 @@ bool CVolumetricLightmap::CreateGPUResources()
         CFFLog::Info("  Brick Info Buffer: %d entries", (int)m_brickInfoData.size());
     }
 
+    // ============================================
+    // 5. 创建 Sampler State (s3: trilinear for atlas)
+    // ============================================
+    {
+        D3D11_SAMPLER_DESC samplerDesc = {};
+        samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;  // trilinear
+        samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDesc.MipLODBias = 0.0f;
+        samplerDesc.MaxAnisotropy = 1;
+        samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+        samplerDesc.MinLOD = 0;
+        samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
+        hr = device->CreateSamplerState(&samplerDesc, &m_sampler);
+        if (FAILED(hr)) {
+            CFFLog::Error("[VolumetricLightmap] Failed to create sampler state!");
+            return false;
+        }
+    }
+
     m_gpuResourcesCreated = true;
     CFFLog::Info("[VolumetricLightmap] GPU resources created successfully!");
 
@@ -856,12 +886,16 @@ void CVolumetricLightmap::UploadToGPU()
 
 void CVolumetricLightmap::Bind(ID3D11DeviceContext* context)
 {
-    if (!m_gpuResourcesCreated || !m_enabled) {
+    // 如果未启用或未烘焙，不绑定任何资源
+    if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
+        // 绑定空资源，避免残留
+        ID3D11ShaderResourceView* nullSRVs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+        context->PSSetShaderResources(20, 5, nullSRVs);
         return;
     }
 
     // 更新 Constant Buffer
-    {
+    if (m_constantBuffer) {
         D3D11_MAPPED_SUBRESOURCE mapped;
         HRESULT hr = context->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
         if (SUCCEEDED(hr)) {
@@ -884,20 +918,17 @@ void CVolumetricLightmap::Bind(ID3D11DeviceContext* context)
             cb->indirectionResolution = m_derived.indirectionResolution;
             cb->brickAtlasSize = m_derived.brickAtlasSize;
             cb->maxLevel = m_derived.maxLevel;
-            cb->enabled = m_enabled ? 1 : 0;
+            cb->enabled = 1;
             cb->brickCount = (int)m_bricks.size();
 
             context->Unmap(m_constantBuffer.Get(), 0);
         }
     }
 
-    // 绑定资源到 Shader
-    // Slot 分配：
-    // t20: Indirection Texture
-    // t21-23: Brick Atlas SH0/SH1/SH2
-    // t24: Brick Info Buffer
-    // b6: Constant Buffer
+    // 绑定 CB 到 b6
+    context->PSSetConstantBuffers(6, 1, m_constantBuffer.GetAddressOf());
 
+    // 绑定纹理资源
     ID3D11ShaderResourceView* srvs[] = {
         m_indirectionSRV.Get(),
         m_brickAtlasSRV[0].Get(),
@@ -906,7 +937,9 @@ void CVolumetricLightmap::Bind(ID3D11DeviceContext* context)
         m_brickInfoSRV.Get()
     };
     context->PSSetShaderResources(20, 5, srvs);
-    context->PSSetConstantBuffers(6, 1, m_constantBuffer.GetAddressOf());
+
+    // 绑定采样器到 s3
+    context->PSSetSamplers(3, 1, m_sampler.GetAddressOf());
 }
 
 void CVolumetricLightmap::Unbind(ID3D11DeviceContext* context)

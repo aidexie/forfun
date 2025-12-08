@@ -8,7 +8,7 @@
 #include <windows.h>
 #include <commdlg.h>
 
-static bool s_showWindow = false;  // Default: hidden (user opens via menu)
+static bool s_showWindow = true;  // Default: hidden (user opens via menu)
 static bool s_isBaking = false;    // Volumetric Lightmap baking state
 
 void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
@@ -58,6 +58,34 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
                 // Apply immediately: reload environment (skybox + IBL)
                 CScene::Instance().ReloadEnvironment(settings.skyboxAssetPath);
             }
+        }
+
+        ImGui::Spacing();
+        ImGui::Spacing();
+
+        // ============================================
+        // Diffuse GI Section
+        // ============================================
+        ImGui::Text("Diffuse Global Illumination");
+        ImGui::Separator();
+
+        // Diffuse GI Mode dropdown
+        const char* diffuseGIModes[] = { "Volumetric Lightmap", "Global IBL", "None" };
+        int currentMode = static_cast<int>(settings.diffuseGIMode);
+        ImGui::PushItemWidth(200);
+        if (ImGui::Combo("Diffuse GI Mode", &currentMode, diffuseGIModes, IM_ARRAYSIZE(diffuseGIModes))) {
+            settings.diffuseGIMode = static_cast<EDiffuseGIMode>(currentMode);
+            CFFLog::Info("[LightSettings] Diffuse GI Mode: %s", diffuseGIModes[currentMode]);
+        }
+        ImGui::PopItemWidth();
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Volumetric Lightmap: Per-pixel GI from baked lightmap\n"
+                "Global IBL: Use skybox irradiance (ambient)\n"
+                "None: Disable diffuse GI (for baking first pass)");
         }
 
         ImGui::Spacing();

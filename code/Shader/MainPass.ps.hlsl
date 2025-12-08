@@ -34,8 +34,14 @@ cbuffer CB_Frame : register(b0) {
     float3   gCamPosWS;   float _pad3;
     float    gShadowBias;
     float    gIblIntensity;  // IBL ambient multiplier
-    float2   _pad4;
+    int      gDiffuseGIMode; // EDiffuseGIMode: 0=VL, 1=GlobalIBL, 2=None
+    float    _pad4;
 }
+
+// Diffuse GI Mode constants
+static const int DIFFUSE_GI_VOLUMETRIC_LIGHTMAP = 0;
+static const int DIFFUSE_GI_GLOBAL_IBL = 1;
+static const int DIFFUSE_GI_NONE = 2;
 
 cbuffer CB_Object : register(b1) {
     float4x4 gWorld;
@@ -283,42 +289,27 @@ float4 main(PSIn i) : SV_Target {
 
 
     // ============================================
-    // Diffuse IBL: Priority Order
-    // 1. Volumetric Lightmap (Per-Pixel, highest quality)
-    // 2. Light Probe (Per-Object fallback)
-    // 3. Global IBL (Reflection Probe's irradiance)
+    // Diffuse IBL: Explicit Mode Selection
+    // Mode 0: Volumetric Lightmap (Per-Pixel GI)
+    // Mode 1: Global IBL (Skybox Irradiance)
+    // Mode 2: None (Disabled, for baking)
     // ============================================
-    float3 diffuseIBL;
+    float3 diffuseIBL = float3(0, 0, 0);
 
-    // Try Volumetric Lightmap first (Per-Pixel sampling)
-    if (IsVolumetricLightmapEnabled()) {
-        float3 vlIrradiance = GetVolumetricLightmapDiffuse(i.posWS, N);
-        if (any(vlIrradiance > 0.0f)) {
-            // Volumetric Lightmap available - use it
+    if (gDiffuseGIMode == DIFFUSE_GI_VOLUMETRIC_LIGHTMAP) {
+        // Volumetric Lightmap mode
+        if (IsVolumetricLightmapEnabled()) {
+            float3 vlIrradiance = GetVolumetricLightmapDiffuse(i.posWS, N);
+            return float4(vlIrradiance, 1.0);
+
             diffuseIBL = vlIrradiance * albedo;
-            // return float4(diffuseIBL, 1.0);  // Early return for performance
-        } else {
-            // Position outside VL volume - fallback to Light Probe / Global IBL
-            bool hasLightProbe;
-            float3 lightProbeIrradiance = SampleLightProbes(i.posWS, N, hasLightProbe);
-            if (hasLightProbe) {
-                diffuseIBL = lightProbeIrradiance * albedo;
-            } else {
-                float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
-                diffuseIBL = irradiance * albedo;
-            }
         }
-    } else {
-        // No Volumetric Lightmap - use Light Probe or Global IBL
-        bool hasLightProbe;
-        float3 lightProbeIrradiance = SampleLightProbes(i.posWS, N, hasLightProbe);
-        if (hasLightProbe) {
-            diffuseIBL = lightProbeIrradiance * albedo;
-        } else {
-            float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
-            diffuseIBL = irradiance * albedo;
-        }
+    } else if (gDiffuseGIMode == DIFFUSE_GI_GLOBAL_IBL) {
+        // Global IBL mode (Skybox Irradiance)
+        float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
+        diffuseIBL = irradiance * albedo;
     }
+    // else: DIFFUSE_GI_NONE - diffuseIBL stays at 0 (no diffuse GI)
     // Sample BRDF LUT (X: NdotV, Y: roughness)
     float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;
 

@@ -160,7 +160,7 @@ struct CB_VolumetricLightmap
     int enabled;                        // 是否启用 (0/1)
 
     int brickCount;                     // 实际 Brick 数量
-    DirectX::XMFLOAT3 _pad5;
+    int _pad5[3];
 };
 
 // ============================================
@@ -358,4 +358,6 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_brickInfoBuffer;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brickInfoSRV;
+
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;  // s3: trilinear sampler for atlas
 };

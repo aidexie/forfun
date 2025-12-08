@@ -32,7 +32,7 @@ cbuffer CB_VolumetricLightmap : register(b6)
     int vl_enabled;
 
     int vl_brickCount;
-    float3 _vl_pad5;
+    int3 _vl_pad5;
 };
 
 // ============================================
@@ -207,14 +207,11 @@ float3 SampleVolumetricLightmap(float3 worldPos, float3 normal)
     // ============================================
     // Step 5: Calculate Atlas UV
     // ============================================
-    // Brick uses 4x4x4 voxels, convert to atlas coordinates
-    // Add 0.5 offset to sample at voxel center
-    float3 voxelCoordInBrick = brickUV * (VL_BRICK_SIZE - 1);  // 0 to 3
-    float3 atlasCoord = brick.atlasOffset + voxelCoordInBrick + 0.5f;
+    float3 voxelCoordInBrick = 0.5 + brickUV * (VL_BRICK_SIZE-1);
+    float3 atlasCoord = brick.atlasOffset + voxelCoordInBrick;
 
     // Convert to normalized UV for texture sampling
     float3 atlasUV = atlasCoord * vl_brickAtlasInvSize;
-
     // ============================================
     // Step 6: Sample SH Atlas with Trilinear Interpolation
     // ============================================
