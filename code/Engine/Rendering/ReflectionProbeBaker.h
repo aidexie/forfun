@@ -72,32 +72,12 @@ private:
     // Cubemap Rendering
     // ============================================
 
-    // 渲染 6 个面到 Cubemap
-    // position: Probe 位置
-    // resolution: Cubemap 分辨率
-    // scene: 场景
-    // outputCubemap: 输出的 Cubemap 纹理
+    // 渲染 6 个面到 Cubemap（使用共享的 CCubemapRenderer）
     void renderToCubemap(
         const DirectX::XMFLOAT3& position,
         int resolution,
         CScene& scene,
         ID3D11Texture2D* outputCubemap
-    );
-
-    // 渲染单个 Cubemap face
-    // face: Face 索引 (0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z)
-    // position: Probe 位置
-    // resolution: 分辨率
-    // scene: 场景
-    // faceRTV: 该 face 的 RTV
-    // dsv: 深度缓冲
-    void renderCubemapFace(
-        int face,
-        const DirectX::XMFLOAT3& position,
-        int resolution,
-        CScene& scene,
-        ID3D11RenderTargetView* faceRTV,
-        ID3D11DepthStencilView* dsv
     );
 
     // ============================================

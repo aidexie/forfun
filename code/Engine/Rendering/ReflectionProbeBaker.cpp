@@ -1,4 +1,5 @@
 #include "ReflectionProbeBaker.h"
+#include "CubemapRenderer.h"
 #include "ForwardRenderPipeline.h"
 #include "IBLGenerator.h"
 #include "ShowFlags.h"
@@ -14,57 +15,6 @@
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
-
-// ============================================
-// Helper: Setup camera for cubemap face rendering
-// ============================================
-// 设置相机的 yaw/pitch 来朝向指定的 cubemap face
-// DirectX 左手坐标系：+X=Right, +Y=Up, +Z=Forward
-static void SetupCameraForCubemapFace(CCamera& camera, int face, const XMFLOAT3& position)
-{
-    using namespace DirectX;
-
-    camera.position = position;
-
-    // 设置 FOV 为 90 度（覆盖整个 cubemap face）
-    camera.fovY = XM_PIDIV2;         // 90 度
-    camera.aspectRatio = 1.0f;       // 1:1 方形
-    camera.nearZ = 0.3f;
-    camera.farZ = 1000.0f;
-
-    // 为每个 cubemap face 设置 LookAt
-    // DirectX Cubemap 标准约定
-    XMFLOAT3 target, up;
-
-    switch (face) {
-    case 0: // +X (Right)
-        target = XMFLOAT3(position.x + 1.0f, position.y, position.z);
-        up = XMFLOAT3(0, 1, 0);
-        break;
-    case 1: // -X (Left)
-        target = XMFLOAT3(position.x - 1.0f, position.y, position.z);
-        up = XMFLOAT3(0, 1, 0);
-        break;
-    case 2: // +Y (Up)
-        target = XMFLOAT3(position.x, position.y + 1.0f, position.z);
-        up = XMFLOAT3(0, 0, -1);   // ⚠️ 特殊：朝上看时，up 指向 +Z
-        break;
-    case 3: // -Y (Down)
-        target = XMFLOAT3(position.x, position.y - 1.0f, position.z);
-        up = XMFLOAT3(0, 0, 1);  // ⚠️ 特殊：朝下看时，up 指向 -Z
-        break;
-    case 4: // +Z (Forward)
-        target = XMFLOAT3(position.x, position.y, position.z + 1.0f);
-        up = XMFLOAT3(0, 1, 0);
-        break;
-    case 5: // -Z (Back)
-        target = XMFLOAT3(position.x, position.y, position.z - 1.0f);
-        up = XMFLOAT3(0, 1, 0);
-        break;
-    }
-
-    camera.SetLookAt(position, target, up);
-}
 
 CReflectionProbeBaker::CReflectionProbeBaker()
     : m_pipeline(nullptr)
@@ -246,101 +196,26 @@ void CReflectionProbeBaker::renderToCubemap(
     CScene& scene,
     ID3D11Texture2D* outputCubemap)
 {
-    auto device = CDX11Context::Instance().GetDevice();
-
-    // RenderDoc 捕获：自动捕获第一个面的渲染
-    // 这样你可以在 RenderDoc 中查看烘焙时的渲染状态
-    static bool s_captureFirstFace = true;
-    if (s_captureFirstFace) {
+    // RenderDoc 捕获：自动捕获渲染过程
+    static bool s_captureFirstBake = true;
+    if (s_captureFirstBake) {
         CRenderDocCapture::BeginFrameCapture();
-        s_captureFirstFace = false;  // 只捕获一次
+        s_captureFirstBake = false;  // 只捕获一次
     }
 
-    // Create depth stencil view (shared for all faces)
-    ComPtr<ID3D11DepthStencilView> dsv;
-    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
-    dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-    dsvDesc.Texture2D.MipSlice = 0;
+    // 使用共享的 CubemapRenderer
+    CCubemapRenderer::RenderToCubemap(
+        position,
+        resolution,
+        scene,
+        m_pipeline,
+        outputCubemap,
+        m_depthBuffer.Get());
 
-    HRESULT hr = device->CreateDepthStencilView(m_depthBuffer.Get(), &dsvDesc, dsv.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Failed to create depth stencil view");
-        return;
-    }
-
-    // Render each face
-    for (int face = 0; face < 6; ++face) {
-        // Create RTV for this face
-        ComPtr<ID3D11RenderTargetView> faceRTV;
-        D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};
-        rtvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-        rtvDesc.Texture2DArray.MipSlice = 0;
-        rtvDesc.Texture2DArray.FirstArraySlice = face;
-        rtvDesc.Texture2DArray.ArraySize = 1;
-
-        hr = device->CreateRenderTargetView(outputCubemap, &rtvDesc, faceRTV.GetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("Failed to create RTV for face %d", face);
-            continue;
-        }
-
-        // Render this face
-        renderCubemapFace(face, position, resolution, scene, faceRTV.Get(), dsv.Get());
-    }
-
-    // 解绑所有 render targets 和 depth stencil（确保 GPU 写入完成）
-    auto context = CDX11Context::Instance().GetContext();
-    // ID3D11RenderTargetView* nullRTV = nullptr;
-    // ID3D11DepthStencilView* nullDSV = nullptr;
-    // ctx->OMSetRenderTargets(1, &nullRTV, nullDSV);
-
-    ID3D11RenderTargetView* nullRTV = nullptr;
-    context->OMSetRenderTargets(1, &nullRTV, nullptr);
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
-    // 在所有 6 个面渲染完成后结束 RenderDoc 捕获
+    // 结束 RenderDoc 捕获
     CRenderDocCapture::EndFrameCapture();
 
     CFFLog::Info("Rendered all 6 cubemap faces");
-}
-
-void CReflectionProbeBaker::renderCubemapFace(
-    int face,
-    const XMFLOAT3& position,
-    int resolution,
-    CScene& scene,
-    ID3D11RenderTargetView* faceRTV,
-    ID3D11DepthStencilView* dsv)
-{
-    auto ctx = CDX11Context::Instance().GetContext();
-
-    // Clear render target and depth buffer
-    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    ctx->ClearRenderTargetView(faceRTV, clearColor);
-    ctx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
-
-    // Setup camera for this cubemap face
-    CCamera faceCamera;
-    SetupCameraForCubemapFace(faceCamera, face, position);
-
-    // Setup RenderContext for this face
-    CRenderPipeline::RenderContext renderCtx{
-        faceCamera,                                     // camera
-        scene,                                          // scene
-        static_cast<unsigned int>(resolution),          // width
-        static_cast<unsigned int>(resolution),          // height
-        0.0f,                                          // deltaTime (not needed for baking)
-        FShowFlags::ReflectionProbe()                   // showFlags
-    };
-
-    // Configure output: copy HDR result to this cubemap face
-    renderCtx.finalOutputRTV = faceRTV;
-    renderCtx.outputFormat = CRenderPipeline::RenderContext::EOutputFormat::HDR;
-
-    // Render using the pipeline
-    m_pipeline->Render(renderCtx);
 }
 
 void CReflectionProbeBaker::generateAndSaveIBL(

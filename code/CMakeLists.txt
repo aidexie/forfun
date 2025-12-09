@@ -222,6 +222,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.cpp
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.h
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
+    ${CODE_PATH}/Engine/Rendering/CubemapRenderer.h
+    ${CODE_PATH}/Engine/Rendering/CubemapRenderer.cpp
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeBaker.h
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeBaker.cpp
     ${CODE_PATH}/Engine/Rendering/ReflectionProbeManager.h
