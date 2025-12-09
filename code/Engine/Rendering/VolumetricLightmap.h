@@ -47,6 +47,10 @@ struct SBrick
     // shData[voxelIndex][coeffIndex] = RGB
     std::array<std::array<DirectX::XMFLOAT3, VL_SH_COEFF_COUNT>, VL_BRICK_VOXEL_COUNT> shData;
 
+    // Validity data for leak prevention
+    // validity[voxelIndex] = true if the probe at this voxel is valid (not inside geometry)
+    std::array<bool, VL_BRICK_VOXEL_COUNT> validity;
+
     // 辅助：体素局部坐标 (x,y,z) → 线性索引
     static int VoxelIndex(int x, int y, int z) {
         return x + y * VL_BRICK_SIZE + z * VL_BRICK_SIZE * VL_BRICK_SIZE;
@@ -59,13 +63,14 @@ struct SBrick
         z = index / (VL_BRICK_SIZE * VL_BRICK_SIZE);
     }
 
-    // 初始化 SH 数据为零
+    // 初始化 SH 数据为零，validity 为 true
     void ClearSHData() {
         for (auto& voxel : shData) {
             for (auto& coeff : voxel) {
                 coeff = {0, 0, 0};
             }
         }
+        validity.fill(true);  // Default to valid
     }
 
     SBrick() { ClearSHData(); }
@@ -290,6 +295,13 @@ private:
                     int level);
     bool allocateBrickInAtlas(SBrick& brick);
     void bakeBrick(SBrick& brick, CScene& scene, CPathTraceBaker& baker);
+
+    // ============================================
+    // Probe Dilation (leak prevention)
+    // ============================================
+    void dilateInvalidProbes();
+    DirectX::XMFLOAT3 getVoxelWorldPosition(const SBrick& brick, int voxelX, int voxelY, int voxelZ) const;
+    int findNearestValidVoxel(int brickIdx, int voxelIdx, int searchRadius) const;
 
     // ============================================
     // GPU 数据构建

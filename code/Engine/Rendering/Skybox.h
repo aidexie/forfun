@@ -47,4 +47,5 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthState;
 
     UINT m_indexCount = 0;
+    std::string m_envPathKTX2 = "";
 };

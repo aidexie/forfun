@@ -81,6 +81,7 @@ bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
 }
 
 bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
+    m_envPathKTX2 = ktx2Path;
     ID3D11Device* device = CDX11Context::Instance().GetDevice();
     if (!device) return false;
 

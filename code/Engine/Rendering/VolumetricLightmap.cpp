@@ -413,7 +413,7 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
 
    // 创建 Path Trace Baker
    SPathTraceConfig ptConfig;
-   ptConfig.samplesPerVoxel = 64;   // 每个 voxel 采样 64 次
+   ptConfig.samplesPerVoxel = 64*64*6;   // 每个 voxel 采样 64 次
    ptConfig.maxBounces = 3;         // 最多 3 次反弹
    ptConfig.useRussianRoulette = true;
 
@@ -480,6 +480,9 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
    CFFLog::Info("[VolumetricLightmap]   Avg per brick: %.3f ms", (totalElapsedSec * 1000.0f) / totalBricks);
    CFFLog::Info("[VolumetricLightmap]   Avg per voxel: %.3f ms", (totalElapsedSec * 1000.0f) / totalVoxels);
    CFFLog::Info("[VolumetricLightmap] ========================================");
+
+   // Apply dilation to fill invalid probes with data from nearby valid probes
+   dilateInvalidProbes();
 }
 
 void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CPathTraceBaker& baker)
@@ -511,16 +514,181 @@ void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CPathTraceBake
             brick.worldMin.z + tz * brickSize.z
         };
 
-        // 使用 Path Tracing 烘焙 SH
-        std::array<XMFLOAT3, 9> shCoeffs;
-        baker.BakeVoxel(voxelPos, scene, shCoeffs);
+        // 使用 Path Tracing 烘焙 SH，并获取 validity
+        SBakeResult result = baker.BakeVoxelWithValidity(voxelPos, scene);
 
-        // 存储 SH 系数
+        // 存储 SH 系数和 validity
         int voxelIndex = SBrick::VoxelIndex(x, y, z);
         for (int c = 0; c < VL_SH_COEFF_COUNT; c++) {
-            brick.shData[voxelIndex][c] = shCoeffs[c];
+            brick.shData[voxelIndex][c] = result.sh[c];
+        }
+        brick.validity[voxelIndex] = result.isValid;
+    }
+}
+
+// ============================================
+// Probe Dilation (leak prevention)
+// ============================================
+
+XMFLOAT3 CVolumetricLightmap::getVoxelWorldPosition(const SBrick& brick, int voxelX, int voxelY, int voxelZ) const
+{
+    XMFLOAT3 brickSize = {
+        brick.worldMax.x - brick.worldMin.x,
+        brick.worldMax.y - brick.worldMin.y,
+        brick.worldMax.z - brick.worldMin.z
+    };
+
+    float tx = (float)voxelX / (VL_BRICK_SIZE - 1);
+    float ty = (float)voxelY / (VL_BRICK_SIZE - 1);
+    float tz = (float)voxelZ / (VL_BRICK_SIZE - 1);
+
+    return {
+        brick.worldMin.x + tx * brickSize.x,
+        brick.worldMin.y + ty * brickSize.y,
+        brick.worldMin.z + tz * brickSize.z
+    };
+}
+
+int CVolumetricLightmap::findNearestValidVoxel(int brickIdx, int voxelIdx, int searchRadius) const
+{
+    const SBrick& brick = m_bricks[brickIdx];
+    int vx, vy, vz;
+    SBrick::IndexToVoxel(voxelIdx, vx, vy, vz);
+    XMFLOAT3 invalidPos = getVoxelWorldPosition(brick, vx, vy, vz);
+
+    float bestDistSq = FLT_MAX;
+    int bestBrick = -1;
+    int bestVoxel = -1;
+
+    // Search within the same brick first
+    for (int z = 0; z < VL_BRICK_SIZE; z++)
+    for (int y = 0; y < VL_BRICK_SIZE; y++)
+    for (int x = 0; x < VL_BRICK_SIZE; x++)
+    {
+        int idx = SBrick::VoxelIndex(x, y, z);
+        if (!brick.validity[idx]) continue;  // Skip invalid
+
+        XMFLOAT3 pos = getVoxelWorldPosition(brick, x, y, z);
+        float dx = pos.x - invalidPos.x;
+        float dy = pos.y - invalidPos.y;
+        float dz = pos.z - invalidPos.z;
+        float distSq = dx*dx + dy*dy + dz*dz;
+
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestBrick = brickIdx;
+            bestVoxel = idx;
         }
     }
+
+    // If found in same brick, return
+    if (bestVoxel >= 0) {
+        return bestBrick * VL_BRICK_VOXEL_COUNT + bestVoxel;
+    }
+
+    // Search neighboring bricks
+    for (size_t bi = 0; bi < m_bricks.size(); bi++)
+    {
+        if ((int)bi == brickIdx) continue;
+
+        const SBrick& other = m_bricks[bi];
+
+        // Quick distance check using brick centers
+        float centerX = (other.worldMin.x + other.worldMax.x) * 0.5f;
+        float centerY = (other.worldMin.y + other.worldMax.y) * 0.5f;
+        float centerZ = (other.worldMin.z + other.worldMax.z) * 0.5f;
+        float dcx = centerX - invalidPos.x;
+        float dcy = centerY - invalidPos.y;
+        float dcz = centerZ - invalidPos.z;
+        float centerDistSq = dcx*dcx + dcy*dcy + dcz*dcz;
+
+        // Skip if too far (heuristic: max brick diagonal ~ sqrt(3) * brickSize)
+        float brickSize = other.worldMax.x - other.worldMin.x;
+        float maxSearchDist = brickSize * (float)searchRadius * 2.0f;
+        if (centerDistSq > maxSearchDist * maxSearchDist) continue;
+
+        for (int z = 0; z < VL_BRICK_SIZE; z++)
+        for (int y = 0; y < VL_BRICK_SIZE; y++)
+        for (int x = 0; x < VL_BRICK_SIZE; x++)
+        {
+            int idx = SBrick::VoxelIndex(x, y, z);
+            if (!other.validity[idx]) continue;
+
+            XMFLOAT3 pos = getVoxelWorldPosition(other, x, y, z);
+            float dx = pos.x - invalidPos.x;
+            float dy = pos.y - invalidPos.y;
+            float dz = pos.z - invalidPos.z;
+            float distSq = dx*dx + dy*dy + dz*dz;
+
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestBrick = (int)bi;
+                bestVoxel = idx;
+            }
+        }
+    }
+
+    if (bestVoxel >= 0) {
+        return bestBrick * VL_BRICK_VOXEL_COUNT + bestVoxel;
+    }
+
+    return -1;  // No valid voxel found
+}
+
+void CVolumetricLightmap::dilateInvalidProbes()
+{
+    CFFLog::Info("[VolumetricLightmap] Starting probe dilation...");
+
+    int totalInvalid = 0;
+    int totalDilated = 0;
+
+    // Count invalid probes
+    for (const auto& brick : m_bricks) {
+        for (int i = 0; i < VL_BRICK_VOXEL_COUNT; i++) {
+            if (!brick.validity[i]) totalInvalid++;
+        }
+    }
+
+    CFFLog::Info("[VolumetricLightmap]   Invalid probes before dilation: %d", totalInvalid);
+
+    if (totalInvalid == 0) {
+        CFFLog::Info("[VolumetricLightmap]   No invalid probes, dilation skipped.");
+        return;
+    }
+
+    const int searchRadius = 3;  // Search within 3 brick-widths
+
+    // For each brick and each invalid voxel, find nearest valid and copy SH
+    for (size_t bi = 0; bi < m_bricks.size(); bi++)
+    {
+        SBrick& brick = m_bricks[bi];
+
+        for (int vi = 0; vi < VL_BRICK_VOXEL_COUNT; vi++)
+        {
+            if (brick.validity[vi]) continue;  // Skip valid probes
+
+            // Find nearest valid voxel
+            int packedResult = findNearestValidVoxel((int)bi, vi, searchRadius);
+
+            if (packedResult >= 0) {
+                int srcBrick = packedResult / VL_BRICK_VOXEL_COUNT;
+                int srcVoxel = packedResult % VL_BRICK_VOXEL_COUNT;
+
+                // Copy SH data from valid source
+                const SBrick& srcBrickRef = m_bricks[srcBrick];
+                for (int c = 0; c < VL_SH_COEFF_COUNT; c++) {
+                    brick.shData[vi][c] = srcBrickRef.shData[srcVoxel][c];
+                }
+
+                // Mark as valid after dilation (so it can be used by GPU)
+                brick.validity[vi] = true;
+                totalDilated++;
+            }
+        }
+    }
+
+    CFFLog::Info("[VolumetricLightmap]   Probes dilated: %d / %d", totalDilated, totalInvalid);
+    CFFLog::Info("[VolumetricLightmap] Probe dilation complete!");
 }
 
 
