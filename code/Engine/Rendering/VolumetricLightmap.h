@@ -10,7 +10,8 @@
 
 // Forward declarations
 class CScene;
-class CLightProbeBaker;
+class CPathTraceBaker;
+struct SPathTraceConfig;
 
 // ============================================
 // Volumetric Lightmap Constants
@@ -288,7 +289,7 @@ private:
                     const DirectX::XMFLOAT3& boundsMax,
                     int level);
     bool allocateBrickInAtlas(SBrick& brick);
-    void bakeBrick(SBrick& brick, CScene& scene, CLightProbeBaker& baker);
+    void bakeBrick(SBrick& brick, CScene& scene, CPathTraceBaker& baker);
 
     // ============================================
     // GPU 数据构建

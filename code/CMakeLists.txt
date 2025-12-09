@@ -234,6 +234,10 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/LightProbeBaker.cpp
     ${CODE_PATH}/Engine/Rendering/VolumetricLightmap.h
     ${CODE_PATH}/Engine/Rendering/VolumetricLightmap.cpp
+    ${CODE_PATH}/Engine/Rendering/RayTracing/RayTracer.h
+    ${CODE_PATH}/Engine/Rendering/RayTracing/RayTracer.cpp
+    ${CODE_PATH}/Engine/Rendering/RayTracing/PathTraceBaker.h
+    ${CODE_PATH}/Engine/Rendering/RayTracing/PathTraceBaker.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h

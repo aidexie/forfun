@@ -1,10 +1,9 @@
 #include "VolumetricLightmap.h"
-#include "LightProbeBaker.h"
+#include "RayTracing/PathTraceBaker.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
-#include "Engine/Components/LightProbe.h"
 #include "Core/DX11Context.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
@@ -412,10 +411,15 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
        return;
    }
 
-   // 创建 Baker
-   CLightProbeBaker baker;
-   if (!baker.Initialize()) {
-       CFFLog::Error("[VolumetricLightmap] Failed to initialize baker!");
+   // 创建 Path Trace Baker
+   SPathTraceConfig ptConfig;
+   ptConfig.samplesPerVoxel = 64;   // 每个 voxel 采样 64 次
+   ptConfig.maxBounces = 3;         // 最多 3 次反弹
+   ptConfig.useRussianRoulette = true;
+
+   CPathTraceBaker baker;
+   if (!baker.Initialize(scene, ptConfig)) {
+       CFFLog::Error("[VolumetricLightmap] Failed to initialize PathTraceBaker!");
        return;
    }
 
@@ -428,9 +432,11 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
    int progressInterval = std::max(1, totalBricks / 20);  // 最多打印约 20 次进度
 
    CFFLog::Info("[VolumetricLightmap] ========================================");
-   CFFLog::Info("[VolumetricLightmap] Starting bake...");
+   CFFLog::Info("[VolumetricLightmap] Starting Path Trace bake...");
    CFFLog::Info("[VolumetricLightmap]   Total Bricks: %d", totalBricks);
    CFFLog::Info("[VolumetricLightmap]   Total Voxels: %d (%d per brick)", totalVoxels, VL_BRICK_VOXEL_COUNT);
+   CFFLog::Info("[VolumetricLightmap]   Samples per voxel: %d", ptConfig.samplesPerVoxel);
+   CFFLog::Info("[VolumetricLightmap]   Max bounces: %d", ptConfig.maxBounces);
    CFFLog::Info("[VolumetricLightmap]   Volume: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
                 m_config.volumeMin.x, m_config.volumeMin.y, m_config.volumeMin.z,
                 m_config.volumeMax.x, m_config.volumeMax.y, m_config.volumeMax.z);
@@ -467,7 +473,7 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
    baker.Shutdown();
 
    CFFLog::Info("[VolumetricLightmap] ========================================");
-   CFFLog::Info("[VolumetricLightmap] Bake complete!");
+   CFFLog::Info("[VolumetricLightmap] Path Trace bake complete!");
    CFFLog::Info("[VolumetricLightmap]   Bricks baked: %d", totalBricks);
    CFFLog::Info("[VolumetricLightmap]   Voxels baked: %d", totalVoxels);
    CFFLog::Info("[VolumetricLightmap]   Total time: %.2f seconds", totalElapsedSec);
@@ -476,7 +482,7 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
    CFFLog::Info("[VolumetricLightmap] ========================================");
 }
 
-void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CLightProbeBaker& baker)
+void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CPathTraceBaker& baker)
 {
     XMFLOAT3 brickSize = {
         brick.worldMax.x - brick.worldMin.x,
@@ -505,16 +511,14 @@ void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CLightProbeBak
             brick.worldMin.z + tz * brickSize.z
         };
 
-        // 创建临时 LightProbe 组件
-        SLightProbe tempProbe;
-
-        // 烘焙！
-        baker.BakeProbe(tempProbe, voxelPos, scene);
+        // 使用 Path Tracing 烘焙 SH
+        std::array<XMFLOAT3, 9> shCoeffs;
+        baker.BakeVoxel(voxelPos, scene, shCoeffs);
 
         // 存储 SH 系数
         int voxelIndex = SBrick::VoxelIndex(x, y, z);
         for (int c = 0; c < VL_SH_COEFF_COUNT; c++) {
-            brick.shData[voxelIndex][c] = tempProbe.shCoeffs[c];
+            brick.shData[voxelIndex][c] = shCoeffs[c];
         }
     }
 }
