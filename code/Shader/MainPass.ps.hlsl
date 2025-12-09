@@ -300,7 +300,6 @@ float4 main(PSIn i) : SV_Target {
         // Volumetric Lightmap mode
         if (IsVolumetricLightmapEnabled()) {
             float3 vlIrradiance = GetVolumetricLightmapDiffuse(i.posWS, N);
-            return float4(vlIrradiance, 1.0);
 
             diffuseIBL = vlIrradiance * albedo;
         }
