@@ -72,6 +72,8 @@ set(CORE_SRC
     ${CODE_PATH}/Core/Offscreen.h
     ${CODE_PATH}/Core/PathManager.cpp
     ${CODE_PATH}/Core/PathManager.h
+    ${CODE_PATH}/Core/RenderConfig.cpp
+    ${CODE_PATH}/Core/RenderConfig.h
     ${CODE_PATH}/Core/ReflectionProbeAsset.cpp
     ${CODE_PATH}/Core/ReflectionProbeAsset.h
     ${CODE_PATH}/Core/RenderData.h
@@ -104,6 +106,24 @@ set(CORE_SRC
     ${CODE_PATH}/Core/Testing/TestCase.cpp
     ${CODE_PATH}/Core/Testing/TestCase.h
     ${CODE_PATH}/Core/Testing/TestRegistry.h
+)
+
+# RHI sources
+set(RHI_SRC
+    # RHI Core
+    ${CODE_PATH}/RHI/RHICommon.h
+    ${CODE_PATH}/RHI/RHIDescriptors.h
+    ${CODE_PATH}/RHI/RHIResources.h
+    ${CODE_PATH}/RHI/ICommandList.h
+    ${CODE_PATH}/RHI/IRenderContext.h
+    ${CODE_PATH}/RHI/RHIFactory.cpp
+    ${CODE_PATH}/RHI/RHIFactory.h
+    # DX11 Backend (implemented in Phase 0.3)
+    # ${CODE_PATH}/RHI/DX11/DX11RenderContext.cpp
+    # ${CODE_PATH}/RHI/DX11/DX11RenderContext.h
+    # DX12 Backend (planned for Phase 3)
+    # ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
+    # ${CODE_PATH}/RHI/DX12/DX12RenderContext.h
 )
 
 # Engine root sources - explicitly listed (no GLOB)
@@ -156,7 +176,7 @@ set(TEST_SRC
 )
 
 add_executable(forfun WIN32
-    ${CORE_SRC} ${ENGINE_SRC}
+    ${CORE_SRC} ${RHI_SRC} ${ENGINE_SRC}
     ${EDITOR_SRC}
     ${TEST_SRC}
     ${CODE_PATH}/main.cpp

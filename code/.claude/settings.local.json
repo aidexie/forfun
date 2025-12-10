@@ -1,30 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(for file in Panels_Dockspace.cpp Panels_SceneLightSettings.cpp ViewportPanel.cpp)",
-      "Bash(do sed -i 's/\\bmainPass\\b/pipeline/g' \"$file\")",
-      "Bash(cmake --build:*)",
-      "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git checkout:*)",
+      "Bash(git -C \"E:/forfun/source/code\" log --oneline --all)",
       "Bash(cat:*)",
-      "Bash(timeout 20 E:/forfun/source/code/build/Debug/forfun.exe:*)",
-      "Bash(timeout 20 ./build/Debug/forfun.exe:*)",
-      "WebSearch",
-      "WebFetch(domain:github.com)",
-      "Bash(dir /b/s E:forfunassets*.ffasset)",
-      "Bash(cmake:*)",
-      "Bash(timeout 15 E:/forfun/source/code/build/Debug/forfun.exe:*)",
-      "Bash(timeout 10 E:/forfun/source/code/build/Debug/forfun.exe:*)",
-      "Bash(dir /b E:forfundebug)",
       "Bash(python3:*)",
-      "Bash(powershell -Command \"Get-Content ''E:/forfun/source/code/Engine/Scene.cpp'' | Out-Null; Write-Host ''File exists''\")",
       "Bash(powershell -Command:*)",
-      "Bash(node:*)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:cseweb.ucsd.edu)",
-      "WebFetch(domain:patapom.com)",
-      "Bash(irradiance\"\n\n- Restore SH coefficients from float4 back to float3 in both C++ and\n  HLSL (XMFLOAT3 shCoeffs[9] / float3 shCoeffs[9])\n\n- Fix solid angle calculation in SphericalHarmonics.cpp: multiply by\n  texelSize² for correct Riemann sum integration\n\n- Add Light Probe baking with debug cubemap face export (PNG)\n\n- Integrate Light Probe system into MainPass pixel shader with proper\n  fallback to Reflection Probe irradiance when no Light Probe coverage\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "WebFetch(domain:docs.unity3d.com)",
+      "Bash(ls:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
