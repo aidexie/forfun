@@ -1,22 +1,24 @@
 // Engine/Rendering/GridPass.h
 #pragma once
-#include <d3d11.h>
 #include <DirectXMath.h>
-#include <wrl/client.h>
+#include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIResources.h"
 
 // CGridPass: Renders an infinite procedural grid on the XZ plane at Y=0
 // Uses shader-based rendering (full-screen quad) with depth buffer reconstruction
 // Supports dual-scale grid lines, distance fading, and view angle fading
+// 
+// Phase 1 Migration: Uses RHI internally, but compatible with existing code
 class CGridPass {
 public:
     static CGridPass& Instance();
 
-    void Initialize();
+    void Initialize();  // Creates internal RHI context
     void Shutdown();
 
     // Render the grid
-    // Note: Uses GPU depth test with currently bound DSV (no depth SRV needed)
-    // Render after all game content (opaque, skybox, transparent) to match Unity/UE
+    // Legacy signature for backward compatibility
     void Render(DirectX::XMMATRIX view, DirectX::XMMATRIX proj,
                 DirectX::XMFLOAT3 cameraPos);
 
@@ -40,7 +42,7 @@ private:
 
     void CreateShaders();
     void CreateBuffers();
-    void CreateStates();
+    void CreatePipelineState();
 
     struct CBPerFrame {
         DirectX::XMMATRIX viewProj;
@@ -51,12 +53,11 @@ private:
         DirectX::XMFLOAT3 padding;
     };
 
-    Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbPerFrame;
-    Microsoft::WRL::ComPtr<ID3D11BlendState> m_blendState;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthState;
-    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_samplerState;
+    RHI::IRenderContext* m_renderContext = nullptr;  // Owned by GridPass for Phase 1
+    RHI::IShader* m_vs = nullptr;
+    RHI::IShader* m_ps = nullptr;
+    RHI::IBuffer* m_cbPerFrame = nullptr;
+    RHI::IPipelineState* m_pso = nullptr;
 
     bool m_initialized = false;
     bool m_enabled = true;

@@ -1,15 +1,16 @@
 // Engine/Rendering/GridPass.cpp
 #include "GridPass.h"
-#include "Core/DX11Context.h"
 #include "Core/FFLog.h"
+#include "RHI/RHIDescriptors.h"
+#include "RHI/RHIFactory.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-using Microsoft::WRL::ComPtr;
 using namespace DirectX;
+using namespace RHI;
 
 // Helper function to load shader source from file
 static std::string LoadShaderSource(const std::string& filepath) {
@@ -31,27 +32,37 @@ CGridPass& CGridPass::Instance() {
 void CGridPass::Initialize() {
     if (m_initialized) return;
 
+    // Create RHI context for this pass (Phase 1: each pass owns its own context)
+    // In Phase 2+, this will be passed from the pipeline
+    m_renderContext = RHI::CreateRenderContext(EBackend::DX11);
+    if (!m_renderContext) {
+        CFFLog::Error("Failed to create RHI context for GridPass");
+        return;
+    }
+
     CreateShaders();
     CreateBuffers();
-    CreateStates();
+    CreatePipelineState();
 
     m_initialized = true;
 }
 
 void CGridPass::Shutdown() {
-    m_vs.Reset();
-    m_ps.Reset();
-    m_cbPerFrame.Reset();
-    m_blendState.Reset();
-    m_depthState.Reset();
-    m_samplerState.Reset();
+    delete m_pso;
+    delete m_vs;
+    delete m_ps;
+    delete m_cbPerFrame;
+    delete m_renderContext;
+
+    m_pso = nullptr;
+    m_vs = nullptr;
+    m_ps = nullptr;
+    m_cbPerFrame = nullptr;
+    m_renderContext = nullptr;
     m_initialized = false;
 }
 
 void CGridPass::CreateShaders() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    if (!device) return;
-
     // Load shader source files
     std::string vsSource = LoadShaderSource("../source/code/Shader/Grid.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/Grid.ps.hlsl");
@@ -66,7 +77,9 @@ void CGridPass::CreateShaders() {
     compileFlags |= D3DCOMPILE_DEBUG;
 #endif
 
-    ComPtr<ID3DBlob> vsBlob, psBlob, err;
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* psBlob = nullptr;
+    ID3DBlob* err = nullptr;
 
     // Compile Vertex Shader
     HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "Grid.vs.hlsl",
@@ -75,6 +88,7 @@ void CGridPass::CreateShaders() {
         if (err) {
             CFFLog::Error("=== GRID VERTEX SHADER COMPILATION ERROR ===");
             CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
         }
         return;
     }
@@ -86,71 +100,76 @@ void CGridPass::CreateShaders() {
         if (err) {
             CFFLog::Error("=== GRID PIXEL SHADER COMPILATION ERROR ===");
             CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
         }
+        vsBlob->Release();
         return;
     }
 
-    // Create shader objects
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
+    // Create shader objects using RHI
+    ShaderDesc vsDesc;
+    vsDesc.type = EShaderType::Vertex;
+    vsDesc.bytecode = vsBlob->GetBufferPointer();
+    vsDesc.bytecodeSize = vsBlob->GetBufferSize();
+    m_vs = m_renderContext->CreateShader(vsDesc);
+
+    ShaderDesc psDesc;
+    psDesc.type = EShaderType::Pixel;
+    psDesc.bytecode = psBlob->GetBufferPointer();
+    psDesc.bytecodeSize = psBlob->GetBufferSize();
+    m_ps = m_renderContext->CreateShader(psDesc);
+
+    vsBlob->Release();
+    psBlob->Release();
 }
 
 void CGridPass::CreateBuffers() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    if (!device) return;
-
     // Create constant buffer
-    D3D11_BUFFER_DESC cbDesc{};
-    cbDesc.ByteWidth = sizeof(CBPerFrame);
-    cbDesc.Usage = D3D11_USAGE_DEFAULT;
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    device->CreateBuffer(&cbDesc, nullptr, m_cbPerFrame.GetAddressOf());
+    BufferDesc cbDesc;
+    cbDesc.size = sizeof(CBPerFrame);
+    cbDesc.usage = EBufferUsage::Constant;
+    cbDesc.cpuAccess = ECPUAccess::Write;  // Need write access for Map/Unmap
+    m_cbPerFrame = m_renderContext->CreateBuffer(cbDesc, nullptr);
 }
 
-void CGridPass::CreateStates() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    if (!device) return;
+void CGridPass::CreatePipelineState() {
+    if (!m_vs || !m_ps) return;
 
-    // Blend State: Alpha blending for RGB, preserve destination alpha
-    D3D11_BLEND_DESC blendDesc{};
-    blendDesc.RenderTarget[0].BlendEnable = TRUE;
-    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    // RGB channels: Standard alpha blending
-    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-    // Alpha channel: Preserve destination alpha (keep PostProcess's alpha=1.0)
-    // This prevents ImGui from blending the viewport texture with its background
-    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED |
-                                                      D3D11_COLOR_WRITE_ENABLE_GREEN |
-                                                      D3D11_COLOR_WRITE_ENABLE_BLUE;
-    device->CreateBlendState(&blendDesc, m_blendState.GetAddressOf());
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs;
+    psoDesc.pixelShader = m_ps;
 
-    // Depth Stencil State: Read depth but don't write
-    D3D11_DEPTH_STENCIL_DESC depthDesc{};
-    depthDesc.DepthEnable = TRUE;
-    depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;  // Don't write depth
-    depthDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-    depthDesc.StencilEnable = FALSE;
-    device->CreateDepthStencilState(&depthDesc, m_depthState.GetAddressOf());
+    // No input layout (vertex shader generates quad procedurally)
+    psoDesc.inputLayout.clear();
 
-    // Sampler State: Point sampling for depth texture
-    D3D11_SAMPLER_DESC samplerDesc{};
-    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    device->CreateSamplerState(&samplerDesc, m_samplerState.GetAddressOf());
+    // Rasterizer state: default
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.frontCounterClockwise = false;
+
+    // Depth stencil state: Read depth but don't write
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+
+    // Blend state: Alpha blending for RGB, preserve destination alpha
+    psoDesc.blend.blendEnable = true;
+    psoDesc.blend.srcBlend = EBlendFactor::SrcAlpha;
+    psoDesc.blend.dstBlend = EBlendFactor::InvSrcAlpha;
+    psoDesc.blend.blendOp = EBlendOp::Add;
+    psoDesc.blend.srcBlendAlpha = EBlendFactor::One;
+    psoDesc.blend.dstBlendAlpha = EBlendFactor::Zero;
+    psoDesc.blend.blendOpAlpha = EBlendOp::Add;
+    psoDesc.blend.renderTargetWriteMask = 0x07; // RGB only
+
+    // Primitive topology
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
+
+    m_pso = m_renderContext->CreatePipelineState(psoDesc);
 }
 
 void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
-    if (!m_initialized || !m_enabled) return;
-
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
-    if (!context) return;
+    if (!m_initialized || !m_enabled || !m_pso || !m_renderContext) return;
 
     // Update constant buffer
     XMMATRIX viewProj = view * proj;
@@ -164,28 +183,24 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
     cb.fadeEnd = m_fadeEnd;
     cb.padding = XMFLOAT3(0, 0, 0);
 
-    context->UpdateSubresource(m_cbPerFrame.Get(), 0, nullptr, &cb, 0, 0);
+    // Map and update constant buffer
+    void* mappedData = m_cbPerFrame->Map();
+    if (mappedData) {
+        memcpy(mappedData, &cb, sizeof(CBPerFrame));
+        m_cbPerFrame->Unmap();
+    }
+
+    // Get command list
+    ICommandList* cmdList = m_renderContext->GetCommandList();
 
     // Set pipeline state
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    context->IASetInputLayout(nullptr);  // No input layout needed (vertex shader generates quad)
+    cmdList->SetPipelineState(m_pso);
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
 
-    context->VSSetShader(m_vs.Get(), nullptr, 0);
-    context->VSSetConstantBuffers(0, 1, m_cbPerFrame.GetAddressOf());
-
-    context->PSSetShader(m_ps.Get(), nullptr, 0);
-    context->PSSetConstantBuffers(0, 1, m_cbPerFrame.GetAddressOf());
-    // Note: No depth SRV needed - GPU depth test handles occlusion
-
-    // Set blend state and depth stencil state
-    float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    context->OMSetBlendState(m_blendState.Get(), blendFactor, 0xFFFFFFFF);
-    context->OMSetDepthStencilState(m_depthState.Get(), 0);
+    // Bind constant buffer
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbPerFrame);
+    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbPerFrame);
 
     // Draw full-screen quad (4 vertices, triangle strip)
-    context->Draw(4, 0);
-
-    // Restore default blend/depth state
-    context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFF);
-    context->OMSetDepthStencilState(nullptr, 0);
+    cmdList->Draw(4, 0);
 }
