@@ -4,6 +4,7 @@
 #include "ReflectionProbeManager.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/RHIResources.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
 #include "Core/GpuMeshResource.h"
@@ -355,9 +356,9 @@ void renderOpaquePass(
         updateObjectConstants(context, cbObj, item);
 
         UINT stride = sizeof(SVertexPNT), offset = 0;
-        ID3D11Buffer* vbo = item.gpuMesh->vbo.Get();
+        ID3D11Buffer* vbo = static_cast<ID3D11Buffer*>(item.gpuMesh->vbo->GetNativeHandle());
         context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-        context->IASetIndexBuffer(item.gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+        context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(item.gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
 
         ID3D11ShaderResourceView* srvs[2] = { item.albedoSRV, item.normalSRV };
         context->PSSetShaderResources(0, 2, srvs);
@@ -405,9 +406,9 @@ void renderTransparentPass(
         updateObjectConstants(context, cbObj, item);
 
         UINT stride = sizeof(SVertexPNT), offset = 0;
-        ID3D11Buffer* vbo = item.gpuMesh->vbo.Get();
+        ID3D11Buffer* vbo = static_cast<ID3D11Buffer*>(item.gpuMesh->vbo->GetNativeHandle());
         context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-        context->IASetIndexBuffer(item.gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+        context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(item.gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
 
         ID3D11ShaderResourceView* srvs[2] = { item.albedoSRV, item.normalSRV };
         context->PSSetShaderResources(0, 2, srvs);
@@ -456,14 +457,21 @@ void CSceneRenderer::Shutdown()
 void CSceneRenderer::Render(
     const CCamera& camera,
     CScene& scene,
-    ID3D11RenderTargetView* hdrRTV,
-    ID3D11DepthStencilView* dsv,
+    RHI::ITexture* hdrRT,
+    RHI::ITexture* depthRT,
     UINT w, UINT h,
     float dt,
     const CShadowPass::Output* shadowData)
 {
     ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context) return;
+
+    // Get D3D11 views from RHI textures
+    ID3D11RenderTargetView* hdrRTV = hdrRT ? static_cast<ID3D11RenderTargetView*>(hdrRT->GetRTV()) : nullptr;
+    ID3D11DepthStencilView* dsv = depthRT ? static_cast<ID3D11DepthStencilView*>(depthRT->GetDSV()) : nullptr;
+
+    // Bind render targets
+    context->OMSetRenderTargets(1, &hdrRTV, dsv);
 
     // Setup viewport
     D3D11_VIEWPORT vp{};

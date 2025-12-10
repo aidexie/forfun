@@ -8,8 +8,6 @@
 // Forward declarations
 struct SMeshCPU_PNT;
 struct SGltfMeshCPU;
-struct ID3D11Device;
-struct ID3D11ShaderResourceView;
 
 // Manages GPU mesh resources with path-based caching and automatic deduplication
 class CMeshResourceManager {

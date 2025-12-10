@@ -1,6 +1,7 @@
 #include "ShadowPass.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
@@ -28,7 +29,8 @@ struct alignas(16) CB_Object {
 bool CShadowPass::Initialize()
 {
     ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
+    if (!device || !context) return false;
 
     // Depth-only vertex shader
     static const char* kDepthVS = R"(
@@ -93,35 +95,16 @@ bool CShadowPass::Initialize()
 
     // --- Create default 1x1 white shadow map (depth=1.0, no shadow) ---
     {
-        D3D11_TEXTURE2D_DESC shadowDesc{};
-        shadowDesc.Width = 1;
-        shadowDesc.Height = 1;
-        shadowDesc.MipLevels = 1;
-        shadowDesc.ArraySize = 1;
-        shadowDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-        shadowDesc.SampleDesc.Count = 1;
-        shadowDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
-
-        ComPtr<ID3D11Texture2D> defaultShadowTex;
-        device->CreateTexture2D(&shadowDesc, nullptr, defaultShadowTex.GetAddressOf());
-
-        // Create DSV to clear it
-        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
-        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-        ComPtr<ID3D11DepthStencilView> dsv;
-        device->CreateDepthStencilView(defaultShadowTex.Get(), &dsvDesc, dsv.GetAddressOf());
+        RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+        RHI::TextureDesc desc = RHI::TextureDesc::DepthStencilWithSRV(1, 1);
+        desc.debugName = "Default_ShadowMap";
+        m_defaultShadowMapRHI.reset(rhiCtx->CreateTexture(desc, nullptr));
 
         // Clear to 1.0 (no shadow)
-        ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-        context->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
-
-        // Create SRV for reading
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-        srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
-        device->CreateShaderResourceView(defaultShadowTex.Get(), &srvDesc, m_defaultShadowMap.GetAddressOf());
+        ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(m_defaultShadowMapRHI->GetDSV());
+        if (dsv) {
+            context->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
+        }
     }
 
     // --- Create shadow sampler (Comparison sampler for PCF) ---
@@ -166,7 +149,7 @@ bool CShadowPass::Initialize()
 
     // --- Initialize output bundle ---
     m_output.cascadeCount = 1;
-    m_output.shadowMapArray = m_defaultShadowMap.Get();  // Default: no shadow
+    m_output.shadowMapArray = static_cast<ID3D11ShaderResourceView*>(m_defaultShadowMapRHI->GetSRV());  // Default: no shadow
     m_output.shadowSampler = m_shadowSampler.Get();
     m_output.cascadeBlendRange = 0.0f;
     m_output.debugShowCascades = false;
@@ -181,12 +164,11 @@ bool CShadowPass::Initialize()
 
 void CShadowPass::Shutdown()
 {
-    m_shadowMapArray.Reset();
-    m_shadowArraySRV.Reset();
+    m_shadowMapArrayRHI.reset();
     for (int i = 0; i < 4; ++i) {
         m_shadowDSVs[i].Reset();
     }
-    m_defaultShadowMap.Reset();
+    m_defaultShadowMapRHI.reset();
     m_shadowSampler.Reset();
     m_depthVS.Reset();
     m_inputLayout.Reset();
@@ -199,36 +181,32 @@ void CShadowPass::Shutdown()
 void CShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
 {
     ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!device || !rhiCtx) return;
 
     if (size == 0) size = 2048;  // Default
     cascadeCount = std::min(std::max(cascadeCount, 1), 4);  // Clamp to [1, 4]
 
     // Already correct size and cascade count
-    if (m_shadowMapArray && m_currentSize == size && m_currentCascadeCount == cascadeCount)
+    if (m_shadowMapArrayRHI && m_currentSize == size && m_currentCascadeCount == cascadeCount)
         return;
 
     // Reset all resources
-    m_shadowMapArray.Reset();
-    m_shadowArraySRV.Reset();
+    m_shadowMapArrayRHI.reset();
     for (int i = 0; i < 4; ++i) {
         m_shadowDSVs[i].Reset();
     }
     m_currentSize = size;
     m_currentCascadeCount = cascadeCount;
 
-    // Create Texture2DArray (depth texture with multiple slices)
-    D3D11_TEXTURE2D_DESC texDesc{};
-    texDesc.Width = size;
-    texDesc.Height = size;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = cascadeCount;  // Key: Array for CSM
-    texDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    // Create Texture2DArray via RHI (depth texture with array slices and SRV)
+    RHI::TextureDesc desc = RHI::TextureDesc::DepthStencilArrayWithSRV(size, size, cascadeCount);
+    desc.debugName = "ShadowMapArray";
+    m_shadowMapArrayRHI.reset(rhiCtx->CreateTexture(desc, nullptr));
 
-    device->CreateTexture2D(&texDesc, nullptr, m_shadowMapArray.GetAddressOf());
+    // Get native texture handle for creating per-slice DSVs
+    ID3D11Texture2D* nativeTexture = static_cast<ID3D11Texture2D*>(m_shadowMapArrayRHI->GetNativeHandle());
+    if (!nativeTexture) return;
 
     // Create per-slice DSVs (for rendering to each cascade)
     for (int i = 0; i < cascadeCount; ++i) {
@@ -238,19 +216,9 @@ void CShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
         dsvDesc.Texture2DArray.FirstArraySlice = i;
         dsvDesc.Texture2DArray.ArraySize = 1;
         dsvDesc.Texture2DArray.MipSlice = 0;
-        device->CreateDepthStencilView(m_shadowMapArray.Get(), &dsvDesc,
+        device->CreateDepthStencilView(nativeTexture, &dsvDesc,
                                        m_shadowDSVs[i].GetAddressOf());
     }
-
-    // Create array SRV (for reading all cascades in MainPass)
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-    srvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    srvDesc.Texture2DArray.MipLevels = 1;
-    srvDesc.Texture2DArray.FirstArraySlice = 0;
-    srvDesc.Texture2DArray.ArraySize = cascadeCount;
-    device->CreateShaderResourceView(m_shadowMapArray.Get(), &srvDesc,
-                                     m_shadowArraySRV.GetAddressOf());
 }
 
 // ===========================
@@ -579,9 +547,9 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
 
                 // Bind vertex/index buffers
                 UINT stride = sizeof(SVertexPNT), offset = 0;
-                ID3D11Buffer* vbo = gpuMesh->vbo.Get();
+                ID3D11Buffer* vbo = static_cast<ID3D11Buffer*>(gpuMesh->vbo->GetNativeHandle());
                 context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-                context->IASetIndexBuffer(gpuMesh->ibo.Get(), DXGI_FORMAT_R32_UINT, 0);
+                context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
 
                 // Draw
                 context->DrawIndexed(gpuMesh->indexCount, 0, 0);
@@ -598,7 +566,7 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
 
     // Update output bundle
     m_output.cascadeCount = cascadeCount;
-    m_output.shadowMapArray = m_shadowArraySRV.Get();
+    m_output.shadowMapArray = static_cast<ID3D11ShaderResourceView*>(m_shadowMapArrayRHI->GetSRV());
     m_output.shadowSampler = m_shadowSampler.Get();
     m_output.cascadeBlendRange = std::clamp(light->cascade_blend_range, 0.0f, 0.5f);
     m_output.debugShowCascades = light->debug_show_cascades;

@@ -38,9 +38,9 @@
 | 任务 | 文件 | 复杂度 | 状态 | 说明 |
 |------|------|--------|------|------|
 | 1.1 | `Core/DX11Context.h/cpp` | 高 | ✅ 完成 | 移动到 `RHI/DX11/`，作为 DX11 后端的内部实现 |
-| 1.2 | `Core/GpuMeshResource.h/cpp` | 中 | 待开始 | 改用 `RHI::IBuffer` 存储 VBO/IBO |
+| 1.2 | `Core/GpuMeshResource.h/cpp` | 中 | ✅ 完成 | 改用 `RHI::IBuffer` 存储 VBO/IBO |
 | 1.3 | `Core/TextureManager.h/cpp` | 中 | 待开始 | 改用 `RHI::ITexture` |
-| 1.4 | `Core/MeshResourceManager.cpp` | 中 | 待开始 | 使用 RHI 创建 buffer |
+| 1.4 | `Core/MeshResourceManager.cpp` | 中 | ✅ 完成 | 使用 RHI 创建 buffer (与 1.2 一起完成) |
 | 1.5 | `Core/DebugEvent.h` | 低 | 待开始 | 需要 RHI 层封装 debug annotation |
 | 1.6 | `Core/Offscreen.h` | 低 | 待开始 | 可能废弃，功能已被 RHI texture 替代 |
 
@@ -49,6 +49,13 @@
 - 更新 `RHI::CRHIManager::Initialize()` 接口，接受 hwnd/width/height 参数
 - 所有使用 `CDX11Context::Instance()` 的代码改为通过 `RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice()/GetNativeContext()` 访问
 - 受影响文件: main.cpp, MeshResourceManager.cpp, TextureManager.cpp, KTXLoader.cpp, KTXExporter.cpp, Screenshot.cpp, Panels_IrradianceDebug.cpp, ViewportPanel.cpp
+
+**Phase 1.2 + 1.4 完成记录 (2025-12-10)**:
+- `GpuMeshResource.h`: 将 `ComPtr<ID3D11Buffer>` 改为 `std::unique_ptr<RHI::IBuffer>`
+- `MeshResourceManager.cpp`: 使用 `IRenderContext::CreateBuffer()` 创建 VBO/IBO
+- `SceneRenderer.cpp`: 渲染时通过 `vbo->GetNativeHandle()` 获取原生指针
+- `ShadowPass.cpp`: 同上
+- 移除了 `MeshResourceManager.h` 中的 D3D11 前向声明
 
 **阻塞项**: 无
 

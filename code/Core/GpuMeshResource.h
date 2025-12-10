@@ -1,7 +1,8 @@
 #pragma once
-#include <d3d11.h>
-#include <wrl/client.h>
+#include "RHI/RHIResources.h"
 #include <DirectXMath.h>
+#include <memory>
+#include <cstdint>
 
 // RAII wrapper for GPU mesh resources
 // Automatically releases GPU resources when destroyed
@@ -9,9 +10,9 @@
 //       Textures and materials are managed separately by TextureManager and MaterialManager.
 class GpuMeshResource {
 public:
-    Microsoft::WRL::ComPtr<ID3D11Buffer> vbo;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> ibo;
-    UINT indexCount = 0;
+    std::unique_ptr<RHI::IBuffer> vbo;
+    std::unique_ptr<RHI::IBuffer> ibo;
+    uint32_t indexCount = 0;
 
     // Local space AABB (computed once at load time, shared by all instances)
     DirectX::XMFLOAT3 localBoundsMin{-0.5f, -0.5f, -0.5f};

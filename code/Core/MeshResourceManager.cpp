@@ -1,12 +1,10 @@
 #include "MeshResourceManager.h"
 #include "RHI/RHIManager.h"
+#include "RHI/RHIDescriptors.h"
 #include "Mesh.h"
 #include "Loader/ObjLoader.h"
 #include "Loader/GltfLoader.h"
-#include <d3d11.h>
 #include <algorithm>
-
-using Microsoft::WRL::ComPtr;
 
 CMeshResourceManager& CMeshResourceManager::Instance() {
     static CMeshResourceManager instance;
@@ -20,8 +18,8 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
         return {};
     }
 
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) {
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!rhiCtx) {
         return {};
     }
 
@@ -100,34 +98,34 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
 std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadMesh(
     const SMeshCPU_PNT& cpu
 ) {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) {
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!rhiCtx) {
         return nullptr;
     }
 
     auto resource = std::make_shared<GpuMeshResource>();
 
-    // Create VBO
-    D3D11_BUFFER_DESC bd{};
-    bd.ByteWidth = (UINT)(cpu.vertices.size() * sizeof(SVertexPNT));
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA initVB{ cpu.vertices.data(), 0, 0 };
-    if (FAILED(device->CreateBuffer(&bd, &initVB, resource->vbo.GetAddressOf()))) {
+    // Create VBO using RHI
+    RHI::BufferDesc vboDesc;
+    vboDesc.size = static_cast<uint32_t>(cpu.vertices.size() * sizeof(SVertexPNT));
+    vboDesc.usage = RHI::EBufferUsage::Vertex;
+    vboDesc.cpuAccess = RHI::ECPUAccess::None;
+    resource->vbo.reset(rhiCtx->CreateBuffer(vboDesc, cpu.vertices.data()));
+    if (!resource->vbo) {
         return nullptr;
     }
 
-    // Create IBO
-    D3D11_BUFFER_DESC ib{};
-    ib.ByteWidth = (UINT)(cpu.indices.size() * sizeof(uint32_t));
-    ib.Usage = D3D11_USAGE_DEFAULT;
-    ib.BindFlags = D3D11_BIND_INDEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA initIB{ cpu.indices.data(), 0, 0 };
-    if (FAILED(device->CreateBuffer(&ib, &initIB, resource->ibo.GetAddressOf()))) {
+    // Create IBO using RHI
+    RHI::BufferDesc iboDesc;
+    iboDesc.size = static_cast<uint32_t>(cpu.indices.size() * sizeof(uint32_t));
+    iboDesc.usage = RHI::EBufferUsage::Index;
+    iboDesc.cpuAccess = RHI::ECPUAccess::None;
+    resource->ibo.reset(rhiCtx->CreateBuffer(iboDesc, cpu.indices.data()));
+    if (!resource->ibo) {
         return nullptr;
     }
 
-    resource->indexCount = (UINT)cpu.indices.size();
+    resource->indexCount = static_cast<uint32_t>(cpu.indices.size());
 
     // Compute AABB from vertices
     if (!cpu.vertices.empty()) {
