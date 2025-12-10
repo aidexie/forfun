@@ -39,10 +39,10 @@ struct RenderItem {
     XMMATRIX worldMatrix;
     float distanceToCamera;
     GpuMeshResource* gpuMesh;
-    ID3D11ShaderResourceView* albedoSRV;
-    ID3D11ShaderResourceView* normalSRV;
-    ID3D11ShaderResourceView* metallicRoughnessSRV;
-    ID3D11ShaderResourceView* emissiveSRV;
+    RHI::ITexture* albedoTex;
+    RHI::ITexture* normalTex;
+    RHI::ITexture* metallicRoughnessTex;
+    RHI::ITexture* emissiveTex;
     bool hasRealMetallicRoughnessTexture;
     bool hasRealEmissiveMap;
     int probeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
@@ -262,13 +262,13 @@ void collectRenderItems(
         }
 
         CTextureManager& texMgr = CTextureManager::Instance();
-        ID3D11ShaderResourceView* albedoSRV = material->albedoTexture.empty() ?
+        RHI::ITexture* albedoTex = material->albedoTexture.empty() ?
             texMgr.GetDefaultWhite() : texMgr.Load(material->albedoTexture, true);
-        ID3D11ShaderResourceView* normalSRV = material->normalMap.empty() ?
+        RHI::ITexture* normalTex = material->normalMap.empty() ?
             texMgr.GetDefaultNormal() : texMgr.Load(material->normalMap, false);
-        ID3D11ShaderResourceView* metallicRoughnessSRV = material->metallicRoughnessMap.empty() ?
+        RHI::ITexture* metallicRoughnessTex = material->metallicRoughnessMap.empty() ?
             texMgr.GetDefaultWhite() : texMgr.Load(material->metallicRoughnessMap, false);
-        ID3D11ShaderResourceView* emissiveSRV = material->emissiveMap.empty() ?
+        RHI::ITexture* emissiveTex = material->emissiveMap.empty() ?
             texMgr.GetDefaultBlack() : texMgr.Load(material->emissiveMap, true);
 
         bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
@@ -298,10 +298,10 @@ void collectRenderItems(
             item.worldMatrix = worldMatrix;
             item.distanceToCamera = distance;
             item.gpuMesh = gpuMesh.get();
-            item.albedoSRV = albedoSRV;
-            item.normalSRV = normalSRV;
-            item.metallicRoughnessSRV = metallicRoughnessSRV;
-            item.emissiveSRV = emissiveSRV;
+            item.albedoTex = albedoTex;
+            item.normalTex = normalTex;
+            item.metallicRoughnessTex = metallicRoughnessTex;
+            item.emissiveTex = emissiveTex;
             item.hasRealMetallicRoughnessTexture = hasRealMetallicRoughnessTexture;
             item.hasRealEmissiveMap = hasRealEmissiveMap;
             item.probeIndex = probeIndex;
@@ -360,10 +360,15 @@ void renderOpaquePass(
         context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
         context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(item.gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
 
-        ID3D11ShaderResourceView* srvs[2] = { item.albedoSRV, item.normalSRV };
+        ID3D11ShaderResourceView* albedoSRV = static_cast<ID3D11ShaderResourceView*>(item.albedoTex->GetSRV());
+        ID3D11ShaderResourceView* normalSRV = static_cast<ID3D11ShaderResourceView*>(item.normalTex->GetSRV());
+        ID3D11ShaderResourceView* metallicRoughnessSRV = static_cast<ID3D11ShaderResourceView*>(item.metallicRoughnessTex->GetSRV());
+        ID3D11ShaderResourceView* emissiveSRV = static_cast<ID3D11ShaderResourceView*>(item.emissiveTex->GetSRV());
+
+        ID3D11ShaderResourceView* srvs[2] = { albedoSRV, normalSRV };
         context->PSSetShaderResources(0, 2, srvs);
-        context->PSSetShaderResources(6, 1, &item.metallicRoughnessSRV);
-        context->PSSetShaderResources(7, 1, &item.emissiveSRV);
+        context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
+        context->PSSetShaderResources(7, 1, &emissiveSRV);
 
         context->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }
@@ -410,10 +415,15 @@ void renderTransparentPass(
         context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
         context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(item.gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
 
-        ID3D11ShaderResourceView* srvs[2] = { item.albedoSRV, item.normalSRV };
+        ID3D11ShaderResourceView* albedoSRV = static_cast<ID3D11ShaderResourceView*>(item.albedoTex->GetSRV());
+        ID3D11ShaderResourceView* normalSRV = static_cast<ID3D11ShaderResourceView*>(item.normalTex->GetSRV());
+        ID3D11ShaderResourceView* metallicRoughnessSRV = static_cast<ID3D11ShaderResourceView*>(item.metallicRoughnessTex->GetSRV());
+        ID3D11ShaderResourceView* emissiveSRV = static_cast<ID3D11ShaderResourceView*>(item.emissiveTex->GetSRV());
+
+        ID3D11ShaderResourceView* srvs[2] = { albedoSRV, normalSRV };
         context->PSSetShaderResources(0, 2, srvs);
-        context->PSSetShaderResources(6, 1, &item.metallicRoughnessSRV);
-        context->PSSetShaderResources(7, 1, &item.emissiveSRV);
+        context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
+        context->PSSetShaderResources(7, 1, &emissiveSRV);
 
         context->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }

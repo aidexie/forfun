@@ -272,6 +272,21 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     return texture;
 }
 
+ITexture* CDX11RenderContext::WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) {
+    auto texture = new CDX11Texture(
+        static_cast<ID3D11Texture2D*>(nativeTexture),
+        width,
+        height,
+        format
+    );
+
+    if (nativeSRV) {
+        texture->SetSRV(static_cast<ID3D11ShaderResourceView*>(nativeSRV));
+    }
+
+    return texture;
+}
+
 ISampler* CDX11RenderContext::CreateSampler(const SamplerDesc& desc) {
     CDX11Context& ctx = CDX11Context::Instance();
 

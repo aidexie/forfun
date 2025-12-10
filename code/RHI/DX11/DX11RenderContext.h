@@ -33,6 +33,7 @@ public:
     IShader* CreateShader(const ShaderDesc& desc) override;
     IPipelineState* CreatePipelineState(const PipelineStateDesc& desc) override;
     IPipelineState* CreateComputePipelineState(const ComputePipelineDesc& desc) override;
+    ITexture* WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) override;
 
     // Backbuffer Access
     ITexture* GetBackbuffer() override;

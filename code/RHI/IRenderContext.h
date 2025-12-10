@@ -72,6 +72,11 @@ public:
     // Create compute pipeline state
     virtual IPipelineState* CreateComputePipelineState(const ComputePipelineDesc& desc) = 0;
 
+    // Wrap an existing native texture (e.g., from WIC loader) into RHI abstraction
+    // DX11: nativeSRV is ID3D11ShaderResourceView*, nativeTexture is ID3D11Texture2D* (can be nullptr)
+    // The RHI takes ownership of these resources
+    virtual ITexture* WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) = 0;
+
     // ============================================
     // Backbuffer Access
     // ============================================

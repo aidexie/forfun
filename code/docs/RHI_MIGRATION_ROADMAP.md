@@ -39,7 +39,7 @@
 |------|------|--------|------|------|
 | 1.1 | `Core/DX11Context.h/cpp` | 高 | ✅ 完成 | 移动到 `RHI/DX11/`，作为 DX11 后端的内部实现 |
 | 1.2 | `Core/GpuMeshResource.h/cpp` | 中 | ✅ 完成 | 改用 `RHI::IBuffer` 存储 VBO/IBO |
-| 1.3 | `Core/TextureManager.h/cpp` | 中 | 待开始 | 改用 `RHI::ITexture` |
+| 1.3 | `Core/TextureManager.h/cpp` | 中 | ✅ 完成 | 改用 `RHI::ITexture` |
 | 1.4 | `Core/MeshResourceManager.cpp` | 中 | ✅ 完成 | 使用 RHI 创建 buffer (与 1.2 一起完成) |
 | 1.5 | `Core/DebugEvent.h` | 低 | 待开始 | 需要 RHI 层封装 debug annotation |
 | 1.6 | `Core/Offscreen.h` | 低 | 待开始 | 可能废弃，功能已被 RHI texture 替代 |
@@ -56,6 +56,14 @@
 - `SceneRenderer.cpp`: 渲染时通过 `vbo->GetNativeHandle()` 获取原生指针
 - `ShadowPass.cpp`: 同上
 - 移除了 `MeshResourceManager.h` 中的 D3D11 前向声明
+
+**Phase 1.3 完成记录 (2025-12-10)**:
+- `TextureManager.h`: 返回 `RHI::ITexture*` 而非 `ID3D11ShaderResourceView*`
+- `TextureManager.cpp`: 使用 `WrapNativeTexture()` 将 WIC 加载的纹理包装为 RHI 对象
+- `IRenderContext.h`: 新增 `WrapNativeTexture()` 接口
+- `DX11RenderContext.cpp`: 实现 `WrapNativeTexture()` - 包装已有 D3D11 资源
+- `SceneRenderer.cpp`: RenderItem 改用 `RHI::ITexture*`，渲染时通过 `GetSRV()` 获取原生 SRV
+- 保留了 TextureManager.cpp 内部的 D3D11 调用（用于 WIC 加载），但对外接口已完全 RHI 化
 
 **阻塞项**: 无
 
