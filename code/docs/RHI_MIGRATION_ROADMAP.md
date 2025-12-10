@@ -41,8 +41,8 @@
 | 1.2 | `Core/GpuMeshResource.h/cpp` | 中 | ✅ 完成 | 改用 `RHI::IBuffer` 存储 VBO/IBO |
 | 1.3 | `Core/TextureManager.h/cpp` | 中 | ✅ 完成 | 改用 `RHI::ITexture` |
 | 1.4 | `Core/MeshResourceManager.cpp` | 中 | ✅ 完成 | 使用 RHI 创建 buffer (与 1.2 一起完成) |
-| 1.5 | `Core/DebugEvent.h` | 低 | 待开始 | 需要 RHI 层封装 debug annotation |
-| 1.6 | `Core/Offscreen.h` | 低 | 待开始 | 可能废弃，功能已被 RHI texture 替代 |
+| 1.5 | `Core/DebugEvent.h` | 低 | ✅ 完成 | D3D11 header 移入 .cpp，公开接口使用 void* |
+| 1.6 | `Core/Offscreen.h` | 低 | ✅ 完成 | 已删除 - 功能已被 RHI texture 替代 |
 
 **Phase 1.1 完成记录 (2025-12-10)**:
 - 将 `Core/DX11Context.h/cpp` 移动到 `RHI/DX11/`
@@ -65,7 +65,20 @@
 - `SceneRenderer.cpp`: RenderItem 改用 `RHI::ITexture*`，渲染时通过 `GetSRV()` 获取原生 SRV
 - 保留了 TextureManager.cpp 内部的 D3D11 调用（用于 WIC 加载），但对外接口已完全 RHI 化
 
+**Phase 1.5 完成记录 (2025-12-10)**:
+- `DebugEvent.h`: 将构造函数参数从 `ID3D11DeviceContext*` 改为 `void*`
+- `DebugEvent.cpp`: D3D11 header `<d3d11_1.h>` 移入 .cpp，内部 cast 回 `ID3D11DeviceContext*`
+- 调用点（如 SceneRenderer.cpp）无需修改，因为已经使用 `GetNativeContext()` 返回 `void*`
+
+**Phase 1.6 完成记录 (2025-12-10)**:
+- 删除了 `Core/Offscreen.h` 和 `Core/Offscreen.cpp`
+- `SOffscreenRT` 是遗留代码，已被 `ForwardRenderPipeline` 中的 RHI texture 替代
+- 从 `ViewportPanel.cpp` 移除了无用的 `#include "Offscreen.h"`
+- 更新 `CMakeLists.txt` 移除 Offscreen 文件引用
+
 **阻塞项**: 无
+
+**Phase 1 完成 ✅** - Core 基础设施迁移全部完成
 
 ---
 

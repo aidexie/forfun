@@ -1,6 +1,8 @@
 #pragma once
-#include <d3d11_1.h>  // ID3DUserDefinedAnnotation requires d3d11_1.h
 #include <string>
+
+// Forward declaration to avoid exposing D3D11 types in header
+struct ID3DUserDefinedAnnotation;
 
 // RAII wrapper for D3D11 debug events (RenderDoc/PIX markers)
 // Usage:
@@ -10,7 +12,9 @@
 //   } // Automatically calls EndEvent
 class CScopedDebugEvent {
 public:
-    CScopedDebugEvent(ID3D11DeviceContext* context, const wchar_t* name);
+    // Constructor takes void* to avoid D3D11 header dependency
+    // nativeContext: ID3D11DeviceContext* (DX11) or ID3D12GraphicsCommandList* (DX12, future)
+    CScopedDebugEvent(void* nativeContext, const wchar_t* name);
     ~CScopedDebugEvent();
 
     // Delete copy/move to prevent misuse

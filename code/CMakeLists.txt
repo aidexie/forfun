@@ -66,8 +66,6 @@ set(CORE_SRC
     ${CODE_PATH}/Core/Mesh.h
     ${CODE_PATH}/Core/MeshResourceManager.cpp
     ${CODE_PATH}/Core/MeshResourceManager.h
-    ${CODE_PATH}/Core/Offscreen.cpp
-    ${CODE_PATH}/Core/Offscreen.h
     ${CODE_PATH}/Core/PathManager.cpp
     ${CODE_PATH}/Core/PathManager.h
     ${CODE_PATH}/Core/RenderConfig.cpp
