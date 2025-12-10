@@ -5,12 +5,13 @@
 #include "Engine/Components/LightProbe.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include <algorithm>
 #include <cmath>
 
 using namespace DirectX;
-using Microsoft::WRL::ComPtr;
 
 // ============================================
 // Public Interface
@@ -41,9 +42,8 @@ bool CLightProbeManager::Initialize()
 
 void CLightProbeManager::Shutdown()
 {
-    m_probeBuffer.Reset();
-    m_probeBufferSRV.Reset();
-    m_cbParams.Reset();
+    m_probeBuffer.reset();
+    m_cbParams.reset();
     m_probeData.clear();
     m_probeCount = 0;
     m_initialized = false;
@@ -104,18 +104,15 @@ void CLightProbeManager::LoadProbesFromScene(CScene& scene)
     CFFLog::Info("[LightProbeManager] Total light probes loaded: %d", m_probeCount);
 }
 
-void CLightProbeManager::Bind(void* context)
+void CLightProbeManager::Bind(RHI::ICommandList* cmdList)
 {
-    if (!m_initialized) return;
-
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
+    if (!m_initialized || !cmdList) return;
 
     // t15: LightProbeBuffer (StructuredBuffer)
-    ID3D11ShaderResourceView* srv = m_probeBufferSRV.Get();
-    d3dContext->PSSetShaderResources(15, 1, &srv);
+    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, m_probeBuffer.get());
 
     // b5: CB_LightProbeParams
-    d3dContext->PSSetConstantBuffers(5, 1, m_cbParams.GetAddressOf());
+    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 5, m_cbParams.get());
 }
 
 void CLightProbeManager::BlendProbesForPosition(
@@ -203,33 +200,20 @@ void CLightProbeManager::BlendProbesForPosition(
 
 bool CLightProbeManager::createStructuredBuffer()
 {
-    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return false;
 
     // 创建 StructuredBuffer（最大容量）
-    D3D11_BUFFER_DESC bufferDesc{};
-    bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
-    bufferDesc.ByteWidth = sizeof(LightProbeData) * MAX_PROBES;
-    bufferDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    bufferDesc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-    bufferDesc.StructureByteStride = sizeof(LightProbeData);
+    RHI::BufferDesc desc;
+    desc.size = sizeof(LightProbeData) * MAX_PROBES;
+    desc.usage = RHI::EBufferUsage::Structured | RHI::EBufferUsage::UnorderedAccess;  // For SRV
+    desc.cpuAccess = RHI::ECPUAccess::Write;
+    desc.structureByteStride = sizeof(LightProbeData);
+    desc.debugName = "LightProbeManager_ProbeBuffer";
 
-    HRESULT hr = device->CreateBuffer(&bufferDesc, nullptr, m_probeBuffer.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeManager] Failed to create probe buffer (HRESULT: 0x%08X)", hr);
-        return false;
-    }
-
-    // 创建 SRV
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-    srvDesc.Buffer.FirstElement = 0;
-    srvDesc.Buffer.NumElements = MAX_PROBES;
-
-    hr = device->CreateShaderResourceView(m_probeBuffer.Get(), &srvDesc, m_probeBufferSRV.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeManager] Failed to create probe buffer SRV (HRESULT: 0x%08X)", hr);
+    m_probeBuffer.reset(renderContext->CreateBuffer(desc));
+    if (!m_probeBuffer) {
+        CFFLog::Error("[LightProbeManager] Failed to create probe buffer");
         return false;
     }
 
@@ -238,17 +222,18 @@ bool CLightProbeManager::createStructuredBuffer()
 
 bool CLightProbeManager::createConstantBuffer()
 {
-    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return false;
 
-    D3D11_BUFFER_DESC cbDesc{};
-    cbDesc.Usage = D3D11_USAGE_DYNAMIC;
-    cbDesc.ByteWidth = sizeof(CB_LightProbeParams);
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    RHI::BufferDesc desc;
+    desc.size = sizeof(CB_LightProbeParams);
+    desc.usage = RHI::EBufferUsage::Constant;
+    desc.cpuAccess = RHI::ECPUAccess::Write;
+    desc.debugName = "LightProbeManager_CB_Params";
 
-    HRESULT hr = device->CreateBuffer(&cbDesc, nullptr, m_cbParams.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeManager] Failed to create constant buffer (HRESULT: 0x%08X)", hr);
+    m_cbParams.reset(renderContext->CreateBuffer(desc));
+    if (!m_cbParams) {
+        CFFLog::Error("[LightProbeManager] Failed to create constant buffer");
         return false;
     }
 
@@ -257,32 +242,22 @@ bool CLightProbeManager::createConstantBuffer()
 
 void CLightProbeManager::updateProbeBuffer()
 {
-    if (m_probeData.empty()) return;
+    if (m_probeData.empty() || !m_probeBuffer) return;
 
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    HRESULT hr = context->Map(m_probeBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeManager] Failed to map probe buffer");
-        return;
+    void* mapped = m_probeBuffer->Map();
+    if (mapped) {
+        memcpy(mapped, m_probeData.data(), sizeof(LightProbeData) * m_probeCount);
+        m_probeBuffer->Unmap();
     }
-
-    memcpy(mapped.pData, m_probeData.data(), sizeof(LightProbeData) * m_probeCount);
-    context->Unmap(m_probeBuffer.Get(), 0);
 }
 
 void CLightProbeManager::updateConstantBuffer()
 {
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
+    if (!m_cbParams) return;
 
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    HRESULT hr = context->Map(m_cbParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-    if (FAILED(hr)) {
-        CFFLog::Error("[LightProbeManager] Failed to map constant buffer");
-        return;
+    void* mapped = m_cbParams->Map();
+    if (mapped) {
+        memcpy(mapped, &m_params, sizeof(CB_LightProbeParams));
+        m_cbParams->Unmap();
     }
-
-    memcpy(mapped.pData, &m_params, sizeof(CB_LightProbeParams));
-    context->Unmap(m_cbParams.Get(), 0);
 }

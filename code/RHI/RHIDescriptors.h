@@ -30,12 +30,14 @@ struct TextureDesc {
     uint32_t width = 1;
     uint32_t height = 1;
     uint32_t depth = 1;
-    uint32_t arraySize = 1;
+    uint32_t arraySize = 1;     // Number of textures in array (or number of cubes for cubemap arrays)
     uint32_t mipLevels = 1;
     ETextureFormat format = ETextureFormat::Unknown;
     ETextureUsage usage = ETextureUsage::ShaderResource;
-    uint32_t sampleCount = 1;  // For MSAA
-    bool isCubemap = false;    // If true, arraySize is treated as cube count (6 faces per cube)
+    ECPUAccess cpuAccess = ECPUAccess::None;  // For staging textures: Read or Write
+    uint32_t sampleCount = 1;   // For MSAA
+    bool isCubemap = false;     // If true, creates a single cubemap (6 faces)
+    bool isCubemapArray = false; // If true, creates a cubemap array (arraySize cubes, each with 6 faces)
     const char* debugName = nullptr;
 
     // View format overrides (for TYPELESS textures)
@@ -123,6 +125,34 @@ struct TextureDesc {
         desc.mipLevels = 1;
         desc.isCubemap = true;
         desc.usage = ETextureUsage::RenderTarget | ETextureUsage::ShaderResource;
+        return desc;
+    }
+
+    // Cubemap array (multiple cubemaps, for reflection probe arrays)
+    // arrayCount: number of cubemaps in the array
+    static TextureDesc CubemapArray(uint32_t size, uint32_t arrayCount, ETextureFormat fmt, uint32_t mipLevels = 1) {
+        TextureDesc desc;
+        desc.width = size;
+        desc.height = size;
+        desc.format = fmt;
+        desc.mipLevels = mipLevels;
+        desc.arraySize = arrayCount;
+        desc.isCubemapArray = true;
+        desc.usage = ETextureUsage::ShaderResource;
+        return desc;
+    }
+
+    // Staging cubemap (for CPU write, then copy to GPU cubemap array)
+    // arraySize = 6 faces
+    static TextureDesc StagingCubemap(uint32_t size, ETextureFormat fmt, ECPUAccess access = ECPUAccess::Write) {
+        TextureDesc desc;
+        desc.width = size;
+        desc.height = size;
+        desc.format = fmt;
+        desc.mipLevels = 1;
+        desc.arraySize = 6;  // 6 faces
+        desc.usage = ETextureUsage::Staging;
+        desc.cpuAccess = access;
         return desc;
     }
 };

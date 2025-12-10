@@ -21,6 +21,13 @@ public:
     // renderTargets: array of render target textures
     // depthStencil: depth stencil texture (can be nullptr)
     virtual void SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) = 0;
+
+    // Set render target to specific array slice (for cubemap face rendering)
+    // renderTarget: texture with RTV slice views created
+    // arraySlice: array slice index (0-5 for cubemap faces)
+    // depthStencil: depth stencil texture (can be nullptr)
+    virtual void SetRenderTargetSlice(ITexture* renderTarget, uint32_t arraySlice, ITexture* depthStencil) = 0;
+
     // Set depth stencil only (for depth-only rendering like shadow maps)
     // Uses specific array slice for texture arrays (CSM support)
     virtual void SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice = 0) = 0;
@@ -119,6 +126,12 @@ public:
 
     // Copy texture to specific array slice and mip level of destination
     virtual void CopyTextureToSlice(ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel, ITexture* src) = 0;
+
+    // Copy specific subresource from source to destination
+    // Useful for cubemap array operations where both src and dst have array slices
+    virtual void CopyTextureSubresource(
+        ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel,
+        ITexture* src, uint32_t srcArraySlice, uint32_t srcMipLevel) = 0;
 
     // ============================================
     // Unbind Operations (for resource hazard prevention)

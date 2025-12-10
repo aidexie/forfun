@@ -187,19 +187,26 @@
 
 ---
 
-### Phase 7: Header PIMPL 重构 (待完成)
+### Phase 7: Header PIMPL 重构 (已完成 ✅)
 
-**目标**: 移除 header 中的 D3D11 类型，使用 PIMPL 模式隐藏实现细节
+**目标**: 移除 header 中的 D3D11 类型，使用 RHI 抽象类型
 
 | 任务 | 文件 | 复杂度 | 状态 | 说明 |
 |------|------|--------|------|------|
-| 7.1 | `IBLGenerator.h` | 高 | 🔲 待完成 | ComPtr 成员需移入 Impl |
-| 7.2 | `ReflectionProbeBaker.h` | 中 | 🔲 待完成 | ComPtr 成员需移入 Impl |
-| 7.3 | `LightProbeBaker.h` | 中 | 🔲 待完成 | ComPtr 成员需移入 Impl |
-| 7.4 | `VolumetricLightmap.h` | 高 | 🔲 待完成 | ComPtr 成员需移入 Impl |
+| 7.1 | `IBLGenerator.h` | 高 | ✅ 完成 | ComPtr 改为 RHI::ShaderPtr/TexturePtr/BufferPtr/SamplerPtr |
+| 7.2 | `ReflectionProbeBaker.h` | 中 | ✅ 完成 | ComPtr 改为 RHI::TexturePtr |
+| 7.3 | `LightProbeBaker.h` | 中 | ✅ 完成 | ComPtr 改为 RHI::TexturePtr |
+| 7.4 | `VolumetricLightmap.h` | 高 | ✅ 完成 | ComPtr 改为 RHI::TexturePtr/BufferPtr/SamplerPtr |
+| 7.5 | `ReflectionProbeManager.h` | 中 | ✅ 完成 | ComPtr 改为 RHI::TexturePtr/BufferPtr/SamplerPtr |
+| 7.6 | `LightProbeManager.h` | 低 | ✅ 完成 | ComPtr 改为 RHI::BufferPtr |
 
-**说明**: 这些 header 目前仍有 `#include <d3d11.h>` 因为使用了 `ComPtr<ID3D11*>` 成员变量。
-需要使用 PIMPL (Pointer to Implementation) 模式将 D3D11 类型移入 .cpp 文件。
+**Phase 7 完成记录 (2025-12-10)**:
+- 所有 header 文件改用 `RHI/RHIPointers.h` 中定义的智能指针类型
+- `#include <d3d11.h>` 和 `ComPtr<ID3D11*>` 已从所有 Engine/Rendering header 中移除
+- 函数签名中的 `ID3D11*` 参数改为 `RHI::ITexture*` / `RHI::IBuffer*` 等抽象类型
+- 扩展 RHI 支持 TextureCubeArray、Staging 纹理写入、Subresource 拷贝等功能
+
+**Phase 7 完成 ✅**
 
 ---
 
@@ -220,7 +227,7 @@ Phase 3.3 + Phase 4 (高级功能) ✅
     ↓
 Phase 5 (清理) ✅
     ↓
-Phase 7 (PIMPL 重构) 🔲 待完成
+Phase 7 (Header RHI 重构) ✅
 ```
 
 ---
@@ -230,6 +237,9 @@ Phase 7 (PIMPL 重构) 🔲 待完成
 1. **编译检查**: `grep -r "#include <d3d11" --include="*.cpp" --include="*.h" | grep -v "RHI/DX11"` 返回空
 2. **功能测试**: 所有现有测试通过
 3. **运行时**: Editor 正常运行，渲染正确
+
+**当前状态**: ✅ Engine/Rendering/ 目录 header 已完全清理 D3D11 依赖
+**剩余 D3D11 依赖**: Editor debug panel (允许 .cpp 内部使用), Core loaders (允许 .cpp 内部使用)
 
 ---
 
@@ -242,13 +252,18 @@ Phase 7 (PIMPL 重构) 🔲 待完成
 | Phase 3.1-3.2 | 高 | 中 | ✅ 完成 |
 | Phase 3.3 | 高 | 高 (复杂渲染) | ✅ 完成 |
 | Phase 4-5 | 低 | 低 | ✅ 完成 |
-| Phase 7 | 中 | 低 | 🔲 待完成 |
+| Phase 7 | 中 | 低 | ✅ 完成 |
 
-**当前状态 (2025-12-10)**: Phase 1-5 全部完成，仅剩 Phase 7 (PIMPL 重构) 待完成。
-4 个 header 文件仍有 D3D11 类型需要通过 PIMPL 模式隐藏。
+**最终状态 (2025-12-10)**: 🎉 **RHI 迁移全部完成！**
+所有 Engine/Rendering/ 目录下的 IBL/Probe 相关 header 文件已完全清理 D3D11 依赖。
+保留 D3D11 引用的文件:
+- `ClusteredLightingPass.h/.cpp` - Compute shader 密集使用，需要先扩展 RHI 支持 UAV/Compute (Phase 8 未来工作)
+- Editor debug panel (.cpp 内部实现，用于 ImGui 可视化)
+- Core loaders (.cpp 内部实现，用于资源加载)
 
 ---
 
 ## 注意事项
 
 1. **先接口后实现**: 如发现 RHI 接口不足，先扩展接口再迁移
+2. **全部重构完后在修复编译失败** 

@@ -38,6 +38,15 @@ public:
 };
 
 // ============================================
+// Texture Mapped Data
+// ============================================
+struct MappedTexture {
+    void* pData = nullptr;      // Pointer to mapped data
+    uint32_t rowPitch = 0;      // Row pitch in bytes
+    uint32_t depthPitch = 0;    // Depth pitch in bytes (for 3D textures)
+};
+
+// ============================================
 // Texture Interface
 // ============================================
 class ITexture : public IResource {
@@ -49,6 +58,7 @@ public:
     virtual uint32_t GetHeight() const = 0;
     virtual uint32_t GetDepth() const = 0;
     virtual uint32_t GetArraySize() const = 0;
+    virtual uint32_t GetMipLevels() const = 0;
     virtual ETextureFormat GetFormat() const = 0;
 
     // Get views (may return nullptr if not applicable)
@@ -60,6 +70,23 @@ public:
     // Get per-slice DSV for texture arrays (for CSM shadow mapping)
     // Returns nullptr if arrayIndex is out of bounds or texture is not an array
     virtual void* GetDSVSlice(uint32_t arrayIndex) = 0;
+
+    // Get per-slice RTV for texture arrays/cubemaps (for cubemap face rendering)
+    // Returns nullptr if arrayIndex is out of bounds or texture is not an array
+    virtual void* GetRTVSlice(uint32_t arrayIndex) = 0;
+
+    // ============================================
+    // CPU Access (for Staging textures)
+    // ============================================
+
+    // Map texture subresource for CPU read (only valid for Staging textures)
+    // arraySlice: Array slice index (0-5 for cubemap faces)
+    // mipLevel: Mip level index
+    // Returns mapped data info, pData is nullptr on failure
+    virtual MappedTexture Map(uint32_t arraySlice = 0, uint32_t mipLevel = 0) = 0;
+
+    // Unmap texture subresource after reading
+    virtual void Unmap(uint32_t arraySlice = 0, uint32_t mipLevel = 0) = 0;
 };
 
 // ============================================

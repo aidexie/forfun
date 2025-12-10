@@ -1,18 +1,17 @@
 #include "IBLGenerator.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
-#include <d3d11.h>  // Still needed for D3D11 API calls in this file
+#include "Core/PathManager.h"
 #include <fstream>
 #include <sstream>
 #include <vector>
 #include <filesystem>
-#include <dxgiformat.h>
-#include <DirectXPackedVector.h>  // For XMHALF4, XMLoadHalf4
-
-using Microsoft::WRL::ComPtr;
+#include <DirectXPackedVector.h>
 
 // DDS file format structures
 #pragma pack(push, 1)
@@ -54,7 +53,7 @@ struct DDS_HEADER_DXT10 {
 #pragma pack(pop)
 
 // DDS constants
-#define DDS_MAGIC 0x20534444  // "DDS "
+#define DDS_MAGIC 0x20534444
 #define DDSD_CAPS 0x1
 #define DDSD_HEIGHT 0x2
 #define DDSD_WIDTH 0x4
@@ -67,6 +66,7 @@ struct DDS_HEADER_DXT10 {
 #define DDSCAPS2_CUBEMAP_ALLFACES 0xFC00
 #define DDPF_FOURCC 0x4
 #define D3D10_RESOURCE_DIMENSION_TEXTURE2D 3
+#define DXGI_FORMAT_R16G16B16A16_FLOAT 10
 
 // Helper to load shader source
 static std::string LoadShaderSource(const std::string& filepath) {
@@ -80,71 +80,61 @@ static std::string LoadShaderSource(const std::string& filepath) {
     return buffer.str();
 }
 
-bool CIBLGenerator::Initialize() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+CIBLGenerator::CIBLGenerator() = default;
+CIBLGenerator::~CIBLGenerator() { Shutdown(); }
 
-    createFullscreenQuad();
-    createIrradianceShader();
-    createPreFilterShader();
-    createBrdfLutShader();
+bool CIBLGenerator::Initialize() {
+    if (m_initialized) return true;
+
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return false;
+
+    createShaders();
 
     // Create sampler state
-    D3D11_SAMPLER_DESC sampDesc = {};
-    sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sampDesc.MinLOD = 0;
-    sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
-    device->CreateSamplerState(&sampDesc, m_sampler.GetAddressOf());
+    RHI::SamplerDesc sampDesc;
+    sampDesc.filter = RHI::EFilter::MinMagMipLinear;
+    sampDesc.addressU = RHI::ETextureAddressMode::Clamp;
+    sampDesc.addressV = RHI::ETextureAddressMode::Clamp;
+    sampDesc.addressW = RHI::ETextureAddressMode::Clamp;
+    sampDesc.minLOD = 0;
+    sampDesc.maxLOD = 3.402823466e+38f; // FLT_MAX
+    m_sampler.reset(renderContext->CreateSampler(sampDesc));
 
-    // Create constant buffer for face index
-    D3D11_BUFFER_DESC cbDesc = {};
-    cbDesc.ByteWidth = 16;  // int + padding
-    cbDesc.Usage = D3D11_USAGE_DYNAMIC;
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    device->CreateBuffer(&cbDesc, nullptr, m_cbFaceIndex.GetAddressOf());
+    // Create constant buffer for face index (16 bytes: int + padding)
+    RHI::BufferDesc cbDesc;
+    cbDesc.size = 16;
+    cbDesc.usage = RHI::EBufferUsage::Constant;
+    cbDesc.cpuAccess = RHI::ECPUAccess::Write;
+    m_cbFaceIndex.reset(renderContext->CreateBuffer(cbDesc, nullptr));
 
-    // Create constant buffer for roughness
-    cbDesc.ByteWidth = 16;  // float + float + padding
-    device->CreateBuffer(&cbDesc, nullptr, m_cbRoughness.GetAddressOf());
+    // Create constant buffer for roughness (16 bytes: float + float + padding)
+    m_cbRoughness.reset(renderContext->CreateBuffer(cbDesc, nullptr));
 
+    m_initialized = true;
     return true;
 }
 
 void CIBLGenerator::Shutdown() {
-    m_fullscreenVS.Reset();
-    m_irradiancePS.Reset();
-    m_prefilterPS.Reset();
-    m_brdfLutPS.Reset();
-    m_fullscreenVB.Reset();
-    m_sampler.Reset();
-    m_cbFaceIndex.Reset();
-    m_cbRoughness.Reset();
-    m_irradianceTexture.Reset();
-    m_irradianceSRV.Reset();
-    m_preFilteredTexture.Reset();
-    m_preFilteredSRV.Reset();
-    m_brdfLutTexture.Reset();
-    m_brdfLutSRV.Reset();
+    if (!m_initialized) return;
+
+    m_fullscreenVS.reset();
+    m_irradiancePS.reset();
+    m_prefilterPS.reset();
+    m_brdfLutPS.reset();
+    m_sampler.reset();
+    m_cbFaceIndex.reset();
+    m_cbRoughness.reset();
+    m_irradianceTexture.reset();
+    m_preFilteredTexture.reset();
+    m_brdfLutTexture.reset();
+
+    m_initialized = false;
 }
 
-void CIBLGenerator::createFullscreenQuad() {
-    // No vertex buffer needed - using SV_VertexID trick in shader
-}
-
-void CIBLGenerator::createIrradianceShader() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-
-    std::string vsSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.vs.hlsl");
-    std::string psSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.ps.hlsl");
-
-    if (vsSource.empty() || psSource.empty()) {
-        CFFLog::Error("Failed to load irradiance shaders!");
-        return;
-    }
+void CIBLGenerator::createShaders() {
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
 
 #if defined(_DEBUG)
     bool debugShaders = true;
@@ -152,137 +142,335 @@ void CIBLGenerator::createIrradianceShader() {
     bool debugShaders = false;
 #endif
 
-    // Compile VS
-    RHI::SCompiledShader vsCompiled = RHI::CompileShaderFromSource(vsSource, "main", "vs_5_0", nullptr, debugShaders);
-    if (!vsCompiled.success) {
-        CFFLog::Error("=== IRRADIANCE VS COMPILATION ERROR ===");
-        CFFLog::Error("%s", vsCompiled.errorMessage.c_str());
-        return;
+    // Compile Irradiance shaders
+    std::string vsSource = LoadShaderSource(shaderDir + "IrradianceConvolution.vs.hlsl");
+    std::string irradiancePsSource = LoadShaderSource(shaderDir + "IrradianceConvolution.ps.hlsl");
+
+    if (!vsSource.empty()) {
+        RHI::SCompiledShader vsCompiled = RHI::CompileShaderFromSource(vsSource, "main", "vs_5_0", nullptr, debugShaders);
+        if (vsCompiled.success) {
+            RHI::ShaderDesc vsDesc;
+            vsDesc.type = RHI::EShaderType::Vertex;
+            vsDesc.bytecode = vsCompiled.bytecode.data();
+            vsDesc.bytecodeSize = vsCompiled.bytecode.size();
+            m_fullscreenVS.reset(renderContext->CreateShader(vsDesc));
+        } else {
+            CFFLog::Error("IBL: Failed to compile irradiance VS: %s", vsCompiled.errorMessage.c_str());
+        }
     }
 
-    // Compile PS
-    RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
-    if (!psCompiled.success) {
-        CFFLog::Error("=== IRRADIANCE PS COMPILATION ERROR ===");
-        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
-        return;
+    if (!irradiancePsSource.empty()) {
+        RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(irradiancePsSource, "main", "ps_5_0", nullptr, debugShaders);
+        if (psCompiled.success) {
+            RHI::ShaderDesc psDesc;
+            psDesc.type = RHI::EShaderType::Pixel;
+            psDesc.bytecode = psCompiled.bytecode.data();
+            psDesc.bytecodeSize = psCompiled.bytecode.size();
+            m_irradiancePS.reset(renderContext->CreateShader(psDesc));
+        } else {
+            CFFLog::Error("IBL: Failed to compile irradiance PS: %s", psCompiled.errorMessage.c_str());
+        }
     }
 
-    device->CreateVertexShader(vsCompiled.bytecode.data(), vsCompiled.bytecode.size(), nullptr, m_fullscreenVS.GetAddressOf());
-    device->CreatePixelShader(psCompiled.bytecode.data(), psCompiled.bytecode.size(), nullptr, m_irradiancePS.GetAddressOf());
+    // Compile Pre-filter shader
+    std::string prefilterPsSource = LoadShaderSource(shaderDir + "PreFilterEnvironmentMap.ps.hlsl");
+    if (!prefilterPsSource.empty()) {
+        RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(prefilterPsSource, "main", "ps_5_0", nullptr, debugShaders);
+        if (psCompiled.success) {
+            RHI::ShaderDesc psDesc;
+            psDesc.type = RHI::EShaderType::Pixel;
+            psDesc.bytecode = psCompiled.bytecode.data();
+            psDesc.bytecodeSize = psCompiled.bytecode.size();
+            m_prefilterPS.reset(renderContext->CreateShader(psDesc));
+        } else {
+            CFFLog::Error("IBL: Failed to compile prefilter PS: %s", psCompiled.errorMessage.c_str());
+        }
+    }
+
+    // Compile BRDF LUT shader
+    std::string brdfLutPsSource = LoadShaderSource(shaderDir + "BrdfLut.ps.hlsl");
+    if (!brdfLutPsSource.empty()) {
+        RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(brdfLutPsSource, "main", "ps_5_0", nullptr, debugShaders);
+        if (psCompiled.success) {
+            RHI::ShaderDesc psDesc;
+            psDesc.type = RHI::EShaderType::Pixel;
+            psDesc.bytecode = psCompiled.bytecode.data();
+            psDesc.bytecodeSize = psCompiled.bytecode.size();
+            m_brdfLutPS.reset(renderContext->CreateShader(psDesc));
+        } else {
+            CFFLog::Error("IBL: Failed to compile BRDF LUT PS: %s", psCompiled.errorMessage.c_str());
+        }
+    }
 }
 
-void CIBLGenerator::createPreFilterShader() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+RHI::ITexture* CIBLGenerator::GenerateIrradianceMap(RHI::ITexture* envMap, int outputSize) {
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
 
-    std::string vsSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.vs.hlsl");
-    std::string psSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.ps.hlsl");
-
-    if (vsSource.empty() || psSource.empty()) {
-        CFFLog::Error("Failed to load pre-filter shaders!");
-        return;
+    if (!envMap || !m_fullscreenVS || !m_irradiancePS) {
+        CFFLog::Error("IBL: Cannot generate irradiance map - missing resources");
+        return nullptr;
     }
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    // Compile PS (VS already compiled in createIrradianceShader)
-    RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
-    if (!psCompiled.success) {
-        CFFLog::Error("=== PREFILTER PS COMPILATION ERROR ===");
-        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
-        return;
-    }
-
-    device->CreatePixelShader(psCompiled.bytecode.data(), psCompiled.bytecode.size(), nullptr, m_prefilterPS.GetAddressOf());
-}
-
-ID3D11ShaderResourceView* CIBLGenerator::GenerateIrradianceMap(
-    ID3D11ShaderResourceView* envMap,
-    int outputSize)
-{
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-
-    if (!device || !context || !envMap) return nullptr;
 
     // Create output cubemap texture
-    D3D11_TEXTURE2D_DESC texDesc = {};
-    texDesc.Width = outputSize;
-    texDesc.Height = outputSize;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 6;  // 6 faces
-    texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR format
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    texDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+    RHI::TextureDesc texDesc;
+    texDesc.width = outputSize;
+    texDesc.height = outputSize;
+    texDesc.mipLevels = 1;
+    texDesc.arraySize = 1;
+    texDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    texDesc.usage = RHI::ETextureUsage::RenderTarget | RHI::ETextureUsage::ShaderResource;
+    texDesc.isCubemap = true;
+    texDesc.debugName = "IBL_IrradianceMap";
 
-    device->CreateTexture2D(&texDesc, nullptr, m_irradianceTexture.ReleaseAndGetAddressOf());
-
-    // Create SRV for the whole cubemap
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = 1;
-    srvDesc.TextureCube.MostDetailedMip = 0;
-    device->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc, m_irradianceSRV.ReleaseAndGetAddressOf());
+    m_irradianceTexture.reset(renderContext->CreateTexture(texDesc));
+    if (!m_irradianceTexture) {
+        CFFLog::Error("IBL: Failed to create irradiance texture");
+        return nullptr;
+    }
 
     // Render to each cubemap face
     for (int face = 0; face < 6; ++face) {
-        // Create RTV for this face
-        D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-        rtvDesc.Format = texDesc.Format;
-        rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-        rtvDesc.Texture2DArray.MipSlice = 0;
-        rtvDesc.Texture2DArray.FirstArraySlice = face;
-        rtvDesc.Texture2DArray.ArraySize = 1;
-
-        ComPtr<ID3D11RenderTargetView> rtv;
-        device->CreateRenderTargetView(m_irradianceTexture.Get(), &rtvDesc, rtv.GetAddressOf());
-
-        // Set render target
-        context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+        // Set render target to this face
+        cmdList->SetRenderTargetSlice(m_irradianceTexture.get(), face, nullptr);
 
         // Set viewport
-        D3D11_VIEWPORT vp = {};
-        vp.Width = (float)outputSize;
-        vp.Height = (float)outputSize;
-        vp.MinDepth = 0.0f;
-        vp.MaxDepth = 1.0f;
-        context->RSSetViewports(1, &vp);
+        cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
 
         // Update face index constant buffer
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        context->Map(m_cbFaceIndex.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        *(int*)mapped.pData = face;
-        context->Unmap(m_cbFaceIndex.Get(), 0);
+        int* faceData = (int*)m_cbFaceIndex->Map();
+        if (faceData) {
+            *faceData = face;
+            m_cbFaceIndex->Unmap();
+        }
 
         // Set shaders and resources
-        context->VSSetShader(m_fullscreenVS.Get(), nullptr, 0);
-        context->PSSetShader(m_irradiancePS.Get(), nullptr, 0);
-        context->PSSetShaderResources(0, 1, &envMap);
-        context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
-        context->PSSetConstantBuffers(0, 1, m_cbFaceIndex.GetAddressOf());
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 0, envMap);
+        cmdList->SetSampler(RHI::EShaderStage::Pixel, 0, m_sampler.get());
+        cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 0, m_cbFaceIndex.get());
 
-        // Draw fullscreen triangle (3 vertices, no vertex buffer)
-        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context->IASetInputLayout(nullptr);
-        context->Draw(3, 0);
+        // Create and set pipeline state
+        RHI::PipelineStateDesc psoDesc;
+        psoDesc.vertexShader = m_fullscreenVS.get();
+        psoDesc.pixelShader = m_irradiancePS.get();
+        psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
+        psoDesc.depthStencil.depthEnable = false;
+        psoDesc.depthStencil.depthWriteEnable = false;
+
+        std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
+        cmdList->SetPipelineState(pso.get());
+
+        // Draw fullscreen triangle
+        cmdList->Draw(3, 0);
     }
 
     // Cleanup
-    ID3D11RenderTargetView* nullRTV = nullptr;
-    context->OMSetRenderTargets(1, &nullRTV, nullptr);
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
+    cmdList->UnbindRenderTargets();
+    cmdList->UnbindShaderResources(RHI::EShaderStage::Pixel, 0, 1);
 
-    CFFLog::Info("IBL: Irradiance map generated successfully!");
+    CFFLog::Info("IBL: Irradiance map generated (%dx%d)", outputSize, outputSize);
+    return m_irradianceTexture.get();
+}
 
-    return m_irradianceSRV.Get();
+RHI::ITexture* CIBLGenerator::GeneratePreFilteredMap(RHI::ITexture* envMap, int outputSize, int numMipLevels) {
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
+
+    if (!envMap || !m_fullscreenVS || !m_prefilterPS) {
+        CFFLog::Error("IBL: Cannot generate pre-filtered map - missing resources");
+        return nullptr;
+    }
+
+    numMipLevels = std::max(1, std::min(numMipLevels, 10));
+    m_preFilteredMipLevels = numMipLevels;
+
+    CFFLog::Info("IBL: Generating pre-filtered map (%dx%d, %d mip levels)...", outputSize, outputSize, numMipLevels);
+
+    // Create output cubemap texture with mipmaps
+    RHI::TextureDesc texDesc;
+    texDesc.width = outputSize;
+    texDesc.height = outputSize;
+    texDesc.mipLevels = numMipLevels;
+    texDesc.arraySize = 1;
+    texDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    texDesc.usage = RHI::ETextureUsage::RenderTarget | RHI::ETextureUsage::ShaderResource;
+    texDesc.isCubemap = true;
+    texDesc.debugName = "IBL_PreFilteredMap";
+
+    m_preFilteredTexture.reset(renderContext->CreateTexture(texDesc));
+    if (!m_preFilteredTexture) {
+        CFFLog::Error("IBL: Failed to create pre-filtered texture");
+        return nullptr;
+    }
+
+    float envResolution = (float)envMap->GetWidth();
+
+    // Note: Current RHI doesn't support per-mip RTVs well
+    // For now, only generate mip 0 (roughness = 0)
+    // Full mip chain generation would require RHI extension for per-mip RTVs
+
+    // Render mip 0 only (for now)
+    for (int face = 0; face < 6; ++face) {
+        cmdList->SetRenderTargetSlice(m_preFilteredTexture.get(), face, nullptr);
+        cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
+
+        // Update constant buffers
+        int* faceData = (int*)m_cbFaceIndex->Map();
+        if (faceData) {
+            *faceData = face;
+            m_cbFaceIndex->Unmap();
+        }
+
+        float* roughnessData = (float*)m_cbRoughness->Map();
+        if (roughnessData) {
+            roughnessData[0] = 0.0f;  // Roughness for mip 0
+            roughnessData[1] = envResolution;
+            m_cbRoughness->Unmap();
+        }
+
+        // Set shaders and resources
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 0, envMap);
+        cmdList->SetSampler(RHI::EShaderStage::Pixel, 0, m_sampler.get());
+        cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 0, m_cbFaceIndex.get());
+        cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 1, m_cbRoughness.get());
+
+        RHI::PipelineStateDesc psoDesc;
+        psoDesc.vertexShader = m_fullscreenVS.get();
+        psoDesc.pixelShader = m_prefilterPS.get();
+        psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
+        psoDesc.depthStencil.depthEnable = false;
+        psoDesc.depthStencil.depthWriteEnable = false;
+
+        std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
+        cmdList->SetPipelineState(pso.get());
+
+        cmdList->Draw(3, 0);
+    }
+
+    cmdList->UnbindRenderTargets();
+    cmdList->UnbindShaderResources(RHI::EShaderStage::Pixel, 0, 1);
+
+    CFFLog::Info("IBL: Pre-filtered map generated");
+    return m_preFilteredTexture.get();
+}
+
+RHI::ITexture* CIBLGenerator::GenerateBrdfLut(int resolution) {
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
+
+    if (!m_fullscreenVS || !m_brdfLutPS) {
+        CFFLog::Error("IBL: Cannot generate BRDF LUT - missing shaders");
+        return nullptr;
+    }
+
+    CFFLog::Info("IBL: Generating BRDF LUT (%dx%d)...", resolution, resolution);
+
+    // Create 2D texture (not cubemap)
+    RHI::TextureDesc texDesc;
+    texDesc.width = resolution;
+    texDesc.height = resolution;
+    texDesc.mipLevels = 1;
+    texDesc.arraySize = 1;
+    texDesc.format = RHI::ETextureFormat::R16G16_FLOAT;  // RG channels for scale/bias
+    texDesc.usage = RHI::ETextureUsage::RenderTarget | RHI::ETextureUsage::ShaderResource;
+    texDesc.isCubemap = false;
+    texDesc.debugName = "IBL_BrdfLut";
+
+    m_brdfLutTexture.reset(renderContext->CreateTexture(texDesc));
+    if (!m_brdfLutTexture) {
+        CFFLog::Error("IBL: Failed to create BRDF LUT texture");
+        return nullptr;
+    }
+
+    // Set render target
+    RHI::ITexture* rts[] = { m_brdfLutTexture.get() };
+    cmdList->SetRenderTargets(1, rts, nullptr);
+
+    // Set viewport
+    cmdList->SetViewport(0, 0, (float)resolution, (float)resolution);
+
+    // Clear
+    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    cmdList->ClearRenderTarget(m_brdfLutTexture.get(), clearColor);
+
+    // Set pipeline state
+    RHI::PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_fullscreenVS.get();
+    psoDesc.pixelShader = m_brdfLutPS.get();
+    psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
+    psoDesc.depthStencil.depthEnable = false;
+    psoDesc.depthStencil.depthWriteEnable = false;
+
+    std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
+    cmdList->SetPipelineState(pso.get());
+
+    // Draw fullscreen triangle
+    cmdList->Draw(3, 0);
+
+    // Cleanup
+    cmdList->UnbindRenderTargets();
+
+    CFFLog::Info("IBL: BRDF LUT generated");
+    return m_brdfLutTexture.get();
+}
+
+bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
+    RHI::ITexture* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!texture) {
+        CFFLog::Error("IBL: Failed to load irradiance map from %s", ktx2Path.c_str());
+        return false;
+    }
+
+    m_irradianceTexture.reset(texture);
+    CFFLog::Info("IBL: Loaded irradiance map from KTX2 (%dx%d)", texture->GetWidth(), texture->GetHeight());
+    return true;
+}
+
+bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
+    RHI::ITexture* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!texture) {
+        CFFLog::Error("IBL: Failed to load pre-filtered map from %s", ktx2Path.c_str());
+        return false;
+    }
+
+    m_preFilteredTexture.reset(texture);
+    m_preFilteredMipLevels = texture->GetMipLevels();
+    CFFLog::Info("IBL: Loaded pre-filtered map from KTX2 (%dx%d, %d mips)",
+                texture->GetWidth(), texture->GetHeight(), m_preFilteredMipLevels);
+    return true;
+}
+
+bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
+    RHI::ITexture* texture = CKTXLoader::Load2DTextureFromKTX2(ktx2Path);
+    if (!texture) {
+        CFFLog::Error("IBL: Failed to load BRDF LUT from %s", ktx2Path.c_str());
+        return false;
+    }
+
+    m_brdfLutTexture.reset(texture);
+    CFFLog::Info("IBL: Loaded BRDF LUT from KTX2 (%dx%d)", texture->GetWidth(), texture->GetHeight());
+    return true;
+}
+
+// Helper: Convert float RGB to RGBE (Radiance HDR format)
+static void floatToRgbe(float r, float g, float b, unsigned char rgbe[4]) {
+    float v = r;
+    if (g > v) v = g;
+    if (b > v) v = b;
+
+    if (v < 1e-32f) {
+        rgbe[0] = rgbe[1] = rgbe[2] = rgbe[3] = 0;
+        return;
+    }
+
+    int e;
+    float m = frexpf(v, &e);
+    v = m * 256.0f / v;
+
+    rgbe[0] = (unsigned char)(r * v);
+    rgbe[1] = (unsigned char)(g * v);
+    rgbe[2] = (unsigned char)(b * v);
+    rgbe[3] = (unsigned char)(e + 128);
 }
 
 bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
@@ -291,52 +479,49 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
         return false;
     }
 
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
 
-    // Get texture description
-    D3D11_TEXTURE2D_DESC desc;
-    m_irradianceTexture->GetDesc(&desc);
+    uint32_t width = m_irradianceTexture->GetWidth();
+    uint32_t height = m_irradianceTexture->GetHeight();
 
-    CFFLog::Info("IBL: Saving irradiance map (%dx%d x 6 faces)...", desc.Width, desc.Height);
+    CFFLog::Info("IBL: Saving irradiance map (%dx%d x 6 faces)...", width, height);
 
     // Create staging texture for readback
-    D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingDesc.MiscFlags = 0;
+    RHI::TextureDesc stagingDesc;
+    stagingDesc.width = width;
+    stagingDesc.height = height;
+    stagingDesc.mipLevels = 1;
+    stagingDesc.arraySize = 1;
+    stagingDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    stagingDesc.usage = RHI::ETextureUsage::Staging;
+    stagingDesc.isCubemap = true;
+    stagingDesc.debugName = "IBL_StagingTexture";
 
-    ComPtr<ID3D11Texture2D> stagingTexture;
-    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.GetAddressOf());
-    if (FAILED(hr)) {
+    RHI::TexturePtr stagingTexture(renderContext->CreateTexture(stagingDesc));
+    if (!stagingTexture) {
         CFFLog::Error("Failed to create staging texture!");
         return false;
     }
 
-    // Copy to staging texture
-    context->CopyResource(stagingTexture.Get(), m_irradianceTexture.Get());
+    // Copy to staging
+    cmdList->CopyTexture(stagingTexture.get(), m_irradianceTexture.get());
 
     // Prepare DDS header
     uint32_t magic = DDS_MAGIC;
-
     DDS_HEADER header = {};
     header.dwSize = 124;
     header.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT | DDSD_LINEARSIZE;
-    header.dwHeight = desc.Height;
-    header.dwWidth = desc.Width;
-    header.dwPitchOrLinearSize = desc.Width * desc.Height * 8;  // R16G16B16A16 = 8 bytes/pixel
+    header.dwHeight = height;
+    header.dwWidth = width;
+    header.dwPitchOrLinearSize = width * height * 8;
     header.dwMipMapCount = 1;
-
-    // Pixel format (DX10 extended header)
     header.ddspf.dwSize = 32;
     header.ddspf.dwFlags = DDPF_FOURCC;
     header.ddspf.dwFourCC = 0x30315844;  // "DX10"
-
     header.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX;
     header.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_ALLFACES;
 
-    // DX10 extended header
     DDS_HEADER_DXT10 header10 = {};
     header10.dxgiFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
     header10.resourceDimension = D3D10_RESOURCE_DIMENSION_TEXTURE2D;
@@ -364,54 +549,27 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
     file.write(reinterpret_cast<const char*>(&header10), sizeof(header10));
 
     // Read and write pixel data for all 6 faces
-    for (UINT face = 0; face < 6; ++face) {
-        // Map staging texture for this face
-        UINT subresource = D3D11CalcSubresource(0, face, 1);
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        hr = context->Map(stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
-        if (FAILED(hr)) {
+    for (uint32_t face = 0; face < 6; ++face) {
+        RHI::MappedTexture mapped = stagingTexture->Map(face, 0);
+        if (!mapped.pData) {
             CFFLog::Error("Failed to map staging texture face %d", face);
             file.close();
             return false;
         }
 
-        // Write pixel data
         const char* srcData = reinterpret_cast<const char*>(mapped.pData);
-        size_t rowPitch = desc.Width * 8;  // 8 bytes per pixel
-        for (UINT row = 0; row < desc.Height; ++row) {
-            file.write(srcData + row * mapped.RowPitch, rowPitch);
+        size_t rowPitch = width * 8;  // 8 bytes per pixel
+        for (uint32_t row = 0; row < height; ++row) {
+            file.write(srcData + row * mapped.rowPitch, rowPitch);
         }
 
-        context->Unmap(stagingTexture.Get(), subresource);
-
+        stagingTexture->Unmap(face, 0);
         CFFLog::Info("IBL: Wrote face %d", face);
     }
 
     file.close();
-
     CFFLog::Info("IBL: Successfully saved to %s", fullPath.string().c_str());
     return true;
-}
-
-// Helper: Convert float RGB to RGBE (Radiance HDR format)
-static void floatToRgbe(float r, float g, float b, unsigned char rgbe[4]) {
-    float v = r;
-    if (g > v) v = g;
-    if (b > v) v = b;
-
-    if (v < 1e-32f) {
-        rgbe[0] = rgbe[1] = rgbe[2] = rgbe[3] = 0;
-        return;
-    }
-
-    int e;
-    float m = frexpf(v, &e);  // v = m * 2^e, where 0.5 <= m < 1
-    v = m * 256.0f / v;       // Scale factor
-
-    rgbe[0] = (unsigned char)(r * v);
-    rgbe[1] = (unsigned char)(g * v);
-    rgbe[2] = (unsigned char)(b * v);
-    rgbe[3] = (unsigned char)(e + 128);
 }
 
 bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
@@ -420,89 +578,76 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
         return false;
     }
 
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
 
-    // Get texture description
-    D3D11_TEXTURE2D_DESC desc;
-    m_irradianceTexture->GetDesc(&desc);
+    uint32_t width = m_irradianceTexture->GetWidth();
+    uint32_t height = m_irradianceTexture->GetHeight();
 
-    CFFLog::Info("IBL: Saving irradiance map to HDR (%dx%d x 6 faces)...", desc.Width, desc.Height);
+    CFFLog::Info("IBL: Saving irradiance map to HDR (%dx%d x 6 faces)...", width, height);
 
-    // Create staging texture for readback
-    D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingDesc.MiscFlags = 0;
+    // Create staging texture
+    RHI::TextureDesc stagingDesc;
+    stagingDesc.width = width;
+    stagingDesc.height = height;
+    stagingDesc.mipLevels = 1;
+    stagingDesc.arraySize = 1;
+    stagingDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    stagingDesc.usage = RHI::ETextureUsage::Staging;
+    stagingDesc.isCubemap = true;
+    stagingDesc.debugName = "IBL_StagingTexture";
 
-    ComPtr<ID3D11Texture2D> stagingTexture;
-    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.GetAddressOf());
-    if (FAILED(hr)) {
+    RHI::TexturePtr stagingTexture(renderContext->CreateTexture(stagingDesc));
+    if (!stagingTexture) {
         CFFLog::Error("Failed to create staging texture!");
         return false;
     }
 
-    // Copy to staging texture
-    context->CopyResource(stagingTexture.Get(), m_irradianceTexture.Get());
+    cmdList->CopyTexture(stagingTexture.get(), m_irradianceTexture.get());
 
-    // Face names for file naming
     const char* faceNames[6] = { "posX", "negX", "posY", "negY", "posZ", "negZ" };
 
-    // Create output directory if needed
     std::filesystem::path basePath = filepath;
     if (basePath.is_relative()) {
         basePath = std::filesystem::current_path() / filepath;
     }
     std::filesystem::create_directories(basePath.parent_path());
 
-    // Remove extension from base path for adding face suffix
     std::string baseStr = basePath.string();
     size_t dotPos = baseStr.rfind('.');
     if (dotPos != std::string::npos) {
         baseStr = baseStr.substr(0, dotPos);
     }
 
-    // Save each face as a separate HDR file
-    for (UINT face = 0; face < 6; ++face) {
+    for (uint32_t face = 0; face < 6; ++face) {
         std::string faceFilename = baseStr + "_" + faceNames[face] + ".hdr";
 
-        // Map staging texture for this face
-        UINT subresource = D3D11CalcSubresource(0, face, 1);
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        hr = context->Map(stagingTexture.Get(), subresource, D3D11_MAP_READ, 0, &mapped);
-        if (FAILED(hr)) {
+        RHI::MappedTexture mapped = stagingTexture->Map(face, 0);
+        if (!mapped.pData) {
             CFFLog::Error("Failed to map staging texture face %d", face);
             continue;
         }
 
-        // Open file
         std::ofstream file(faceFilename, std::ios::binary);
         if (!file) {
             CFFLog::Error("Failed to create file: %s", faceFilename.c_str());
-            context->Unmap(stagingTexture.Get(), subresource);
+            stagingTexture->Unmap(face, 0);
             continue;
         }
 
-        // Write HDR header
         file << "#?RADIANCE\n";
         file << "FORMAT=32-bit_rle_rgbe\n";
         file << "\n";
-        file << "-Y " << desc.Height << " +X " << desc.Width << "\n";
+        file << "-Y " << height << " +X " << width << "\n";
 
-        // Write pixel data (convert R16G16B16A16_FLOAT to RGBE)
-        // HDR files store from top to bottom (same as our texture)
-        std::vector<unsigned char> rgbeData(desc.Width * desc.Height * 4);
-
+        std::vector<unsigned char> rgbeData(width * height * 4);
         const uint16_t* srcData = reinterpret_cast<const uint16_t*>(mapped.pData);
-        size_t srcRowPitch = mapped.RowPitch / sizeof(uint16_t);
+        size_t srcRowPitch = mapped.rowPitch / sizeof(uint16_t);
 
-        for (UINT y = 0; y < desc.Height; ++y) {
-            for (UINT x = 0; x < desc.Width; ++x) {
-                // R16G16B16A16_FLOAT: 4 half-floats per pixel
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
                 size_t srcOffset = y * srcRowPitch + x * 4;
 
-                // Convert half-float to float (using DirectXPackedVector)
                 DirectX::PackedVector::XMHALF4 half4;
                 half4.x = srcData[srcOffset + 0];
                 half4.y = srcData[srcOffset + 1];
@@ -513,405 +658,19 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
                 DirectX::XMFLOAT4 f4;
                 DirectX::XMStoreFloat4(&f4, v);
 
-                // Convert to RGBE
-                size_t dstOffset = (y * desc.Width + x) * 4;
+                size_t dstOffset = (y * width + x) * 4;
                 floatToRgbe(f4.x, f4.y, f4.z, &rgbeData[dstOffset]);
             }
         }
 
-        // Write all RGBE data
         file.write(reinterpret_cast<const char*>(rgbeData.data()), rgbeData.size());
 
-        context->Unmap(stagingTexture.Get(), subresource);
+        stagingTexture->Unmap(face, 0);
         file.close();
 
         CFFLog::Info("IBL: Saved face %s to %s", faceNames[face], faceFilename.c_str());
     }
 
     CFFLog::Info("IBL: Successfully saved irradiance map to HDR files!");
-    return true;
-}
-
-ID3D11ShaderResourceView* CIBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
-    if (faceIndex < 0 || faceIndex >= 6) return nullptr;
-    if (!m_irradianceTexture) return nullptr;
-
-    // Create face SRV on-demand
-    if (!m_debugFaceSRVs[faceIndex]) {
-        ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-
-        D3D11_TEXTURE2D_DESC desc;
-        m_irradianceTexture->GetDesc(&desc);
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = desc.Format;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-        srvDesc.Texture2DArray.MostDetailedMip = 0;
-        srvDesc.Texture2DArray.MipLevels = 1;
-        srvDesc.Texture2DArray.FirstArraySlice = faceIndex;
-        srvDesc.Texture2DArray.ArraySize = 1;
-
-        device->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc,
-                                        m_debugFaceSRVs[faceIndex].GetAddressOf());
-    }
-
-    return m_debugFaceSRVs[faceIndex].Get();
-}
-
-ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
-    ID3D11ShaderResourceView* envMap,
-    int outputSize,
-    int numMipLevels)
-{
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-
-    if (!device || !context || !envMap) return nullptr;
-
-    // Clamp mip levels to reasonable range
-    numMipLevels = std::max(1, std::min(numMipLevels, 10));
-    m_preFilteredMipLevels = numMipLevels;
-
-    CFFLog::Info("IBL: Generating pre-filtered map (%dx%d, %d mip levels)...", outputSize, outputSize, numMipLevels);
-
-    // Get environment map description for resolution
-    ID3D11Resource* envResource;
-    envMap->GetResource(&envResource);
-    ComPtr<ID3D11Texture2D> envTexture;
-    envResource->QueryInterface(envTexture.GetAddressOf());
-    D3D11_TEXTURE2D_DESC envDesc;
-    envTexture->GetDesc(&envDesc);
-    float envResolution = (float)envDesc.Width;
-
-    CFFLog::Info("IBL: Environment map info: %dx%d, %d mip levels", envDesc.Width, envDesc.Height, envDesc.MipLevels);
-
-    if (envDesc.MipLevels <= 1) {
-        CFFLog::Warning("Environment map has no mipmaps! Pre-filtering quality will be poor.");
-    }
-
-    envResource->Release();
-
-    // Create output cubemap texture with mipmaps
-    D3D11_TEXTURE2D_DESC texDesc = {};
-    texDesc.Width = outputSize;
-    texDesc.Height = outputSize;
-    texDesc.MipLevels = numMipLevels;
-    texDesc.ArraySize = 6;  // 6 faces
-    texDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR format
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    texDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
-
-    device->CreateTexture2D(&texDesc, nullptr, m_preFilteredTexture.ReleaseAndGetAddressOf());
-
-    // Create SRV for the whole cubemap
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = numMipLevels;
-    srvDesc.TextureCube.MostDetailedMip = 0;
-    device->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, m_preFilteredSRV.ReleaseAndGetAddressOf());
-
-    // Render to each mip level
-    for (int mip = 0; mip < numMipLevels; ++mip) {
-        int mipWidth = outputSize >> mip;   // outputSize / 2^mip
-        int mipHeight = outputSize >> mip;
-
-        // Calculate roughness for this mip level (linear mapping)
-        float roughness = (numMipLevels != 1) ? (float)mip / (float)(numMipLevels - 1) : 0.0f;
-
-        // Calculate expected sample count (matches shader logic)
-        int expectedSamples;
-        if (roughness < 0.1f) {
-            expectedSamples = 65536;
-        } else if (roughness < 0.3f) {
-            expectedSamples = 32768;
-        } else if (roughness < 0.6f) {
-            expectedSamples = 16384;
-        } else {
-            expectedSamples = 8192;
-        }
-
-        CFFLog::Info("  Mip %d: %dx%d, roughness=%.3f, samples=%d", mip, mipWidth, mipHeight, roughness, expectedSamples);
-
-        // Render to each cubemap face at this mip level
-        for (int face = 0; face < 6; ++face) {
-            // Create RTV for this face and mip level
-            D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-            rtvDesc.Format = texDesc.Format;
-            rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-            rtvDesc.Texture2DArray.MipSlice = mip;
-            rtvDesc.Texture2DArray.FirstArraySlice = face;
-            rtvDesc.Texture2DArray.ArraySize = 1;
-
-            ComPtr<ID3D11RenderTargetView> rtv;
-            HRESULT hr = device->CreateRenderTargetView(m_preFilteredTexture.Get(), &rtvDesc, rtv.GetAddressOf());
-            if (FAILED(hr)) {
-                CFFLog::Error("Failed to create RTV for face %d, mip %d", face, mip);
-                continue;
-            }
-
-            // Set render target
-            context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
-
-            // Clear to magenta for debugging (will be overwritten if rendering works)
-            const float clearColor[4] = { 1.0f, 0.0f, 1.0f, 1.0f };  // Magenta
-            context->ClearRenderTargetView(rtv.Get(), clearColor);
-
-            // Set viewport
-            D3D11_VIEWPORT vp = {};
-            vp.Width = (float)mipWidth;
-            vp.Height = (float)mipHeight;
-            vp.MinDepth = 0.0f;
-            vp.MaxDepth = 1.0f;
-            context->RSSetViewports(1, &vp);
-
-            // Update face index constant buffer
-            D3D11_MAPPED_SUBRESOURCE mapped;
-            context->Map(m_cbFaceIndex.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-            *(int*)mapped.pData = face;
-            context->Unmap(m_cbFaceIndex.Get(), 0);
-
-            // Update roughness constant buffer
-            context->Map(m_cbRoughness.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-            float* cbData = (float*)mapped.pData;
-            cbData[0] = roughness;
-            cbData[1] = envResolution;
-            context->Unmap(m_cbRoughness.Get(), 0);
-
-            // Set shaders and resources
-            context->VSSetShader(m_fullscreenVS.Get(), nullptr, 0);
-            context->PSSetShader(m_prefilterPS.Get(), nullptr, 0);
-            context->PSSetShaderResources(0, 1, &envMap);
-            context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
-            context->PSSetConstantBuffers(0, 1, m_cbFaceIndex.GetAddressOf());
-            context->PSSetConstantBuffers(1, 1, m_cbRoughness.GetAddressOf());
-
-            // Verify shader is valid
-            if (!m_fullscreenVS || !m_prefilterPS) {
-                CFFLog::Error("Pre-filter shaders not compiled!");
-                continue;
-            }
-
-            // Draw fullscreen triangle (3 vertices, no vertex buffer)
-            context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            context->IASetInputLayout(nullptr);
-            context->Draw(3, 0);
-        }
-        CFFLog::Info("    Rendered all 6 faces for mip %d", mip);
-    }
-
-    // Cleanup
-    ID3D11RenderTargetView* nullRTV = nullptr;
-    context->OMSetRenderTargets(1, &nullRTV, nullptr);
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
-
-    CFFLog::Info("IBL: Pre-filtered map generated successfully!");
-
-    return m_preFilteredSRV.Get();
-}
-
-ID3D11ShaderResourceView* CIBLGenerator::GetPreFilteredFaceSRV(int faceIndex, int mipLevel) {
-    if (faceIndex < 0 || faceIndex >= 6) return nullptr;
-    if (mipLevel < 0 || mipLevel >= m_preFilteredMipLevels) return nullptr;
-    if (!m_preFilteredTexture) return nullptr;
-
-    int srvIndex = mipLevel * 6 + faceIndex;
-    if (srvIndex < 0 || srvIndex >= 6 * 10) return nullptr;
-
-    // Create face SRV on-demand
-    if (!m_debugPreFilteredFaceSRVs[srvIndex]) {
-        ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-
-        D3D11_TEXTURE2D_DESC desc;
-        m_preFilteredTexture->GetDesc(&desc);
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = desc.Format;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-        srvDesc.Texture2DArray.MostDetailedMip = mipLevel;
-        srvDesc.Texture2DArray.MipLevels = 1;
-        srvDesc.Texture2DArray.FirstArraySlice = faceIndex;
-        srvDesc.Texture2DArray.ArraySize = 1;
-
-        device->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc,
-                                        m_debugPreFilteredFaceSRVs[srvIndex].GetAddressOf());
-    }
-
-    return m_debugPreFilteredFaceSRVs[srvIndex].Get();
-}
-
-void CIBLGenerator::createBrdfLutShader() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-
-    std::string vsSource = LoadShaderSource("../source/code/Shader/BrdfLut.vs.hlsl");
-    std::string psSource = LoadShaderSource("../source/code/Shader/BrdfLut.ps.hlsl");
-
-    if (vsSource.empty() || psSource.empty()) {
-        CFFLog::Error("Failed to load BRDF LUT shaders!");
-        return;
-    }
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    // Compile PS (VS already compiled in createIrradianceShader, can reuse m_fullscreenVS)
-    RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
-    if (!psCompiled.success) {
-        CFFLog::Error("=== BRDF LUT PS COMPILATION ERROR ===");
-        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
-        return;
-    }
-
-    device->CreatePixelShader(psCompiled.bytecode.data(), psCompiled.bytecode.size(), nullptr, m_brdfLutPS.GetAddressOf());
-}
-
-ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-
-    if (!device || !context) return nullptr;
-
-    CFFLog::Info("IBL: Generating BRDF LUT (%dx%d)...", resolution, resolution);
-
-    // Create 2D texture (not cubemap)
-    D3D11_TEXTURE2D_DESC texDesc = {};
-    texDesc.Width = resolution;
-    texDesc.Height = resolution;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_R16G16_FLOAT;  // RG channels for scale/bias
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    texDesc.MiscFlags = 0;  // NOT a cubemap
-
-    device->CreateTexture2D(&texDesc, nullptr, m_brdfLutTexture.ReleaseAndGetAddressOf());
-
-    // Create SRV for the whole texture
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = 1;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    device->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, m_brdfLutSRV.ReleaseAndGetAddressOf());
-
-    // Create RTV
-    D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-    rtvDesc.Format = texDesc.Format;
-    rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-    rtvDesc.Texture2D.MipSlice = 0;
-
-    ComPtr<ID3D11RenderTargetView> rtv;
-    device->CreateRenderTargetView(m_brdfLutTexture.Get(), &rtvDesc, rtv.GetAddressOf());
-
-    // Set render target
-    context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
-
-    // Set viewport
-    D3D11_VIEWPORT vp = {};
-    vp.Width = (float)resolution;
-    vp.Height = (float)resolution;
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    context->RSSetViewports(1, &vp);
-
-    // Clear to black (for debugging)
-    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    context->ClearRenderTargetView(rtv.Get(), clearColor);
-
-    // Set shaders
-    context->VSSetShader(m_fullscreenVS.Get(), nullptr, 0);
-    context->PSSetShader(m_brdfLutPS.Get(), nullptr, 0);
-
-    // No textures or constant buffers needed for BRDF LUT
-
-    // Draw fullscreen triangle (3 vertices, no vertex buffer)
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->IASetInputLayout(nullptr);
-    context->Draw(3, 0);
-
-    // Cleanup
-    ID3D11RenderTargetView* nullRTV = nullptr;
-    context->OMSetRenderTargets(1, &nullRTV, nullptr);
-
-    CFFLog::Info("IBL: BRDF LUT generated successfully!");
-
-    return m_brdfLutSRV.Get();
-}
-
-bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
-    RHI::ITexture* rhiTexture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
-    if (!rhiTexture) {
-        CFFLog::Error("IBLGenerator: Failed to load irradiance map from %s", ktx2Path.c_str());
-        return false;
-    }
-
-    // Store RHI texture to keep it alive
-    m_rhiIrradianceTexture.reset(rhiTexture);
-
-    // Get native D3D11 resources from RHI texture
-    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
-
-    // Store raw pointers for rendering (borrowed from RHI texture)
-    m_irradianceTexture = texture;  // Note: ComPtr will AddRef
-    m_irradianceSRV = srv;
-
-    CFFLog::Info("IBLGenerator: Loaded irradiance map from KTX2 (%dx%d)", rhiTexture->GetWidth(), rhiTexture->GetHeight());
-    return true;
-}
-
-bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
-    RHI::ITexture* rhiTexture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
-    if (!rhiTexture) {
-        CFFLog::Error("IBLGenerator: Failed to load pre-filtered map from %s", ktx2Path.c_str());
-        return false;
-    }
-
-    // Store RHI texture to keep it alive
-    m_rhiPreFilteredTexture.reset(rhiTexture);
-
-    // Get native D3D11 resources from RHI texture
-    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
-
-    // Store raw pointers for rendering (borrowed from RHI texture)
-    m_preFilteredTexture = texture;
-    m_preFilteredSRV = srv;
-
-    // Get mip levels from texture descriptor
-    D3D11_TEXTURE2D_DESC texDesc;
-    texture->GetDesc(&texDesc);
-    m_preFilteredMipLevels = texDesc.MipLevels;
-
-    CFFLog::Info("IBLGenerator: Loaded pre-filtered map from KTX2 (%dx%d, %d mips)", rhiTexture->GetWidth(), rhiTexture->GetHeight(), m_preFilteredMipLevels);
-    return true;
-}
-
-bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
-    RHI::ITexture* rhiTexture = CKTXLoader::Load2DTextureFromKTX2(ktx2Path);
-    if (!rhiTexture) {
-        CFFLog::Error("IBLGenerator: Failed to load BRDF LUT from %s", ktx2Path.c_str());
-        return false;
-    }
-
-    // Store RHI texture to keep it alive
-    m_rhiBrdfLutTexture.reset(rhiTexture);
-
-    // Get native D3D11 resources from RHI texture
-    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
-
-    // Store raw pointers for rendering (borrowed from RHI texture)
-    m_brdfLutTexture = texture;
-    m_brdfLutSRV = srv;
-
-    CFFLog::Info("IBLGenerator: Loaded BRDF LUT from KTX2 (%dx%d)", rhiTexture->GetWidth(), rhiTexture->GetHeight());
     return true;
 }

@@ -57,7 +57,8 @@ enum class ETextureUsage : uint32_t {
     ShaderResource = 1 << 0,
     RenderTarget = 1 << 1,
     DepthStencil = 1 << 2,
-    UnorderedAccess = 1 << 3
+    UnorderedAccess = 1 << 3,
+    Staging = 1 << 4  // CPU readback (D3D11_USAGE_STAGING)
 };
 
 inline ETextureUsage operator|(ETextureUsage a, ETextureUsage b) {

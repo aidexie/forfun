@@ -1,13 +1,16 @@
 #pragma once
+#include "RHI/RHIPointers.h"
 #include <DirectXMath.h>
 #include <string>
-#include <d3d11.h>
-#include <wrl/client.h>
+#include <memory>
 
 // Forward declarations
 class CScene;
 class CForwardRenderPipeline;
 class CIBLGenerator;
+namespace RHI {
+    class ITexture;
+}
 
 // ============================================
 // CReflectionProbeBaker - Reflection Probe Baking
@@ -77,7 +80,7 @@ private:
         const DirectX::XMFLOAT3& position,
         int resolution,
         CScene& scene,
-        ID3D11Texture2D* outputCubemap
+        RHI::ITexture* outputCubemap
     );
 
     // ============================================
@@ -91,7 +94,7 @@ private:
     //   - basePath/irradiance.ktx2
     //   - basePath/prefiltered.ktx2
     void generateAndSaveIBL(
-        ID3D11Texture2D* envCubemap,
+        RHI::ITexture* envCubemap,
         const std::string& basePath
     );
 
@@ -103,7 +106,7 @@ private:
     // cubemap: Cubemap 纹理
     // outputPath: 输出路径（完整路径）
     bool saveCubemapAsKTX2(
-        ID3D11Texture2D* cubemap,
+        RHI::ITexture* cubemap,
         const std::string& outputPath
     );
 
@@ -128,11 +131,12 @@ private:
     // Members
     // ============================================
 
-    CForwardRenderPipeline* m_pipeline;   // Rendering pipeline (owned)
-    CIBLGenerator* m_iblGenerator;        // IBL generator (owned)
+    std::unique_ptr<CForwardRenderPipeline> m_pipeline;   // Rendering pipeline (owned)
+    std::unique_ptr<CIBLGenerator> m_iblGenerator;        // IBL generator (owned)
 
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cubemapRT;      // Cubemap render target
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthBuffer;    // Depth buffer for cubemap rendering
+    RHI::TexturePtr m_cubemapRT;      // Cubemap render target
+    RHI::TexturePtr m_depthBuffer;    // Depth buffer for cubemap rendering
 
+    int m_currentResolution = 0;      // Current resolution for caching
     bool m_initialized = false;
 };

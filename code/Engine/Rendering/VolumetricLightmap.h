@@ -1,12 +1,17 @@
 #pragma once
+#include "RHI/RHIPointers.h"
 #include <DirectXMath.h>
-#include <d3d11.h>  // Required for ComPtr<ID3D11*> members
-#include <wrl/client.h>
 #include <vector>
 #include <array>
 #include <string>
 #include <cmath>
 #include <algorithm>
+
+// Forward declarations
+namespace RHI {
+    class ICommandList;
+}
+
 class CScene;
 class CPathTraceBaker;
 struct SPathTraceConfig;
@@ -229,10 +234,10 @@ public:
     void UploadToGPU();
 
     // 绑定到 Shader（每帧调用）
-    void Bind(void* context);
+    void Bind(RHI::ICommandList* cmdList);
 
     // 解绑
-    void Unbind(void* context);
+    void Unbind(RHI::ICommandList* cmdList);
 
     // ============================================
     // 序列化
@@ -357,18 +362,14 @@ private:
     std::vector<SBrickInfo> m_brickInfoData;        // Brick 信息 Buffer
 
     // ============================================
-    // GPU 资源
+    // GPU 资源 (RHI abstractions)
     // ============================================
-    Microsoft::WRL::ComPtr<ID3D11Texture3D> m_indirectionTexture;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_indirectionSRV;
+    RHI::TexturePtr m_indirectionTexture;
 
-    Microsoft::WRL::ComPtr<ID3D11Texture3D> m_brickAtlasTexture[3];
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brickAtlasSRV[3];
+    RHI::TexturePtr m_brickAtlasTexture[3];
 
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_constantBuffer;
+    RHI::BufferPtr m_constantBuffer;
+    RHI::BufferPtr m_brickInfoBuffer;
 
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_brickInfoBuffer;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brickInfoSRV;
-
-    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;  // s3: trilinear sampler for atlas
+    RHI::SamplerPtr m_sampler;  // s3: trilinear sampler for atlas
 };

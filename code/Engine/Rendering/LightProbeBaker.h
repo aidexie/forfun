@@ -1,9 +1,9 @@
 #pragma once
+#include "RHI/RHIPointers.h"
 #include <DirectXMath.h>
 #include <string>
-#include <d3d11.h>
-#include <wrl/client.h>
 #include <memory>
+
 // Forward declarations
 class CScene;
 class CForwardRenderPipeline;
@@ -76,7 +76,7 @@ private:
     void renderToCubemap(
         const DirectX::XMFLOAT3& position,
         CScene& scene,
-        ID3D11Texture2D* outputCubemap
+        RHI::ITexture* outputCubemap
     );
 
     // ============================================
@@ -88,7 +88,7 @@ private:
     // outCoeffs: 输出的 SH 系数（9 个 XMFLOAT3）
     // 返回: 成功返回 true，失败返回 false
     bool projectCubemapToSH(
-        ID3D11Texture2D* cubemap,
+        RHI::ITexture* cubemap,
         DirectX::XMFLOAT3 outCoeffs[9]
     );
 
@@ -108,9 +108,9 @@ private:
 
     std::unique_ptr<CForwardRenderPipeline> m_pipeline;   // Rendering pipeline (owned)
 
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_cubemapRT;      // Cubemap render target
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthBuffer;    // Depth buffer for cubemap rendering
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_stagingTexture; // Staging texture for CPU readback
+    RHI::TexturePtr m_cubemapRT;       // Cubemap render target
+    RHI::TexturePtr m_depthBuffer;     // Depth buffer for cubemap rendering
+    RHI::TexturePtr m_stagingTexture;  // Staging texture for CPU readback
 
     bool m_initialized = false;
 };

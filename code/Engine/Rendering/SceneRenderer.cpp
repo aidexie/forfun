@@ -384,23 +384,23 @@ void CSceneRenderer::Render(
         cmdList->SetSampler(EShaderStage::Pixel, 1, shadowData->shadowSampler);
     }
 
-    // Bind BRDF LUT (t5) - modules use void* interface
+    // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
     auto& probeManager = scene.GetProbeManager();
-    void* nativeCtx = ctx->GetNativeContext();
-    probeManager.Bind(nativeCtx);
+    probeManager.Bind(cmdList);
 
     // Bind Light Probes (t15, b5)
     auto& lightProbeManager = scene.GetLightProbeManager();
-    lightProbeManager.Bind(nativeCtx);
+    lightProbeManager.Bind(cmdList);
 
     // Bind Volumetric Lightmap (t20-t24, b6)
     auto& volumetricLightmap = scene.GetVolumetricLightmap();
-    volumetricLightmap.Bind(nativeCtx);
+    volumetricLightmap.Bind(cmdList);
 
     // Bind sampler (s0)
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Clustered lighting setup
+    void* nativeCtx = ctx->GetNativeContext();
     m_clusteredLighting.Resize(w, h);
     m_clusteredLighting.BuildClusterGrid(nativeCtx, proj, camera.nearZ, camera.farZ);
     m_clusteredLighting.CullLights(nativeCtx, &scene, view);

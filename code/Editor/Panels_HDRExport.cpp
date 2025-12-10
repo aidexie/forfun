@@ -13,7 +13,6 @@
 #include "Engine/Rendering/IBLGenerator.h"
 #include "Core/Exporter/KTXExporter.h"
 #include "RHI/RHIResources.h"
-#include <d3d11.h>
 
 using json = nlohmann::json;
 
@@ -170,8 +169,8 @@ void Panels::DrawHDRExportWindow() {
 
         // 2. Generate IBL maps
         CIBLGenerator tempIBL;
-        ID3D11ShaderResourceView* irradianceSRV = nullptr;
-        ID3D11ShaderResourceView* prefilterSRV = nullptr;
+        RHI::ITexture* irradianceTexture = nullptr;
+        RHI::ITexture* prefilterTexture = nullptr;
 
         if (success) {
             s_exportProgress = 0.3f;
@@ -189,9 +188,8 @@ void Panels::DrawHDRExportWindow() {
             s_exportStatus = "Generating irradiance map...";
 
             RHI::ITexture* envTexture = tempSkybox.GetEnvironmentTexture();
-            ID3D11ShaderResourceView* envSRV = envTexture ? static_cast<ID3D11ShaderResourceView*>(envTexture->GetSRV()) : nullptr;
-            irradianceSRV = tempIBL.GenerateIrradianceMap(envSRV, 32);
-            if (!irradianceSRV) {
+            irradianceTexture = tempIBL.GenerateIrradianceMap(envTexture, 32);
+            if (!irradianceTexture) {
                 s_exportStatus = "ERROR: Failed to generate irradiance map";
                 success = false;
             }
@@ -201,11 +199,9 @@ void Panels::DrawHDRExportWindow() {
             s_exportProgress = 0.5f;
             s_exportStatus = "Generating pre-filtered map (this may take a while)...";
 
-            // Reuse envSRV from above (same texture)
             RHI::ITexture* envTex = tempSkybox.GetEnvironmentTexture();
-            ID3D11ShaderResourceView* envSrvForPrefilter = envTex ? static_cast<ID3D11ShaderResourceView*>(envTex->GetSRV()) : nullptr;
-            prefilterSRV = tempIBL.GeneratePreFilteredMap(envSrvForPrefilter, 128, 7);
-            if (!prefilterSRV) {
+            prefilterTexture = tempIBL.GeneratePreFilteredMap(envTex, 128, 7);
+            if (!prefilterTexture) {
                 s_exportStatus = "ERROR: Failed to generate pre-filtered map";
                 success = false;
             }
@@ -229,7 +225,7 @@ void Panels::DrawHDRExportWindow() {
             s_exportStatus = "Exporting irradiance map...";
 
             irrPath = s_outputDir + "\\" + s_assetName + "_irr.ktx2";
-            if (!CKTXExporter::ExportCubemapToKTX2Native(tempIBL.GetIrradianceTexture(), irrPath, 1)) {
+            if (!CKTXExporter::ExportCubemapToKTX2(tempIBL.GetIrradianceTexture(), irrPath, 1)) {
                 s_exportStatus = "ERROR: Failed to export irradiance map";
                 success = false;
             }
@@ -240,7 +236,7 @@ void Panels::DrawHDRExportWindow() {
             s_exportStatus = "Exporting pre-filtered map...";
 
             prefilterPath = s_outputDir + "\\" + s_assetName + "_prefilter.ktx2";
-            if (!CKTXExporter::ExportCubemapToKTX2Native(tempIBL.GetPreFilteredTexture(), prefilterPath, 7)) {
+            if (!CKTXExporter::ExportCubemapToKTX2(tempIBL.GetPreFilteredTexture(), prefilterPath, 7)) {
                 s_exportStatus = "ERROR: Failed to export pre-filtered map";
                 success = false;
             }

@@ -6,6 +6,8 @@
 #include "Engine/Components/MeshRenderer.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <DirectXPackedVector.h>
@@ -16,7 +18,6 @@
 
 using namespace DirectX;
 using namespace DirectX::PackedVector;
-using Microsoft::WRL::ComPtr;
 
 // ============================================
 // 生命周期
@@ -52,16 +53,13 @@ void CVolumetricLightmap::Shutdown()
     m_brickAtlasSH2.clear();
     m_brickInfoData.clear();
 
-    m_indirectionTexture.Reset();
-    m_indirectionSRV.Reset();
+    m_indirectionTexture.reset();
     for (int i = 0; i < 3; i++) {
-        m_brickAtlasTexture[i].Reset();
-        m_brickAtlasSRV[i].Reset();
+        m_brickAtlasTexture[i].reset();
     }
-    m_constantBuffer.Reset();
-    m_brickInfoBuffer.Reset();
-    m_brickInfoSRV.Reset();
-    m_sampler.Reset();
+    m_constantBuffer.reset();
+    m_brickInfoBuffer.reset();
+    m_sampler.reset();
 
     m_initialized = false;
     m_enabled = false;
@@ -866,9 +864,9 @@ bool CVolumetricLightmap::CreateGPUResources()
         return false;
     }
 
-    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) {
-        CFFLog::Error("[VolumetricLightmap] No D3D11 device!");
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) {
+        CFFLog::Error("[VolumetricLightmap] No render context!");
         return false;
     }
 
@@ -878,37 +876,24 @@ bool CVolumetricLightmap::CreateGPUResources()
     buildIndirectionData();
     packSHToAtlas();
 
-    HRESULT hr;
-
     // ============================================
-    // 1. 创建 Indirection Texture
+    // 1. 创建 Indirection Texture (3D)
     // ============================================
     {
         int res = m_derived.indirectionResolution;
 
-        D3D11_TEXTURE3D_DESC desc = {};
-        desc.Width = res;
-        desc.Height = res;
-        desc.Depth = res;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_R32_UINT;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        RHI::TextureDesc texDesc;
+        texDesc.width = res;
+        texDesc.height = res;
+        texDesc.depth = res;
+        texDesc.mipLevels = 1;
+        texDesc.format = RHI::ETextureFormat::R32_UINT;
+        texDesc.usage = RHI::ETextureUsage::ShaderResource;
+        texDesc.debugName = "VolumetricLightmap_Indirection";
 
-        D3D11_SUBRESOURCE_DATA initData = {};
-        initData.pSysMem = m_indirectionData.data();
-        initData.SysMemPitch = res * sizeof(uint32_t);
-        initData.SysMemSlicePitch = res * res * sizeof(uint32_t);
-
-        hr = device->CreateTexture3D(&desc, &initData, &m_indirectionTexture);
-        if (FAILED(hr)) {
+        m_indirectionTexture.reset(renderContext->CreateTexture(texDesc, m_indirectionData.data()));
+        if (!m_indirectionTexture) {
             CFFLog::Error("[VolumetricLightmap] Failed to create Indirection texture!");
-            return false;
-        }
-
-        hr = device->CreateShaderResourceView(m_indirectionTexture.Get(), nullptr, &m_indirectionSRV);
-        if (FAILED(hr)) {
-            CFFLog::Error("[VolumetricLightmap] Failed to create Indirection SRV!");
             return false;
         }
 
@@ -916,19 +901,10 @@ bool CVolumetricLightmap::CreateGPUResources()
     }
 
     // ============================================
-    // 2. 创建 Brick Atlas Textures
+    // 2. 创建 Brick Atlas Textures (3D)
     // ============================================
     {
         int atlasSize = m_derived.brickAtlasSize;
-
-        D3D11_TEXTURE3D_DESC desc = {};
-        desc.Width = atlasSize;
-        desc.Height = atlasSize;
-        desc.Depth = atlasSize;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
         const std::vector<XMFLOAT4>* atlasData[3] = {
             &m_brickAtlasSH0,
@@ -942,7 +918,6 @@ bool CVolumetricLightmap::CreateGPUResources()
             std::vector<uint16_t> halfData(atlasSize * atlasSize * atlasSize * 4);
             for (size_t j = 0; j < atlasData[i]->size(); j++) {
                 const XMFLOAT4& v = (*atlasData[i])[j];
-                // 简单的 float -> half 转换（使用 DirectXMath）
                 XMHALF4 h;
                 XMStoreHalf4(&h, XMLoadFloat4(&v));
                 halfData[j * 4 + 0] = h.x;
@@ -951,20 +926,18 @@ bool CVolumetricLightmap::CreateGPUResources()
                 halfData[j * 4 + 3] = h.w;
             }
 
-            D3D11_SUBRESOURCE_DATA initData = {};
-            initData.pSysMem = halfData.data();
-            initData.SysMemPitch = atlasSize * sizeof(uint16_t) * 4;
-            initData.SysMemSlicePitch = atlasSize * atlasSize * sizeof(uint16_t) * 4;
+            RHI::TextureDesc texDesc;
+            texDesc.width = atlasSize;
+            texDesc.height = atlasSize;
+            texDesc.depth = atlasSize;
+            texDesc.mipLevels = 1;
+            texDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+            texDesc.usage = RHI::ETextureUsage::ShaderResource;
+            texDesc.debugName = "VolumetricLightmap_BrickAtlas";
 
-            hr = device->CreateTexture3D(&desc, &initData, &m_brickAtlasTexture[i]);
-            if (FAILED(hr)) {
+            m_brickAtlasTexture[i].reset(renderContext->CreateTexture(texDesc, halfData.data()));
+            if (!m_brickAtlasTexture[i]) {
                 CFFLog::Error("[VolumetricLightmap] Failed to create Atlas texture %d!", i);
-                return false;
-            }
-
-            hr = device->CreateShaderResourceView(m_brickAtlasTexture[i].Get(), nullptr, &m_brickAtlasSRV[i]);
-            if (FAILED(hr)) {
-                CFFLog::Error("[VolumetricLightmap] Failed to create Atlas SRV %d!", i);
                 return false;
             }
         }
@@ -976,47 +949,33 @@ bool CVolumetricLightmap::CreateGPUResources()
     // 3. 创建 Constant Buffer
     // ============================================
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(CB_VolumetricLightmap);
-        desc.Usage = D3D11_USAGE_DYNAMIC;
-        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        RHI::BufferDesc bufDesc;
+        bufDesc.size = sizeof(CB_VolumetricLightmap);
+        bufDesc.usage = RHI::EBufferUsage::Constant;
+        bufDesc.cpuAccess = RHI::ECPUAccess::Write;
+        bufDesc.debugName = "VolumetricLightmap_CB";
 
-        hr = device->CreateBuffer(&desc, nullptr, &m_constantBuffer);
-        if (FAILED(hr)) {
+        m_constantBuffer.reset(renderContext->CreateBuffer(bufDesc, nullptr));
+        if (!m_constantBuffer) {
             CFFLog::Error("[VolumetricLightmap] Failed to create constant buffer!");
             return false;
         }
     }
 
     // ============================================
-    // 4. 创建 Brick Info Buffer
+    // 4. 创建 Brick Info Buffer (Structured Buffer)
     // ============================================
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = (UINT)(m_brickInfoData.size() * sizeof(SBrickInfo));
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(SBrickInfo);
+        RHI::BufferDesc bufDesc;
+        bufDesc.size = (uint32_t)(m_brickInfoData.size() * sizeof(SBrickInfo));
+        bufDesc.usage = RHI::EBufferUsage::Structured | RHI::EBufferUsage::UnorderedAccess;
+        bufDesc.cpuAccess = RHI::ECPUAccess::None;
+        bufDesc.structureByteStride = sizeof(SBrickInfo);
+        bufDesc.debugName = "VolumetricLightmap_BrickInfo";
 
-        D3D11_SUBRESOURCE_DATA initData = {};
-        initData.pSysMem = m_brickInfoData.data();
-
-        hr = device->CreateBuffer(&desc, &initData, &m_brickInfoBuffer);
-        if (FAILED(hr)) {
+        m_brickInfoBuffer.reset(renderContext->CreateBuffer(bufDesc, m_brickInfoData.data()));
+        if (!m_brickInfoBuffer) {
             CFFLog::Error("[VolumetricLightmap] Failed to create Brick Info buffer!");
-            return false;
-        }
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = (UINT)m_brickInfoData.size();
-
-        hr = device->CreateShaderResourceView(m_brickInfoBuffer.Get(), &srvDesc, &m_brickInfoSRV);
-        if (FAILED(hr)) {
-            CFFLog::Error("[VolumetricLightmap] Failed to create Brick Info SRV!");
             return false;
         }
 
@@ -1027,19 +986,14 @@ bool CVolumetricLightmap::CreateGPUResources()
     // 5. 创建 Sampler State (s3: trilinear for atlas)
     // ============================================
     {
-        D3D11_SAMPLER_DESC samplerDesc = {};
-        samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;  // trilinear
-        samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-        samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-        samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-        samplerDesc.MipLODBias = 0.0f;
-        samplerDesc.MaxAnisotropy = 1;
-        samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-        samplerDesc.MinLOD = 0;
-        samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+        RHI::SamplerDesc samplerDesc;
+        samplerDesc.filter = RHI::EFilter::MinMagMipLinear;
+        samplerDesc.addressU = RHI::ETextureAddressMode::Clamp;
+        samplerDesc.addressV = RHI::ETextureAddressMode::Clamp;
+        samplerDesc.addressW = RHI::ETextureAddressMode::Clamp;
 
-        hr = device->CreateSamplerState(&samplerDesc, &m_sampler);
-        if (FAILED(hr)) {
+        m_sampler.reset(renderContext->CreateSampler(samplerDesc));
+        if (!m_sampler) {
             CFFLog::Error("[VolumetricLightmap] Failed to create sampler state!");
             return false;
         }
@@ -1057,24 +1011,24 @@ void CVolumetricLightmap::UploadToGPU()
     // 这个函数保留用于将来的动态更新
 }
 
-void CVolumetricLightmap::Bind(void* context)
+void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
 {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
-
     // 如果未启用或未烘焙，不绑定任何资源
     if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
         // 绑定空资源，避免残留
-        ID3D11ShaderResourceView* nullSRVs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-        d3dContext->PSSetShaderResources(20, 5, nullSRVs);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, nullptr);
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, nullptr);
         return;
     }
 
     // 更新 Constant Buffer
     if (m_constantBuffer) {
-        D3D11_MAPPED_SUBRESOURCE mapped;
-        HRESULT hr = d3dContext->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        if (SUCCEEDED(hr)) {
-            CB_VolumetricLightmap* cb = (CB_VolumetricLightmap*)mapped.pData;
+        void* mapped = m_constantBuffer->Map();
+        if (mapped) {
+            CB_VolumetricLightmap* cb = (CB_VolumetricLightmap*)mapped;
 
             cb->volumeMin = m_config.volumeMin;
             cb->volumeMax = m_config.volumeMax;
@@ -1096,36 +1050,33 @@ void CVolumetricLightmap::Bind(void* context)
             cb->enabled = 1;
             cb->brickCount = (int)m_bricks.size();
 
-            d3dContext->Unmap(m_constantBuffer.Get(), 0);
+            m_constantBuffer->Unmap();
         }
     }
 
     // 绑定 CB 到 b6
-    d3dContext->PSSetConstantBuffers(6, 1, m_constantBuffer.GetAddressOf());
+    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 6, m_constantBuffer.get());
 
-    // 绑定纹理资源
-    ID3D11ShaderResourceView* srvs[] = {
-        m_indirectionSRV.Get(),
-        m_brickAtlasSRV[0].Get(),
-        m_brickAtlasSRV[1].Get(),
-        m_brickAtlasSRV[2].Get(),
-        m_brickInfoSRV.Get()
-    };
-    d3dContext->PSSetShaderResources(20, 5, srvs);
+    // 绑定纹理资源 (t20-t24)
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, m_indirectionTexture.get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, m_brickAtlasTexture[0].get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, m_brickAtlasTexture[1].get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, m_brickAtlasTexture[2].get());
+    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, m_brickInfoBuffer.get());
 
     // 绑定采样器到 s3
-    d3dContext->PSSetSamplers(3, 1, m_sampler.GetAddressOf());
+    cmdList->SetSampler(RHI::EShaderStage::Pixel, 3, m_sampler.get());
 }
 
-void CVolumetricLightmap::Unbind(void* context)
+void CVolumetricLightmap::Unbind(RHI::ICommandList* cmdList)
 {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, nullptr);
+    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, nullptr);
 
-    ID3D11ShaderResourceView* nullSRVs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-    d3dContext->PSSetShaderResources(20, 5, nullSRVs);
-
-    ID3D11Buffer* nullCB = nullptr;
-    d3dContext->PSSetConstantBuffers(6, 1, &nullCB);
+    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 6, nullptr);
 }
 
 // ============================================

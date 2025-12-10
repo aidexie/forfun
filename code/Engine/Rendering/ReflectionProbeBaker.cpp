@@ -5,6 +5,7 @@
 #include "ShowFlags.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
@@ -15,19 +16,10 @@
 #include "Engine/Camera.h"
 #include <filesystem>
 
-using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
-CReflectionProbeBaker::CReflectionProbeBaker()
-    : m_pipeline(nullptr)
-    , m_iblGenerator(nullptr)
-{
-}
-
-CReflectionProbeBaker::~CReflectionProbeBaker()
-{
-    Shutdown();
-}
+CReflectionProbeBaker::CReflectionProbeBaker() = default;
+CReflectionProbeBaker::~CReflectionProbeBaker() { Shutdown(); }
 
 bool CReflectionProbeBaker::Initialize()
 {
@@ -37,23 +29,20 @@ bool CReflectionProbeBaker::Initialize()
     }
 
     // 创建 rendering pipeline
-    m_pipeline = new CForwardRenderPipeline();
+    m_pipeline = std::make_unique<CForwardRenderPipeline>();
     if (!m_pipeline->Initialize()) {
         CFFLog::Error("Failed to initialize ForwardRenderPipeline for ReflectionProbeBaker");
-        delete m_pipeline;
-        m_pipeline = nullptr;
+        m_pipeline.reset();
         return false;
     }
 
     // 创建 IBL generator
-    m_iblGenerator = new CIBLGenerator();
+    m_iblGenerator = std::make_unique<CIBLGenerator>();
     if (!m_iblGenerator->Initialize()) {
         CFFLog::Error("Failed to initialize IBLGenerator for ReflectionProbeBaker");
         m_pipeline->Shutdown();
-        delete m_pipeline;
-        m_pipeline = nullptr;
-        delete m_iblGenerator;
-        m_iblGenerator = nullptr;
+        m_pipeline.reset();
+        m_iblGenerator.reset();
         return false;
     }
 
@@ -66,19 +55,17 @@ void CReflectionProbeBaker::Shutdown()
 {
     if (!m_initialized) return;
 
-    m_cubemapRT.Reset();
-    m_depthBuffer.Reset();
+    m_cubemapRT.reset();
+    m_depthBuffer.reset();
 
     if (m_iblGenerator) {
         m_iblGenerator->Shutdown();
-        delete m_iblGenerator;
-        m_iblGenerator = nullptr;
+        m_iblGenerator.reset();
     }
 
     if (m_pipeline) {
         m_pipeline->Shutdown();
-        delete m_pipeline;
-        m_pipeline = nullptr;
+        m_pipeline.reset();
     }
 
     m_initialized = false;
@@ -106,7 +93,7 @@ bool CReflectionProbeBaker::BakeProbe(
     }
 
     // 2. 渲染 6 个面到 Cubemap
-    renderToCubemap(position, resolution, scene, m_cubemapRT.Get());
+    renderToCubemap(position, resolution, scene, m_cubemapRT.get());
 
     // 3. 构建输出路径
     std::string fullAssetPath = FFPath::GetAbsolutePath(outputAssetPath);
@@ -121,13 +108,13 @@ bool CReflectionProbeBaker::BakeProbe(
 
     // 4. 保存 Environment Cubemap
     std::string envPath = basePath + "/env.ktx2";
-    if (!saveCubemapAsKTX2(m_cubemapRT.Get(), envPath)) {
+    if (!saveCubemapAsKTX2(m_cubemapRT.get(), envPath)) {
         CFFLog::Error("Failed to save environment cubemap");
         return false;
     }
 
     // 5. 生成并保存 IBL maps
-    generateAndSaveIBL(m_cubemapRT.Get(), basePath);
+    generateAndSaveIBL(m_cubemapRT.get(), basePath);
 
     // 6. 创建 .ffasset
     if (!createAssetFile(fullAssetPath, resolution)) {
@@ -141,53 +128,49 @@ bool CReflectionProbeBaker::BakeProbe(
 
 bool CReflectionProbeBaker::createCubemapRenderTarget(int resolution)
 {
-    auto device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
 
-    // Release old resources if they exist
-    m_cubemapRT.Reset();
-    m_depthBuffer.Reset();
+    // Release old resources if resolution changed
+    if (m_currentResolution != resolution) {
+        m_cubemapRT.reset();
+        m_depthBuffer.reset();
+    }
 
     // Create Cubemap render target (HDR format for accurate lighting)
-    D3D11_TEXTURE2D_DESC cubemapDesc{};
-    cubemapDesc.Width = resolution;
-    cubemapDesc.Height = resolution;
-    cubemapDesc.MipLevels = 1;
-    cubemapDesc.ArraySize = 6;  // 6 faces
-    cubemapDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR
-    cubemapDesc.SampleDesc.Count = 1;
-    cubemapDesc.SampleDesc.Quality = 0;
-    cubemapDesc.Usage = D3D11_USAGE_DEFAULT;
-    cubemapDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    cubemapDesc.CPUAccessFlags = 0;
-    cubemapDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+    RHI::TextureDesc cubemapDesc;
+    cubemapDesc.width = resolution;
+    cubemapDesc.height = resolution;
+    cubemapDesc.mipLevels = 1;
+    cubemapDesc.arraySize = 1;  // Will be 6 due to isCubemap
+    cubemapDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    cubemapDesc.usage = RHI::ETextureUsage::RenderTarget | RHI::ETextureUsage::ShaderResource;
+    cubemapDesc.isCubemap = true;
+    cubemapDesc.debugName = "ReflectionProbeBaker_CubemapRT";
 
-    HRESULT hr = device->CreateTexture2D(&cubemapDesc, nullptr, m_cubemapRT.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Failed to create cubemap render target (HRESULT: 0x%08X)", hr);
+    m_cubemapRT.reset(renderContext->CreateTexture(cubemapDesc));
+    if (!m_cubemapRT) {
+        CFFLog::Error("Failed to create cubemap render target");
         return false;
     }
 
     // Create depth buffer
-    D3D11_TEXTURE2D_DESC depthDesc{};
-    depthDesc.Width = resolution;
-    depthDesc.Height = resolution;
-    depthDesc.MipLevels = 1;
-    depthDesc.ArraySize = 1;  // Shared depth buffer for all faces
-    depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    depthDesc.SampleDesc.Count = 1;
-    depthDesc.SampleDesc.Quality = 0;
-    depthDesc.Usage = D3D11_USAGE_DEFAULT;
-    depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    depthDesc.CPUAccessFlags = 0;
-    depthDesc.MiscFlags = 0;
+    RHI::TextureDesc depthDesc;
+    depthDesc.width = resolution;
+    depthDesc.height = resolution;
+    depthDesc.mipLevels = 1;
+    depthDesc.arraySize = 1;
+    depthDesc.format = RHI::ETextureFormat::D24_UNORM_S8_UINT;
+    depthDesc.usage = RHI::ETextureUsage::DepthStencil;
+    depthDesc.debugName = "ReflectionProbeBaker_DepthBuffer";
 
-    hr = device->CreateTexture2D(&depthDesc, nullptr, m_depthBuffer.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Failed to create depth buffer (HRESULT: 0x%08X)", hr);
-        m_cubemapRT.Reset();
+    m_depthBuffer.reset(renderContext->CreateTexture(depthDesc));
+    if (!m_depthBuffer) {
+        CFFLog::Error("Failed to create depth buffer");
+        m_cubemapRT.reset();
         return false;
     }
 
+    m_currentResolution = resolution;
     CFFLog::Info("Created cubemap render target: %dx%d", resolution, resolution);
     return true;
 }
@@ -196,32 +179,22 @@ void CReflectionProbeBaker::renderToCubemap(
     const XMFLOAT3& position,
     int resolution,
     CScene& scene,
-    ID3D11Texture2D* outputCubemap)
+    RHI::ITexture* outputCubemap)
 {
     // RenderDoc 捕获：自动捕获渲染过程
     static bool s_captureFirstBake = true;
     if (s_captureFirstBake) {
         CRenderDocCapture::BeginFrameCapture();
-        s_captureFirstBake = false;  // 只捕获一次
+        s_captureFirstBake = false;
     }
-
-    // Wrap the D3D11 texture as RHI texture for CubemapRenderer
-    RHI::TextureDesc wrapDesc;
-    wrapDesc.width = resolution;
-    wrapDesc.height = resolution;
-    wrapDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
-    wrapDesc.isCubemap = true;
-
-    std::unique_ptr<RHI::ITexture> rhiCubemap(
-        RHI::CRHIManager::Instance().GetRenderContext()->WrapExternalTexture(outputCubemap, wrapDesc));
 
     // 使用共享的 CubemapRenderer
     CCubemapRenderer::RenderToCubemap(
         position,
         resolution,
         scene,
-        m_pipeline,
-        rhiCubemap.get());
+        m_pipeline.get(),
+        outputCubemap);
 
     // 结束 RenderDoc 捕获
     CRenderDocCapture::EndFrameCapture();
@@ -230,49 +203,31 @@ void CReflectionProbeBaker::renderToCubemap(
 }
 
 void CReflectionProbeBaker::generateAndSaveIBL(
-    ID3D11Texture2D* envCubemap,
+    RHI::ITexture* envCubemap,
     const std::string& basePath)
 {
-    auto device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-
-    // Create SRV for the environment cubemap
-    ComPtr<ID3D11ShaderResourceView> envSRV;
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-    srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = 1;
-    srvDesc.TextureCube.MostDetailedMip = 0;
-
-    HRESULT hr = device->CreateShaderResourceView(envCubemap, &srvDesc, envSRV.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Failed to create SRV for environment cubemap");
-        return;
-    }
-
     // Generate Irradiance Map (32×32, diffuse convolution)
-    ID3D11ShaderResourceView* irradianceSRV = m_iblGenerator->GenerateIrradianceMap(envSRV.Get(), 32);
-    if (!irradianceSRV) {
+    RHI::ITexture* irradianceTexture = m_iblGenerator->GenerateIrradianceMap(envCubemap, 32);
+    if (!irradianceTexture) {
         CFFLog::Error("Failed to generate irradiance map");
         return;
     }
 
     // Generate Pre-filtered Map (128×128, 7 mip levels for roughness)
-    ID3D11ShaderResourceView* prefilteredSRV = m_iblGenerator->GeneratePreFilteredMap(envSRV.Get(), 128, 7);
-    if (!prefilteredSRV) {
+    RHI::ITexture* prefilteredTexture = m_iblGenerator->GeneratePreFilteredMap(envCubemap, 128, 7);
+    if (!prefilteredTexture) {
         CFFLog::Error("Failed to generate pre-filtered map");
         return;
     }
 
     // Save Irradiance Map to KTX2
     std::string irradiancePath = basePath + "/irradiance.ktx2";
-    ID3D11Texture2D* irradianceTexture = m_iblGenerator->GetIrradianceTexture();
     if (!saveCubemapAsKTX2(irradianceTexture, irradiancePath)) {
         CFFLog::Error("Failed to save irradiance map");
     }
 
     // Save Pre-filtered Map to KTX2
     std::string prefilteredPath = basePath + "/prefiltered.ktx2";
-    ID3D11Texture2D* prefilteredTexture = m_iblGenerator->GetPreFilteredTexture();
     if (!saveCubemapAsKTX2(prefilteredTexture, prefilteredPath)) {
         CFFLog::Error("Failed to save pre-filtered map");
     }
@@ -281,7 +236,7 @@ void CReflectionProbeBaker::generateAndSaveIBL(
 }
 
 bool CReflectionProbeBaker::saveCubemapAsKTX2(
-    ID3D11Texture2D* cubemap,
+    RHI::ITexture* cubemap,
     const std::string& outputPath)
 {
     if (!cubemap) {
@@ -289,17 +244,12 @@ bool CReflectionProbeBaker::saveCubemapAsKTX2(
         return false;
     }
 
-    // Get texture description to determine mip levels
-    D3D11_TEXTURE2D_DESC desc;
-    cubemap->GetDesc(&desc);
-
-    // Export using CKTXExporter (Native version for D3D11 texture)
-    // 0 = export all mip levels (or just 1 if texture has no mipmaps)
-    bool success = CKTXExporter::ExportCubemapToKTX2Native(cubemap, outputPath, desc.MipLevels);
+    // Export using CKTXExporter (RHI version)
+    bool success = CKTXExporter::ExportCubemapToKTX2(cubemap, outputPath, cubemap->GetMipLevels());
 
     if (success) {
         CFFLog::Info("Saved cubemap to KTX2: %s (resolution: %dx%d, mips: %d)",
-                    outputPath.c_str(), desc.Width, desc.Height, desc.MipLevels);
+                    outputPath.c_str(), cubemap->GetWidth(), cubemap->GetHeight(), cubemap->GetMipLevels());
     } else {
         CFFLog::Error("Failed to save cubemap to KTX2: %s", outputPath.c_str());
     }
@@ -318,8 +268,6 @@ bool CReflectionProbeBaker::createAssetFile(
     asset.m_irradianceMap = "irradiance.ktx2";
     asset.m_prefilteredMap = "prefiltered.ktx2";
 
-
     // 保存
     return asset.SaveToFile(fullAssetPath);
 }
-

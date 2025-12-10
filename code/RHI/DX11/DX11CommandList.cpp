@@ -45,6 +45,20 @@ void CDX11CommandList::ClearDepthStencil(ITexture* depthStencil, bool clearDepth
     }
 }
 
+void CDX11CommandList::SetRenderTargetSlice(ITexture* renderTarget, uint32_t arraySlice, ITexture* depthStencil) {
+    ID3D11RenderTargetView* rtv = nullptr;
+    if (renderTarget) {
+        rtv = static_cast<ID3D11RenderTargetView*>(renderTarget->GetRTVSlice(arraySlice));
+    }
+
+    ID3D11DepthStencilView* dsv = nullptr;
+    if (depthStencil) {
+        dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSV());
+    }
+
+    m_context->OMSetRenderTargets(rtv ? 1 : 0, rtv ? &rtv : nullptr, dsv);
+}
+
 void CDX11CommandList::SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice) {
     ID3D11DepthStencilView* dsv = nullptr;
     if (depthStencil) {
@@ -286,17 +300,26 @@ void CDX11CommandList::CopyTextureToSlice(ITexture* dst, uint32_t dstArraySlice,
     if (!dstRes || !srcRes) return;
 
     // Calculate destination subresource
-    UINT dstMipLevels = 1;
-    D3D11_RESOURCE_DIMENSION dim;
-    dstRes->GetType(&dim);
-    if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
-        D3D11_TEXTURE2D_DESC desc;
-        static_cast<ID3D11Texture2D*>(dstRes)->GetDesc(&desc);
-        dstMipLevels = desc.MipLevels;
-    }
-
+    UINT dstMipLevels = dst->GetMipLevels();
     UINT dstSubresource = D3D11CalcSubresource(dstMipLevel, dstArraySlice, dstMipLevels);
     m_context->CopySubresourceRegion(dstRes, dstSubresource, 0, 0, 0, srcRes, 0, nullptr);
+}
+
+void CDX11CommandList::CopyTextureSubresource(
+    ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel,
+    ITexture* src, uint32_t srcArraySlice, uint32_t srcMipLevel)
+{
+    if (!dst || !src) return;
+    ID3D11Resource* dstRes = static_cast<ID3D11Resource*>(dst->GetNativeHandle());
+    ID3D11Resource* srcRes = static_cast<ID3D11Resource*>(src->GetNativeHandle());
+    if (!dstRes || !srcRes) return;
+
+    UINT dstMipLevels = dst->GetMipLevels();
+    UINT srcMipLevels = src->GetMipLevels();
+    UINT dstSubresource = D3D11CalcSubresource(dstMipLevel, dstArraySlice, dstMipLevels);
+    UINT srcSubresource = D3D11CalcSubresource(srcMipLevel, srcArraySlice, srcMipLevels);
+
+    m_context->CopySubresourceRegion(dstRes, dstSubresource, 0, 0, 0, srcRes, srcSubresource, nullptr);
 }
 
 void CDX11CommandList::UnbindRenderTargets() {

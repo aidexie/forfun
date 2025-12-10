@@ -1,12 +1,13 @@
 #pragma once
+#include "RHI/RHIPointers.h"
 #include <DirectXMath.h>
-#include <wrl/client.h>
 #include <string>
 #include <vector>
 
-// Forward declarations - D3D11 types hidden from public interface
-struct ID3D11Buffer;
-struct ID3D11ShaderResourceView;
+// Forward declarations
+namespace RHI {
+    class ICommandList;
+}
 class CScene;
 
 // ============================================
@@ -80,7 +81,7 @@ public:
     // 绑定资源到 Shader（每帧调用一次）
     // slot 15: LightProbeBuffer (StructuredBuffer)
     // slot 5 (CB): CB_LightProbeParams
-    void Bind(void* context);
+    void Bind(RHI::ICommandList* cmdList);
 
     // 获取 Probe 数量（用于调试）
     int GetProbeCount() const { return m_probeCount; }
@@ -92,8 +93,8 @@ public:
         DirectX::XMFLOAT3 outShCoeffs[9]
     ) const;
 
-    // 获取 SRV（用于调试）
-    ID3D11ShaderResourceView* GetProbeBufferSRV() const { return m_probeBufferSRV.Get(); }
+    // 获取资源（用于调试）
+    RHI::IBuffer* GetProbeBuffer() const { return m_probeBuffer.get(); }
 
 private:
     // ============================================
@@ -116,12 +117,11 @@ private:
     // Data
     // ============================================
 
-    // StructuredBuffer 资源
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_probeBuffer;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_probeBufferSRV;
+    // StructuredBuffer 资源 (RHI)
+    RHI::BufferPtr m_probeBuffer;
 
-    // 常量缓冲区
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbParams;
+    // 常量缓冲区 (RHI)
+    RHI::BufferPtr m_cbParams;
 
     // CPU 侧 Probe 数据
     std::vector<LightProbeData> m_probeData;

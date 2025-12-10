@@ -7,6 +7,8 @@
 #include "Core/Loader/KTXLoader.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <DirectXPackedVector.h>
@@ -14,7 +16,6 @@
 
 using namespace DirectX;
 using namespace DirectX::PackedVector;
-using Microsoft::WRL::ComPtr;
 
 // ============================================
 // Public Interface
@@ -43,8 +44,7 @@ bool CReflectionProbeManager::Initialize()
     m_probeData.probeCount = 1;
 
     // 更新常量缓冲区
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
+    updateConstantBuffer();
 
     m_initialized = true;
     CFFLog::Info("[ReflectionProbeManager] Initialized (max %d probes, default fallback IBL set)", MAX_PROBES);
@@ -53,12 +53,10 @@ bool CReflectionProbeManager::Initialize()
 
 void CReflectionProbeManager::Shutdown()
 {
-    m_irradianceArray.Reset();
-    m_prefilteredArray.Reset();
-    m_irradianceArraySRV.Reset();
-    m_prefilteredArraySRV.Reset();
-    m_brdfLutSRV.Reset();
-    m_cbProbes.Reset();
+    m_irradianceArray.reset();
+    m_prefilteredArray.reset();
+    m_brdfLutTexture.reset();
+    m_cbProbes.reset();
     m_probeCount = 0;
     m_initialized = false;
 }
@@ -129,28 +127,26 @@ void CReflectionProbeManager::LoadLocalProbesFromScene(CScene& scene)
 
     // 更新常量缓冲区
     m_probeData.probeCount = m_probeCount;
-
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
+    updateConstantBuffer();
 
     CFFLog::Info("[ReflectionProbeManager] Total probes loaded: %d", m_probeCount);
 }
 
-void CReflectionProbeManager::Bind(void* context)
+void CReflectionProbeManager::Bind(RHI::ICommandList* cmdList)
 {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
-    if (!m_initialized) return;
+    if (!m_initialized || !cmdList) return;
 
     // t3: IrradianceArray
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 3, m_irradianceArray.get());
+
     // t4: PrefilteredArray
-    ID3D11ShaderResourceView* srvs[2] = {
-        m_irradianceArraySRV.Get(),
-        m_prefilteredArraySRV.Get()
-    };
-    d3dContext->PSSetShaderResources(3, 2, srvs);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 4, m_prefilteredArray.get());
+
+    // t5: BRDF LUT
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 5, m_brdfLutTexture.get());
 
     // b4: CB_Probes
-    d3dContext->PSSetConstantBuffers(4, 1, m_cbProbes.GetAddressOf());
+    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 4, m_cbProbes.get());
 }
 
 int CReflectionProbeManager::SelectProbeForPosition(const DirectX::XMFLOAT3& worldPos) const
@@ -205,8 +201,7 @@ bool CReflectionProbeManager::LoadGlobalProbe(const std::string& irrPath, const 
     m_probeData.probeCount = m_probeCount;
 
     // Update constant buffer
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
+    updateConstantBuffer();
 
     CFFLog::Info("[ReflectionProbeManager] Global probe (index 0) reloaded");
     return true;
@@ -226,12 +221,8 @@ bool CReflectionProbeManager::LoadBrdfLut(const std::string& brdfLutPath)
         return false;
     }
 
-    // Store RHI texture to keep it alive
-    m_rhiBrdfLutTexture.reset(rhiTexture);
-
-    // Get native SRV from RHI texture
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
-    m_brdfLutSRV = srv;
+    // Store RHI texture
+    m_brdfLutTexture.reset(rhiTexture);
 
     CFFLog::Info("[ReflectionProbeManager] Loaded BRDF LUT: %s", brdfLutPath.c_str());
     return true;
@@ -243,77 +234,43 @@ bool CReflectionProbeManager::LoadBrdfLut(const std::string& brdfLutPath)
 
 bool CReflectionProbeManager::createCubeArrays()
 {
-    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return false;
 
     // ============================================
-    // Irradiance Array: 32x32, 1 mip, 8 slices
+    // Irradiance Array: 32x32, 1 mip, 8 cubes
     // ============================================
     {
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = IRRADIANCE_SIZE;
-        desc.Height = IRRADIANCE_SIZE;
-        desc.MipLevels = 1;
-        desc.ArraySize = MAX_PROBES * 6;  // 8 probes * 6 faces
-        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+        RHI::TextureDesc desc = RHI::TextureDesc::CubemapArray(
+            IRRADIANCE_SIZE,
+            MAX_PROBES,
+            RHI::ETextureFormat::R16G16B16A16_FLOAT,
+            1  // 1 mip level
+        );
+        desc.debugName = "ReflectionProbeManager_IrradianceArray";
 
-        HRESULT hr = device->CreateTexture2D(&desc, nullptr, &m_irradianceArray);
-        if (FAILED(hr)) {
+        m_irradianceArray.reset(renderContext->CreateTexture(desc));
+        if (!m_irradianceArray) {
             CFFLog::Error("[ReflectionProbeManager] Failed to create irradiance array");
-            return false;
-        }
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = desc.Format;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
-        srvDesc.TextureCubeArray.MipLevels = 1;
-        srvDesc.TextureCubeArray.MostDetailedMip = 0;
-        srvDesc.TextureCubeArray.First2DArrayFace = 0;
-        srvDesc.TextureCubeArray.NumCubes = MAX_PROBES;
-
-        hr = device->CreateShaderResourceView(m_irradianceArray.Get(), &srvDesc, &m_irradianceArraySRV);
-        if (FAILED(hr)) {
-            CFFLog::Error("[ReflectionProbeManager] Failed to create irradiance array SRV");
             return false;
         }
     }
 
     // ============================================
-    // Prefiltered Array: 128x128, 7 mips, 8 slices
+    // Prefiltered Array: 128x128, 7 mips, 8 cubes
     // ============================================
     {
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = PREFILTERED_SIZE;
-        desc.Height = PREFILTERED_SIZE;
-        desc.MipLevels = PREFILTERED_MIP_COUNT;
-        desc.ArraySize = MAX_PROBES * 6;  // 8 probes * 6 faces
-        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+        RHI::TextureDesc desc = RHI::TextureDesc::CubemapArray(
+            PREFILTERED_SIZE,
+            MAX_PROBES,
+            RHI::ETextureFormat::R16G16B16A16_FLOAT,
+            PREFILTERED_MIP_COUNT
+        );
+        desc.debugName = "ReflectionProbeManager_PrefilteredArray";
 
-        HRESULT hr = device->CreateTexture2D(&desc, nullptr, &m_prefilteredArray);
-        if (FAILED(hr)) {
+        m_prefilteredArray.reset(renderContext->CreateTexture(desc));
+        if (!m_prefilteredArray) {
             CFFLog::Error("[ReflectionProbeManager] Failed to create prefiltered array");
-            return false;
-        }
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = desc.Format;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
-        srvDesc.TextureCubeArray.MipLevels = PREFILTERED_MIP_COUNT;
-        srvDesc.TextureCubeArray.MostDetailedMip = 0;
-        srvDesc.TextureCubeArray.First2DArrayFace = 0;
-        srvDesc.TextureCubeArray.NumCubes = MAX_PROBES;
-
-        hr = device->CreateShaderResourceView(m_prefilteredArray.Get(), &srvDesc, &m_prefilteredArraySRV);
-        if (FAILED(hr)) {
-            CFFLog::Error("[ReflectionProbeManager] Failed to create prefiltered array SRV");
             return false;
         }
     }
@@ -327,16 +284,17 @@ bool CReflectionProbeManager::createCubeArrays()
 
 bool CReflectionProbeManager::createConstantBuffer()
 {
-    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return false;
 
-    D3D11_BUFFER_DESC desc = {};
-    desc.ByteWidth = sizeof(CB_Probes);
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    RHI::BufferDesc desc;
+    desc.size = sizeof(CB_Probes);
+    desc.usage = RHI::EBufferUsage::Constant;
+    desc.cpuAccess = RHI::ECPUAccess::Write;  // Dynamic buffer for Map/Unmap
+    desc.debugName = "ReflectionProbeManager_CB_Probes";
 
-    HRESULT hr = device->CreateBuffer(&desc, nullptr, &m_cbProbes);
-    if (FAILED(hr)) {
+    m_cbProbes.reset(renderContext->CreateBuffer(desc));
+    if (!m_cbProbes) {
         CFFLog::Error("[ReflectionProbeManager] Failed to create CB_Probes");
         return false;
     }
@@ -345,34 +303,39 @@ bool CReflectionProbeManager::createConstantBuffer()
 }
 
 bool CReflectionProbeManager::copyCubemapToArray(
-    ID3D11Texture2D* srcCubemap,
-    ID3D11Texture2D* dstArray,
+    RHI::ITexture* srcCubemap,
+    RHI::ITexture* dstArray,
     int sliceIndex,
     int expectedSize,
     int mipCount)
 {
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!context || !srcCubemap || !dstArray) return false;
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
+    if (!cmdList || !srcCubemap || !dstArray) return false;
 
-    // 验证源纹理大小
-    D3D11_TEXTURE2D_DESC srcDesc;
-    srcCubemap->GetDesc(&srcDesc);
-
-    if (srcDesc.Width != expectedSize || srcDesc.Height != expectedSize) {
+    // Verify source texture size
+    if (srcCubemap->GetWidth() != (uint32_t)expectedSize ||
+        srcCubemap->GetHeight() != (uint32_t)expectedSize) {
         CFFLog::Warning("[ReflectionProbeManager] Source cubemap size mismatch: expected %d, got %d",
-                       expectedSize, srcDesc.Width);
-        // 继续尝试拷贝（可能需要 resize，但这里简单处理）
+                       expectedSize, srcCubemap->GetWidth());
+        // Continue trying to copy
     }
 
-    // 拷贝每个 face 的每个 mip
+    // Copy each face of each mip level
+    int srcMipCount = (int)srcCubemap->GetMipLevels();
     for (int face = 0; face < 6; face++) {
-        for (int mip = 0; mip < mipCount && mip < (int)srcDesc.MipLevels; mip++) {
-            UINT srcSubresource = D3D11CalcSubresource(mip, face, srcDesc.MipLevels);
-            UINT dstSubresource = D3D11CalcSubresource(mip, sliceIndex * 6 + face, mipCount);
+        for (int mip = 0; mip < mipCount && mip < srcMipCount; mip++) {
+            // Source: cubemap face (arraySlice = face, mipLevel = mip)
+            uint32_t srcArraySlice = face;
+            uint32_t srcMipLevel = mip;
 
-            context->CopySubresourceRegion(
-                dstArray, dstSubresource, 0, 0, 0,
-                srcCubemap, srcSubresource, nullptr
+            // Destination: cubemap array (arraySlice = sliceIndex * 6 + face, mipLevel = mip)
+            uint32_t dstArraySlice = sliceIndex * 6 + face;
+            uint32_t dstMipLevel = mip;
+
+            cmdList->CopyTextureSubresource(
+                dstArray, dstArraySlice, dstMipLevel,
+                srcCubemap, srcArraySlice, srcMipLevel
             );
         }
     }
@@ -385,74 +348,63 @@ bool CReflectionProbeManager::loadAndCopyToArray(
     int sliceIndex,
     bool isIrradiance)
 {
-    // 加载 KTX2 Cubemap
+    // Load KTX2 Cubemap using RHI
     std::unique_ptr<RHI::ITexture> rhiTexture(CKTXLoader::LoadCubemapFromKTX2(ktx2Path));
     if (!rhiTexture) {
         CFFLog::Error("[ReflectionProbeManager] Failed to load: %s", ktx2Path.c_str());
         return false;
     }
 
-    // Get native D3D11 texture from RHI
-    ID3D11Texture2D* cubemap = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
-
-    // 拷贝到 Array
+    // Copy to Array
     bool success = false;
     if (isIrradiance) {
-        success = copyCubemapToArray(cubemap, m_irradianceArray.Get(), sliceIndex, IRRADIANCE_SIZE, 1);
+        success = copyCubemapToArray(rhiTexture.get(), m_irradianceArray.get(), sliceIndex, IRRADIANCE_SIZE, 1);
     } else {
-        success = copyCubemapToArray(cubemap, m_prefilteredArray.Get(), sliceIndex, PREFILTERED_SIZE, PREFILTERED_MIP_COUNT);
+        success = copyCubemapToArray(rhiTexture.get(), m_prefilteredArray.get(), sliceIndex, PREFILTERED_SIZE, PREFILTERED_MIP_COUNT);
     }
 
-    // rhiTexture unique_ptr will automatically release the D3D11 resources
+    // rhiTexture unique_ptr will automatically release the texture
     return success;
 }
 
 void CReflectionProbeManager::fillSliceWithSolidColor(int sliceIndex, float r, float g, float b)
 {
-    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!device || !context) return;
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
+    if (!renderContext || !cmdList) return;
+
+    // Convert float to half (using DirectX PackedVector)
+    uint16_t hr16 = XMConvertFloatToHalf(r);
+    uint16_t hg16 = XMConvertFloatToHalf(g);
+    uint16_t hb16 = XMConvertFloatToHalf(b);
+    uint16_t ha16 = XMConvertFloatToHalf(1.0f);
 
     // ============================================
-    // 填充 Irradiance Array (32x32, 1 mip)
+    // Fill Irradiance Array (32x32, 1 mip)
     // ============================================
     {
-        // 创建临时 staging texture
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = IRRADIANCE_SIZE;
-        desc.Height = IRRADIANCE_SIZE;
-        desc.MipLevels = 1;
-        desc.ArraySize = 6;  // 6 faces
-        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_STAGING;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-        desc.MiscFlags = 0;  // Staging 不需要 TEXTURECUBE flag
+        // Create staging texture for writing
+        RHI::TextureDesc stagingDesc = RHI::TextureDesc::StagingCubemap(
+            IRRADIANCE_SIZE,
+            RHI::ETextureFormat::R16G16B16A16_FLOAT,
+            RHI::ECPUAccess::Write
+        );
+        stagingDesc.debugName = "ReflectionProbeManager_IrrStagingTemp";
 
-        ComPtr<ID3D11Texture2D> stagingTex;
-        HRESULT hr = device->CreateTexture2D(&desc, nullptr, &stagingTex);
-        if (FAILED(hr)) {
+        std::unique_ptr<RHI::ITexture> stagingTex(renderContext->CreateTexture(stagingDesc));
+        if (!stagingTex) {
             CFFLog::Error("[ReflectionProbeManager] Failed to create irradiance staging texture");
             return;
         }
 
-        // 填充每个 face
+        // Fill each face
         for (int face = 0; face < 6; face++) {
-            D3D11_MAPPED_SUBRESOURCE mapped;
-            hr = context->Map(stagingTex.Get(), face, D3D11_MAP_WRITE, 0, &mapped);
-            if (SUCCEEDED(hr)) {
-                // R16G16B16A16_FLOAT: 每像素 8 bytes (4 * 2 bytes)
-                uint16_t* pixels = reinterpret_cast<uint16_t*>(mapped.pData);
-
-                // 转换 float 到 half (简化版，使用 DirectX 的转换)
-                uint16_t hr16 = XMConvertFloatToHalf(r);
-                uint16_t hg16 = XMConvertFloatToHalf(g);
-                uint16_t hb16 = XMConvertFloatToHalf(b);
-                uint16_t ha16 = XMConvertFloatToHalf(1.0f);
-
+            RHI::MappedTexture mapped = stagingTex->Map(face, 0);
+            if (mapped.pData) {
+                // R16G16B16A16_FLOAT: 8 bytes per pixel
                 for (int y = 0; y < IRRADIANCE_SIZE; y++) {
                     uint16_t* row = reinterpret_cast<uint16_t*>(
-                        reinterpret_cast<uint8_t*>(mapped.pData) + y * mapped.RowPitch);
+                        reinterpret_cast<uint8_t*>(mapped.pData) + y * mapped.rowPitch);
                     for (int x = 0; x < IRRADIANCE_SIZE; x++) {
                         row[x * 4 + 0] = hr16;
                         row[x * 4 + 1] = hg16;
@@ -460,78 +412,82 @@ void CReflectionProbeManager::fillSliceWithSolidColor(int sliceIndex, float r, f
                         row[x * 4 + 3] = ha16;
                     }
                 }
-                context->Unmap(stagingTex.Get(), face);
+                stagingTex->Unmap(face, 0);
             }
         }
 
-        // 拷贝到目标 array
+        // Copy staging texture to target array slice
         for (int face = 0; face < 6; face++) {
-            UINT srcSubresource = D3D11CalcSubresource(0, face, 1);
-            UINT dstSubresource = D3D11CalcSubresource(0, sliceIndex * 6 + face, 1);
-            context->CopySubresourceRegion(
-                m_irradianceArray.Get(), dstSubresource, 0, 0, 0,
-                stagingTex.Get(), srcSubresource, nullptr);
+            uint32_t srcArraySlice = face;
+            uint32_t dstArraySlice = sliceIndex * 6 + face;
+            cmdList->CopyTextureSubresource(
+                m_irradianceArray.get(), dstArraySlice, 0,
+                stagingTex.get(), srcArraySlice, 0
+            );
         }
     }
 
     // ============================================
-    // 填充 Prefiltered Array (128x128, 7 mips)
+    // Fill Prefiltered Array (128x128, 7 mips)
     // ============================================
-    {
-        for (int mip = 0; mip < PREFILTERED_MIP_COUNT; mip++) {
-            int mipSize = PREFILTERED_SIZE >> mip;
-            if (mipSize < 1) mipSize = 1;
+    for (int mip = 0; mip < PREFILTERED_MIP_COUNT; mip++) {
+        int mipSize = PREFILTERED_SIZE >> mip;
+        if (mipSize < 1) mipSize = 1;
 
-            // 创建临时 staging texture (每个 mip 单独创建)
-            D3D11_TEXTURE2D_DESC desc = {};
-            desc.Width = mipSize;
-            desc.Height = mipSize;
-            desc.MipLevels = 1;
-            desc.ArraySize = 6;
-            desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-            desc.SampleDesc.Count = 1;
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-            desc.MiscFlags = 0;
+        // Create staging texture for this mip level
+        RHI::TextureDesc stagingDesc;
+        stagingDesc.width = mipSize;
+        stagingDesc.height = mipSize;
+        stagingDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+        stagingDesc.mipLevels = 1;
+        stagingDesc.arraySize = 6;  // 6 faces
+        stagingDesc.usage = RHI::ETextureUsage::Staging;
+        stagingDesc.cpuAccess = RHI::ECPUAccess::Write;
+        stagingDesc.debugName = "ReflectionProbeManager_PrefStagingTemp";
 
-            ComPtr<ID3D11Texture2D> stagingTex;
-            HRESULT hr = device->CreateTexture2D(&desc, nullptr, &stagingTex);
-            if (FAILED(hr)) continue;
+        std::unique_ptr<RHI::ITexture> stagingTex(renderContext->CreateTexture(stagingDesc));
+        if (!stagingTex) continue;
 
-            uint16_t hr16 = XMConvertFloatToHalf(r);
-            uint16_t hg16 = XMConvertFloatToHalf(g);
-            uint16_t hb16 = XMConvertFloatToHalf(b);
-            uint16_t ha16 = XMConvertFloatToHalf(1.0f);
-
-            for (int face = 0; face < 6; face++) {
-                D3D11_MAPPED_SUBRESOURCE mapped;
-                hr = context->Map(stagingTex.Get(), face, D3D11_MAP_WRITE, 0, &mapped);
-                if (SUCCEEDED(hr)) {
-                    for (int y = 0; y < mipSize; y++) {
-                        uint16_t* row = reinterpret_cast<uint16_t*>(
-                            reinterpret_cast<uint8_t*>(mapped.pData) + y * mapped.RowPitch);
-                        for (int x = 0; x < mipSize; x++) {
-                            row[x * 4 + 0] = hr16;
-                            row[x * 4 + 1] = hg16;
-                            row[x * 4 + 2] = hb16;
-                            row[x * 4 + 3] = ha16;
-                        }
+        // Fill each face
+        for (int face = 0; face < 6; face++) {
+            RHI::MappedTexture mapped = stagingTex->Map(face, 0);
+            if (mapped.pData) {
+                for (int y = 0; y < mipSize; y++) {
+                    uint16_t* row = reinterpret_cast<uint16_t*>(
+                        reinterpret_cast<uint8_t*>(mapped.pData) + y * mapped.rowPitch);
+                    for (int x = 0; x < mipSize; x++) {
+                        row[x * 4 + 0] = hr16;
+                        row[x * 4 + 1] = hg16;
+                        row[x * 4 + 2] = hb16;
+                        row[x * 4 + 3] = ha16;
                     }
-                    context->Unmap(stagingTex.Get(), face);
                 }
+                stagingTex->Unmap(face, 0);
             }
+        }
 
-            // 拷贝到目标 array
-            for (int face = 0; face < 6; face++) {
-                UINT srcSubresource = D3D11CalcSubresource(0, face, 1);
-                UINT dstSubresource = D3D11CalcSubresource(mip, sliceIndex * 6 + face, PREFILTERED_MIP_COUNT);
-                context->CopySubresourceRegion(
-                    m_prefilteredArray.Get(), dstSubresource, 0, 0, 0,
-                    stagingTex.Get(), srcSubresource, nullptr);
-            }
+        // Copy staging texture to target array slice
+        for (int face = 0; face < 6; face++) {
+            uint32_t srcArraySlice = face;
+            uint32_t dstArraySlice = sliceIndex * 6 + face;
+            cmdList->CopyTextureSubresource(
+                m_prefilteredArray.get(), dstArraySlice, mip,
+                stagingTex.get(), srcArraySlice, 0
+            );
         }
     }
 
     CFFLog::Info("[ReflectionProbeManager] Filled slice %d with solid color (%.2f, %.2f, %.2f)",
                 sliceIndex, r, g, b);
+}
+
+void CReflectionProbeManager::updateConstantBuffer()
+{
+    if (!m_cbProbes) return;
+
+    void* mapped = m_cbProbes->Map();
+    if (mapped) {
+        memcpy(mapped, &m_probeData, sizeof(CB_Probes));
+        m_cbProbes->Unmap();
+    }
 }

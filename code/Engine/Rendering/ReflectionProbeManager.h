@@ -1,19 +1,15 @@
 #pragma once
-#include "RHI/RHIResources.h"
+#include "RHI/RHIPointers.h"
 #include <DirectXMath.h>
-#include <wrl/client.h>
 #include <string>
 #include <vector>
 #include <memory>
 
-// Forward declarations - D3D11 types hidden from public interface
-struct ID3D11DeviceContext;
-struct ID3D11Device;
-struct ID3D11Texture2D;
-struct ID3D11ShaderResourceView;
-struct ID3D11Buffer;
-
 // Forward declarations
+namespace RHI {
+    class ICommandList;
+}
+
 class CScene;
 
 // ============================================
@@ -82,7 +78,7 @@ public:
     // slot 3: IrradianceArray
     // slot 4: PrefilteredArray
     // slot 4 (CB): CB_Probes
-    void Bind(void* context);
+    void Bind(RHI::ICommandList* cmdList);
 
     // 加载/重载全局 Probe（index 0）
     bool LoadGlobalProbe(const std::string& irrPath, const std::string& prefPath);
@@ -97,10 +93,10 @@ public:
     // Returns probe index (0 = global fallback, 1-7 = local probes)
     int SelectProbeForPosition(const DirectX::XMFLOAT3& worldPos) const;
 
-    // 获取 SRV（用于调试和渲染）
-    ID3D11ShaderResourceView* GetIrradianceArraySRV() const { return m_irradianceArraySRV.Get(); }
-    ID3D11ShaderResourceView* GetPrefilteredArraySRV() const { return m_prefilteredArraySRV.Get(); }
-    ID3D11ShaderResourceView* GetBrdfLutSRV() const { return m_brdfLutSRV.Get(); }
+    // 获取纹理（用于调试和渲染）
+    RHI::ITexture* GetIrradianceArrayTexture() const { return m_irradianceArray.get(); }
+    RHI::ITexture* GetPrefilteredArrayTexture() const { return m_prefilteredArray.get(); }
+    RHI::ITexture* GetBrdfLutTexture() const { return m_brdfLutTexture.get(); }
 
 private:
     // ============================================
@@ -115,8 +111,8 @@ private:
 
     // 将单个 Cubemap 拷贝到 Array 的指定 slice
     bool copyCubemapToArray(
-        ID3D11Texture2D* srcCubemap,
-        ID3D11Texture2D* dstArray,
+        RHI::ITexture* srcCubemap,
+        RHI::ITexture* dstArray,
         int sliceIndex,
         int expectedSize,
         int mipCount
@@ -132,22 +128,22 @@ private:
     // 创建默认纯色 fallback cubemap 并填充到指定 slice
     void fillSliceWithSolidColor(int sliceIndex, float r, float g, float b);
 
+    // 更新常量缓冲区
+    void updateConstantBuffer();
+
     // ============================================
     // Data
     // ============================================
 
-    // TextureCubeArray 资源
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_irradianceArray;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_prefilteredArray;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_irradianceArraySRV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_prefilteredArraySRV;
+    // TextureCubeArray 资源 (RHI)
+    RHI::TexturePtr m_irradianceArray;
+    RHI::TexturePtr m_prefilteredArray;
 
     // BRDF LUT (2D texture, shared across all probes)
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brdfLutSRV;
-    std::unique_ptr<RHI::ITexture> m_rhiBrdfLutTexture;  // Owns the D3D11 resources
+    RHI::TexturePtr m_brdfLutTexture;
 
     // 常量缓冲区
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbProbes;
+    RHI::BufferPtr m_cbProbes;
 
     // Probe 数据
     CB_Probes m_probeData{};

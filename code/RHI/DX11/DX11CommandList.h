@@ -13,6 +13,7 @@ public:
 
     // Render Target Operations
     void SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) override;
+    void SetRenderTargetSlice(ITexture* renderTarget, uint32_t arraySlice, ITexture* depthStencil) override;
     void SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice) override;
     void ClearRenderTarget(ITexture* renderTarget, const float color[4]) override;
     void ClearDepthStencil(ITexture* depthStencil, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) override;
@@ -52,6 +53,9 @@ public:
     // Copy Operations
     void CopyTexture(ITexture* dst, ITexture* src) override;
     void CopyTextureToSlice(ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel, ITexture* src) override;
+    void CopyTextureSubresource(
+        ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel,
+        ITexture* src, uint32_t srcArraySlice, uint32_t srcMipLevel) override;
 
     // Unbind Operations
     void UnbindRenderTargets() override;

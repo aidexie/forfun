@@ -54,20 +54,30 @@ private:
 };
 
 // ============================================
-// DX11 Texture
+// DX11 Texture (supports 2D and 3D textures)
 // ============================================
 class CDX11Texture : public ITexture {
 public:
-    // Owning constructor (takes ownership via ComPtr)
-    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format, uint32_t arraySize = 1)
-        : m_texture(texture), m_rawTexture(nullptr), m_width(width), m_height(height), m_format(format), m_arraySize(arraySize), m_owning(true) {}
+    // Owning constructor for 2D textures (takes ownership via ComPtr)
+    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format,
+                 uint32_t arraySize = 1, uint32_t mipLevels = 1, ID3D11DeviceContext* context = nullptr)
+        : m_texture2D(texture), m_rawTexture(nullptr), m_width(width), m_height(height), m_depth(1),
+          m_format(format), m_arraySize(arraySize), m_mipLevels(mipLevels), m_owning(true), m_is3D(false), m_context(context) {}
 
-    // Non-owning constructor
-    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format, bool owning)
-        : m_rawTexture(owning ? nullptr : texture), m_width(width), m_height(height), m_format(format), m_arraySize(1), m_owning(owning)
+    // Owning constructor for 3D textures
+    CDX11Texture(ID3D11Texture3D* texture, uint32_t width, uint32_t height, uint32_t depth, ETextureFormat format,
+                 uint32_t mipLevels = 1, ID3D11DeviceContext* context = nullptr)
+        : m_texture3D(texture), m_rawTexture(nullptr), m_width(width), m_height(height), m_depth(depth),
+          m_format(format), m_arraySize(1), m_mipLevels(mipLevels), m_owning(true), m_is3D(true), m_context(context) {}
+
+    // Non-owning constructor for 2D textures
+    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format, bool owning,
+                 ID3D11DeviceContext* context = nullptr)
+        : m_rawTexture(owning ? nullptr : texture), m_width(width), m_height(height), m_depth(1),
+          m_format(format), m_arraySize(1), m_mipLevels(1), m_owning(owning), m_is3D(false), m_context(context)
     {
         if (owning) {
-            m_texture = texture;
+            m_texture2D = texture;
         }
     }
 
@@ -75,11 +85,17 @@ public:
 
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
-    uint32_t GetDepth() const override { return 1; }
+    uint32_t GetDepth() const override { return m_depth; }
     uint32_t GetArraySize() const override { return m_arraySize; }
+    uint32_t GetMipLevels() const override { return m_mipLevels; }
     ETextureFormat GetFormat() const override { return m_format; }
 
-    void* GetNativeHandle() override { return m_owning ? m_texture.Get() : m_rawTexture; }
+    void* GetNativeHandle() override {
+        if (m_is3D) {
+            return m_texture3D.Get();
+        }
+        return m_owning ? m_texture2D.Get() : m_rawTexture;
+    }
     void* GetRTV() override { return m_rtv.Get(); }
     void* GetDSV() override { return m_dsv.Get(); }
     void* GetSRV() override { return m_srv.Get(); }
@@ -87,32 +103,88 @@ public:
 
     // Per-slice DSV for texture arrays (CSM shadow mapping)
     void* GetDSVSlice(uint32_t arrayIndex) override {
-        if (arrayIndex >= m_arraySize || arrayIndex >= 4) return nullptr;
+        if (arrayIndex >= m_arraySize || arrayIndex >= MAX_SLICE_VIEWS) return nullptr;
         return m_sliceDSVs[arrayIndex].Get();
+    }
+
+    // Per-slice RTV for texture arrays/cubemaps (face rendering)
+    void* GetRTVSlice(uint32_t arrayIndex) override {
+        if (arrayIndex >= m_arraySize || arrayIndex >= MAX_SLICE_VIEWS) return nullptr;
+        return m_sliceRTVs[arrayIndex].Get();
+    }
+
+    // CPU Access (for Staging textures)
+    MappedTexture Map(uint32_t arraySlice = 0, uint32_t mipLevel = 0) override {
+        MappedTexture result;
+        if (!m_context || !m_isStaging) return result;
+
+        UINT subresource = D3D11CalcSubresource(mipLevel, arraySlice, m_mipLevels);
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        D3D11_MAP mapType = (m_cpuAccess == ECPUAccess::Write) ? D3D11_MAP_WRITE : D3D11_MAP_READ;
+        HRESULT hr = m_context->Map(GetD3D11Resource(), subresource, mapType, 0, &mapped);
+        if (SUCCEEDED(hr)) {
+            result.pData = mapped.pData;
+            result.rowPitch = mapped.RowPitch;
+            result.depthPitch = mapped.DepthPitch;
+        }
+        return result;
+    }
+
+    void Unmap(uint32_t arraySlice = 0, uint32_t mipLevel = 0) override {
+        if (!m_context || !m_isStaging) return;
+        UINT subresource = D3D11CalcSubresource(mipLevel, arraySlice, m_mipLevels);
+        m_context->Unmap(GetD3D11Resource(), subresource);
     }
 
     void SetRTV(ID3D11RenderTargetView* rtv) { m_rtv = rtv; }
     void SetDSV(ID3D11DepthStencilView* dsv) { m_dsv = dsv; }
     void SetSRV(ID3D11ShaderResourceView* srv) { m_srv = srv; }
     void SetUAV(ID3D11UnorderedAccessView* uav) { m_uav = uav; }
-    void SetSliceDSV(uint32_t index, ID3D11DepthStencilView* dsv) { if (index < 4) m_sliceDSVs[index] = dsv; }
+    void SetSliceDSV(uint32_t index, ID3D11DepthStencilView* dsv) { if (index < MAX_SLICE_VIEWS) m_sliceDSVs[index] = dsv; }
+    void SetSliceRTV(uint32_t index, ID3D11RenderTargetView* rtv) { if (index < MAX_SLICE_VIEWS) m_sliceRTVs[index] = rtv; }
     void SetArraySize(uint32_t arraySize) { m_arraySize = arraySize; }
+    void SetMipLevels(uint32_t mipLevels) { m_mipLevels = mipLevels; }
+    void SetIsStaging(bool isStaging) { m_isStaging = isStaging; }
+    void SetContext(ID3D11DeviceContext* context) { m_context = context; }
+    void SetCPUAccess(ECPUAccess cpuAccess) { m_cpuAccess = cpuAccess; }
+    void SetIsCubemapArray(bool isCubemapArray) { m_isCubemapArray = isCubemapArray; }
+    void SetCubeCount(uint32_t cubeCount) { m_cubeCount = cubeCount; }
 
-    ID3D11Texture2D* GetD3D11Texture() { return m_owning ? m_texture.Get() : m_rawTexture; }
+    ID3D11Texture2D* GetD3D11Texture() { return m_owning ? m_texture2D.Get() : m_rawTexture; }
+    ID3D11Texture3D* GetD3D11Texture3D() { return m_texture3D.Get(); }
+    ID3D11Resource* GetD3D11Resource() {
+        if (m_is3D) return m_texture3D.Get();
+        return m_owning ? m_texture2D.Get() : m_rawTexture;
+    }
+    bool Is3D() const { return m_is3D; }
+    bool IsCubemapArray() const { return m_isCubemapArray; }
+    uint32_t GetCubeCount() const { return m_cubeCount; }
 
 private:
-    ComPtr<ID3D11Texture2D> m_texture;      // Owning reference
-    ID3D11Texture2D* m_rawTexture;          // Non-owning raw pointer
+    static const uint32_t MAX_SLICE_VIEWS = 6;  // Max for cubemap faces
+
+    ComPtr<ID3D11Texture2D> m_texture2D;    // Owning reference for 2D textures
+    ComPtr<ID3D11Texture3D> m_texture3D;    // Owning reference for 3D textures
+    ID3D11Texture2D* m_rawTexture;          // Non-owning raw pointer (2D only)
     ComPtr<ID3D11RenderTargetView> m_rtv;
     ComPtr<ID3D11DepthStencilView> m_dsv;
     ComPtr<ID3D11ShaderResourceView> m_srv;
     ComPtr<ID3D11UnorderedAccessView> m_uav;
-    ComPtr<ID3D11DepthStencilView> m_sliceDSVs[4];  // Per-slice DSVs for array textures (max 4 cascades)
+    ComPtr<ID3D11DepthStencilView> m_sliceDSVs[MAX_SLICE_VIEWS];  // Per-slice DSVs for array textures
+    ComPtr<ID3D11RenderTargetView> m_sliceRTVs[MAX_SLICE_VIEWS];  // Per-slice RTVs for cubemap faces
     uint32_t m_width;
     uint32_t m_height;
+    uint32_t m_depth;
     uint32_t m_arraySize;
+    uint32_t m_mipLevels;
+    uint32_t m_cubeCount = 0;       // For cubemap arrays: number of cubes
     ETextureFormat m_format;
-    bool m_owning;  // If true, texture is owned by ComPtr; if false, m_rawTexture is used
+    ECPUAccess m_cpuAccess = ECPUAccess::None;  // CPU access mode for staging textures
+    bool m_owning;      // If true, texture is owned by ComPtr; if false, m_rawTexture is used
+    bool m_is3D;        // If true, m_texture3D is used; if false, m_texture2D/m_rawTexture is used
+    bool m_isStaging = false;       // If true, this is a staging texture for CPU access
+    bool m_isCubemapArray = false;  // If true, this is a cubemap array texture
+    ID3D11DeviceContext* m_context = nullptr;  // Non-owning, for Map/Unmap operations
 };
 
 // ============================================

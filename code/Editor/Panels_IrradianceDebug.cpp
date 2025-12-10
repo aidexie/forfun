@@ -265,8 +265,8 @@ void Panels::DrawIrradianceDebug() {
                 }
                 ImGui::Separator();
 
-                ID3D11ShaderResourceView* brdfLutSRV = CScene::Instance().GetProbeManager().GetBrdfLutSRV();
-                if (brdfLutSRV) {
+                RHI::ITexture* brdfLutTex = CScene::Instance().GetProbeManager().GetBrdfLutTexture();
+                if (brdfLutTex && brdfLutTex->GetSRV()) {
                     ImGui::Text("Resolution: 512 x 512");
                     ImGui::Text("Format: R16G16_FLOAT (RG channels)");
                     ImGui::Text("R channel: Scale (multiply with F0)");
@@ -282,7 +282,7 @@ void Panels::DrawIrradianceDebug() {
                     ImGui::Text("Y-axis: Roughness [0=mirror, 1=rough]");
                     ImGui::Separator();
 
-                    ImGui::Image((void*)brdfLutSRV, ImVec2(lutDisplaySize, lutDisplaySize));
+                    ImGui::Image(brdfLutTex->GetSRV(), ImVec2(lutDisplaySize, lutDisplaySize));
 
                     ImGui::Separator();
                     ImGui::TextWrapped("Expected appearance: Bright in top-left (smooth + perpendicular), "

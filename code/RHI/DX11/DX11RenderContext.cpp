@@ -138,32 +138,110 @@ IBuffer* CDX11RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
 ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void* initialData) {
     CDX11Context& ctx = CDX11Context::Instance();
 
+    // Handle Staging texture specially
+    const bool isStaging = (desc.usage & ETextureUsage::Staging);
+    const bool is3D = desc.depth > 1;
+
+    // 3D Texture path
+    if (is3D) {
+        D3D11_TEXTURE3D_DESC tex3DDesc = {};
+        tex3DDesc.Width = desc.width;
+        tex3DDesc.Height = desc.height;
+        tex3DDesc.Depth = desc.depth;
+        tex3DDesc.MipLevels = desc.mipLevels;
+        tex3DDesc.Format = ToDXGIFormat(desc.format);
+        tex3DDesc.Usage = D3D11_USAGE_DEFAULT;
+        tex3DDesc.BindFlags = ToD3D11BindFlags(desc.usage);
+        tex3DDesc.CPUAccessFlags = 0;
+        tex3DDesc.MiscFlags = 0;
+
+        D3D11_SUBRESOURCE_DATA* pInitData = nullptr;
+        D3D11_SUBRESOURCE_DATA initData = {};
+        if (initialData) {
+            initData.pSysMem = initialData;
+            // Calculate pitch based on format
+            uint32_t bytesPerPixel = 4;  // Default for most formats
+            if (desc.format == ETextureFormat::R32_UINT) bytesPerPixel = 4;
+            else if (desc.format == ETextureFormat::R16G16B16A16_FLOAT) bytesPerPixel = 8;
+            initData.SysMemPitch = desc.width * bytesPerPixel;
+            initData.SysMemSlicePitch = desc.width * desc.height * bytesPerPixel;
+            pInitData = &initData;
+        }
+
+        ID3D11Texture3D* d3dTexture3D = nullptr;
+        HRESULT hr = ctx.GetDevice()->CreateTexture3D(&tex3DDesc, pInitData, &d3dTexture3D);
+        if (FAILED(hr)) {
+            return nullptr;
+        }
+
+        auto texture = new CDX11Texture(d3dTexture3D, desc.width, desc.height, desc.depth,
+                                         desc.format, desc.mipLevels, ctx.GetContext());
+
+        // Create SRV for 3D texture
+        if (desc.usage & ETextureUsage::ShaderResource) {
+            ID3D11ShaderResourceView* srv = nullptr;
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = ToDXGIFormat(desc.format);
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+            srvDesc.Texture3D.MipLevels = desc.mipLevels;
+            srvDesc.Texture3D.MostDetailedMip = 0;
+
+            hr = ctx.GetDevice()->CreateShaderResourceView(d3dTexture3D, &srvDesc, &srv);
+            if (SUCCEEDED(hr)) {
+                texture->SetSRV(srv);
+            }
+        }
+
+        return texture;
+    }
+
+    // 2D Texture path (original code)
+
+    // Calculate array size (cubemap = 6 faces, cubemapArray = arraySize * 6 faces)
+    uint32_t d3dArraySize = desc.arraySize;
+    if (desc.isCubemap) {
+        d3dArraySize = 6;  // Single cubemap = 6 faces
+    } else if (desc.isCubemapArray) {
+        d3dArraySize = desc.arraySize * 6;  // Cubemap array = N cubes * 6 faces
+    }
+
     D3D11_TEXTURE2D_DESC texDesc = {};
     texDesc.Width = desc.width;
     texDesc.Height = desc.height;
     texDesc.MipLevels = desc.mipLevels;
-    texDesc.ArraySize = desc.isCubemap ? 6 * desc.arraySize : desc.arraySize;
+    texDesc.ArraySize = d3dArraySize;
     texDesc.Format = ToDXGIFormat(desc.format);
     texDesc.SampleDesc.Count = desc.sampleCount;
     texDesc.SampleDesc.Quality = 0;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = ToD3D11BindFlags(desc.usage);
-    texDesc.CPUAccessFlags = 0;
-    texDesc.MiscFlags = 0;
 
-    // Check for cubemap usage
-    if (desc.isCubemap) {
-        texDesc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+    if (isStaging) {
+        // Staging texture for CPU access (read or write)
+        texDesc.Usage = D3D11_USAGE_STAGING;
+        texDesc.BindFlags = 0;  // Staging textures cannot have bind flags
+        texDesc.CPUAccessFlags = (desc.cpuAccess == ECPUAccess::Write)
+            ? D3D11_CPU_ACCESS_WRITE
+            : D3D11_CPU_ACCESS_READ;
+        texDesc.MiscFlags = 0;  // Staging textures don't need TEXTURECUBE flag
+    } else {
+        texDesc.Usage = D3D11_USAGE_DEFAULT;
+        texDesc.BindFlags = ToD3D11BindFlags(desc.usage);
+        texDesc.CPUAccessFlags = 0;
+        texDesc.MiscFlags = 0;
+
+        // Check for cubemap usage
+        if (desc.isCubemap || desc.isCubemapArray) {
+            texDesc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+        }
     }
 
-    if (desc.mipLevels == 0) {
+    if (desc.mipLevels == 0 && !isStaging) {
         texDesc.MipLevels = 0;
         texDesc.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
     }
 
     D3D11_SUBRESOURCE_DATA* pInitData = nullptr;
     D3D11_SUBRESOURCE_DATA initData = {};
-    if (initialData) {
+    if (initialData && !isStaging) {
         initData.pSysMem = initialData;
         initData.SysMemPitch = desc.width * 4; // TODO: Calculate based on format
         pInitData = &initData;
@@ -175,12 +253,27 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
         return nullptr;
     }
 
-    auto texture = new CDX11Texture(d3dTexture, desc.width, desc.height, desc.format, desc.arraySize);
+    // Store metadata for the texture wrapper
+    uint32_t actualArraySize = d3dArraySize;
+    auto texture = new CDX11Texture(d3dTexture, desc.width, desc.height, desc.format,
+                                     actualArraySize, desc.mipLevels, ctx.GetContext());
+
+    // Store additional metadata
+    texture->SetIsCubemapArray(desc.isCubemapArray);
+    texture->SetCubeCount(desc.isCubemapArray ? desc.arraySize : (desc.isCubemap ? 1 : 0));
+
+    // Mark staging textures
+    if (isStaging) {
+        texture->SetIsStaging(true);
+        texture->SetCPUAccess(desc.cpuAccess);
+        return texture;  // Staging textures don't need views
+    }
 
     // Get actual mip levels after creation (if 0 was specified, D3D calculates it)
     D3D11_TEXTURE2D_DESC createdDesc;
     d3dTexture->GetDesc(&createdDesc);
     UINT actualMipLevels = createdDesc.MipLevels;
+    texture->SetMipLevels(actualMipLevels);
 
     // Create views based on usage flags
     // Use view format overrides if specified (for TYPELESS textures)
@@ -189,9 +282,13 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
         D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
         D3D11_RENDER_TARGET_VIEW_DESC* pRtvDesc = nullptr;
 
+        DXGI_FORMAT rtvFormat = (desc.rtvFormat != ETextureFormat::Unknown)
+            ? ToDXGIFormat(desc.rtvFormat)
+            : texDesc.Format;
+
         // Use override format if specified
         if (desc.rtvFormat != ETextureFormat::Unknown) {
-            rtvDesc.Format = ToDXGIFormat(desc.rtvFormat);
+            rtvDesc.Format = rtvFormat;
             rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
             rtvDesc.Texture2D.MipSlice = 0;
             pRtvDesc = &rtvDesc;
@@ -199,6 +296,24 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
         hr = ctx.GetDevice()->CreateRenderTargetView(d3dTexture, pRtvDesc, &rtv);
         if (SUCCEEDED(hr)) {
             texture->SetRTV(rtv);
+        }
+
+        // Create per-slice RTVs for cubemaps/array textures (for face rendering)
+        if (desc.isCubemap || desc.arraySize > 1) {
+            for (uint32_t i = 0; i < actualArraySize && i < 6; ++i) {
+                D3D11_RENDER_TARGET_VIEW_DESC sliceRtvDesc = {};
+                sliceRtvDesc.Format = rtvFormat;
+                sliceRtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+                sliceRtvDesc.Texture2DArray.MipSlice = 0;
+                sliceRtvDesc.Texture2DArray.FirstArraySlice = i;
+                sliceRtvDesc.Texture2DArray.ArraySize = 1;
+
+                ID3D11RenderTargetView* sliceRtv = nullptr;
+                hr = ctx.GetDevice()->CreateRenderTargetView(d3dTexture, &sliceRtvDesc, &sliceRtv);
+                if (SUCCEEDED(hr)) {
+                    texture->SetSliceRTV(i, sliceRtv);
+                }
+            }
         }
     }
 
@@ -258,8 +373,15 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
             ? ToDXGIFormat(desc.srvFormat)
             : texDesc.Format;
 
-        if (desc.isCubemap) {
-            // Cubemap
+        if (desc.isCubemapArray) {
+            // Cubemap array
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
+            srvDesc.TextureCubeArray.MipLevels = actualMipLevels;
+            srvDesc.TextureCubeArray.MostDetailedMip = 0;
+            srvDesc.TextureCubeArray.First2DArrayFace = 0;
+            srvDesc.TextureCubeArray.NumCubes = desc.arraySize;
+        } else if (desc.isCubemap) {
+            // Single cubemap
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
             srvDesc.TextureCube.MipLevels = actualMipLevels;
             srvDesc.TextureCube.MostDetailedMip = 0;
