@@ -1,5 +1,6 @@
 #include "PostProcessPass.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include <d3dcompiler.h>
 
 #pragma comment(lib, "d3dcompiler.lib")
@@ -12,7 +13,7 @@ struct FullscreenVertex {
 };
 
 bool CPostProcessPass::Initialize() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     createFullscreenQuad();
@@ -65,7 +66,7 @@ void CPostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
                              ID3D11RenderTargetView* ldrOutput,
                              UINT width, UINT height,
                              float exposure) {
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context || !hdrInput || !ldrOutput) return;
 
     // Update constant buffer with exposure
@@ -115,7 +116,7 @@ void CPostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
 }
 
 void CPostProcessPass::createFullscreenQuad() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     // Fullscreen quad in NDC space (triangle strip)
@@ -135,7 +136,7 @@ void CPostProcessPass::createFullscreenQuad() {
 }
 
 void CPostProcessPass::createShaders() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     // Vertex shader: Pass-through with UV

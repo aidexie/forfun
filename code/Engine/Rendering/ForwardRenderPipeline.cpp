@@ -1,5 +1,6 @@
 #include "ForwardRenderPipeline.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
 #include "Engine/Scene.h"
@@ -12,7 +13,7 @@ using Microsoft::WRL::ComPtr;
 
 bool CForwardRenderPipeline::Initialize()
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     // 初始化各个 Pass
@@ -48,7 +49,7 @@ void CForwardRenderPipeline::Shutdown()
 
 void CForwardRenderPipeline::Render(const RenderContext& ctx)
 {
-    ID3D11DeviceContext* d3dCtx = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* d3dCtx = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!d3dCtx) return;
 
     // ============================================
@@ -218,7 +219,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
 
 void CForwardRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     if (w == 0 || h == 0) return;

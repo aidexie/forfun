@@ -1,5 +1,6 @@
 #include "ShadowPass.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
@@ -26,7 +27,7 @@ struct alignas(16) CB_Object {
 
 bool CShadowPass::Initialize()
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     // Depth-only vertex shader
@@ -112,7 +113,7 @@ bool CShadowPass::Initialize()
         device->CreateDepthStencilView(defaultShadowTex.Get(), &dsvDesc, dsv.GetAddressOf());
 
         // Clear to 1.0 (no shadow)
-        ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+        ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
         context->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 
         // Create SRV for reading
@@ -197,7 +198,7 @@ void CShadowPass::Shutdown()
 
 void CShadowPass::ensureShadowMapArray(UINT size, int cascadeCount)
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     if (size == 0) size = 2048;  // Default
@@ -488,7 +489,7 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
                         const XMMATRIX& cameraView,
                         const XMMATRIX& cameraProj)
 {
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context || !light) return;
 
     // Get CSM parameters from light

@@ -1,5 +1,6 @@
 #include "IBLGenerator.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
 #include <d3dcompiler.h>
@@ -79,7 +80,7 @@ static std::string LoadShaderSource(const std::string& filepath) {
 }
 
 bool CIBLGenerator::Initialize() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     createFullscreenQuad();
@@ -134,7 +135,7 @@ void CIBLGenerator::createFullscreenQuad() {
 }
 
 void CIBLGenerator::createIrradianceShader() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/IrradianceConvolution.ps.hlsl");
@@ -178,7 +179,7 @@ void CIBLGenerator::createIrradianceShader() {
 }
 
 void CIBLGenerator::createPreFilterShader() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/PreFilterEnvironmentMap.ps.hlsl");
@@ -213,8 +214,8 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateIrradianceMap(
     ID3D11ShaderResourceView* envMap,
     int outputSize)
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     if (!device || !context || !envMap) return nullptr;
 
@@ -300,8 +301,8 @@ bool CIBLGenerator::SaveIrradianceMapToDDS(const std::string& filepath) {
         return false;
     }
 
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     // Get texture description
     D3D11_TEXTURE2D_DESC desc;
@@ -429,8 +430,8 @@ bool CIBLGenerator::SaveIrradianceMapToHDR(const std::string& filepath) {
         return false;
     }
 
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     // Get texture description
     D3D11_TEXTURE2D_DESC desc;
@@ -547,7 +548,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GetIrradianceFaceSRV(int faceIndex) {
 
     // Create face SRV on-demand
     if (!m_debugFaceSRVs[faceIndex]) {
-        ID3D11Device* device = CDX11Context::Instance().GetDevice();
+        ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
         D3D11_TEXTURE2D_DESC desc;
         m_irradianceTexture->GetDesc(&desc);
@@ -572,8 +573,8 @@ ID3D11ShaderResourceView* CIBLGenerator::GeneratePreFilteredMap(
     int outputSize,
     int numMipLevels)
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     if (!device || !context || !envMap) return nullptr;
 
@@ -732,7 +733,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GetPreFilteredFaceSRV(int faceIndex, in
 
     // Create face SRV on-demand
     if (!m_debugPreFilteredFaceSRVs[srvIndex]) {
-        ID3D11Device* device = CDX11Context::Instance().GetDevice();
+        ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
         D3D11_TEXTURE2D_DESC desc;
         m_preFilteredTexture->GetDesc(&desc);
@@ -753,7 +754,7 @@ ID3D11ShaderResourceView* CIBLGenerator::GetPreFilteredFaceSRV(int faceIndex, in
 }
 
 void CIBLGenerator::createBrdfLutShader() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/BrdfLut.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/BrdfLut.ps.hlsl");
@@ -785,8 +786,8 @@ void CIBLGenerator::createBrdfLutShader() {
 }
 
 ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     if (!device || !context) return nullptr;
 
@@ -868,7 +869,8 @@ bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
     m_irradianceTexture.Attach(texture);
 
     // Create SRV
-    auto& ctx = CDX11Context::Instance();
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
     D3D11_TEXTURE2D_DESC texDesc;
     m_irradianceTexture->GetDesc(&texDesc);
 
@@ -878,7 +880,7 @@ bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
     srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
     srvDesc.TextureCube.MostDetailedMip = 0;
 
-    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc, &m_irradianceSRV);
+    HRESULT hr = device->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc, &m_irradianceSRV);
     if (FAILED(hr)) {
         CFFLog::Error("IBLGenerator: Failed to create irradiance SRV");
         return false;
@@ -898,7 +900,8 @@ bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
     m_preFilteredTexture.Attach(texture);
 
     // Create SRV
-    auto& ctx = CDX11Context::Instance();
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
     D3D11_TEXTURE2D_DESC texDesc;
     m_preFilteredTexture->GetDesc(&texDesc);
 
@@ -908,7 +911,7 @@ bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
     srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
     srvDesc.TextureCube.MostDetailedMip = 0;
 
-    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, &m_preFilteredSRV);
+    HRESULT hr = device->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, &m_preFilteredSRV);
     if (FAILED(hr)) {
         CFFLog::Error("IBLGenerator: Failed to create pre-filtered SRV");
         return false;
@@ -930,7 +933,8 @@ bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
     m_brdfLutTexture.Attach(texture);
 
     // Create SRV
-    auto& ctx = CDX11Context::Instance();
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
     D3D11_TEXTURE2D_DESC texDesc;
     m_brdfLutTexture->GetDesc(&texDesc);
 
@@ -940,7 +944,7 @@ bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
     srvDesc.Texture2D.MipLevels = texDesc.MipLevels;
     srvDesc.Texture2D.MostDetailedMip = 0;
 
-    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, &m_brdfLutSRV);
+    HRESULT hr = device->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, &m_brdfLutSRV);
     if (FAILED(hr)) {
         CFFLog::Error("IBLGenerator: Failed to create BRDF LUT SRV");
         return false;

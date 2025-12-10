@@ -48,6 +48,7 @@ public:
 
     // Advanced
     void* GetNativeDevice() override;
+    void* GetNativeContext() override;
 
 private:
     std::unique_ptr<CDX11CommandList> m_commandList;

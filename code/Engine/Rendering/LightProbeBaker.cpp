@@ -2,7 +2,8 @@
 #include "CubemapRenderer.h"
 #include "ForwardRenderPipeline.h"
 #include "RenderPipeline.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/SphericalHarmonics.h"
 #include "Core/RenderDocCapture.h"
@@ -172,7 +173,7 @@ bool CLightProbeBaker::projectCubemapToSH(
     ID3D11Texture2D* cubemap,
     XMFLOAT3 outCoeffs[9])
 {
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     // 拷贝 cubemap 到 staging texture（用于 CPU 读取）
     context->CopyResource(m_stagingTexture.Get(), cubemap);
@@ -292,7 +293,7 @@ bool CLightProbeBaker::projectCubemapToSH(
 
 bool CLightProbeBaker::createCubemapRenderTarget()
 {
-    auto* device = CDX11Context::Instance().GetDevice();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     // 创建 Cubemap render target (R16G16B16A16_FLOAT, 6 faces)
     D3D11_TEXTURE2D_DESC texDesc{};

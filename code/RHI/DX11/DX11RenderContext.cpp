@@ -492,5 +492,9 @@ void* CDX11RenderContext::GetNativeDevice() {
     return CDX11Context::Instance().GetDevice();
 }
 
+void* CDX11RenderContext::GetNativeContext() {
+    return CDX11Context::Instance().GetContext();
+}
+
 } // namespace DX11
 } // namespace RHI

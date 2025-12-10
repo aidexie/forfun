@@ -8,7 +8,11 @@
       "Bash(powershell -Command:*)",
       "WebFetch(domain:docs.unity3d.com)",
       "Bash(ls:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(cmake --build:*)",
+      "Bash(git checkout:*)",
+      "Bash(grep:*)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []

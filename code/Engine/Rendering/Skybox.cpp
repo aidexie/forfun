@@ -1,5 +1,6 @@
 #include "Skybox.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/Loader/HdrLoader.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
@@ -34,7 +35,7 @@ struct CB_SkyboxTransform {
 };
 
 bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     // Convert equirectangular HDR to cubemap
@@ -82,7 +83,7 @@ bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
 
 bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     m_envPathKTX2 = ktx2Path;
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     // Load cubemap from KTX2
@@ -181,7 +182,7 @@ void CSkybox::Shutdown() {
 }
 
 void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context || !m_envCubemap) return;
 
     // Remove translation from view matrix
@@ -222,8 +223,8 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
 }
 
 void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!device || !context) return;
 
     // Load HDR file
@@ -451,7 +452,7 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
 }
 
 void CSkybox::createCubeMesh() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     // Cube vertices (positions only)
@@ -499,7 +500,7 @@ void CSkybox::createCubeMesh() {
 }
 
 void CSkybox::createShaders() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     // Load shader source from files (paths relative to E:\forfun\assets working directory)

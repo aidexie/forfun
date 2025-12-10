@@ -1,5 +1,6 @@
 #include "ClusteredLightingPass.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"  // FFPath namespace
 #include "Engine/Scene.h"
@@ -67,7 +68,7 @@ void CClusteredLightingPass::Resize(uint32_t width, uint32_t height) {
                  m_totalClusters);
 
     // Recreate cluster AABB and data buffers with new size
-    auto device = CDX11Context::Instance().GetDevice();
+    auto device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     CreateBuffers(device);
     m_clusterGridDirty = true;  // Force rebuild after resize
 }
@@ -491,7 +492,7 @@ void CClusteredLightingPass::CullLights(ID3D11DeviceContext* context,
     cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
     ComPtr<ID3D11Buffer> lightCullingCB;
-    hr = CDX11Context::Instance().GetDevice()->CreateBuffer(&cbDesc, nullptr, lightCullingCB.ReleaseAndGetAddressOf());
+    hr = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice())->CreateBuffer(&cbDesc, nullptr, lightCullingCB.ReleaseAndGetAddressOf());
     if (SUCCEEDED(hr)) {
         hr = context->Map(lightCullingCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
         if (SUCCEEDED(hr)) {

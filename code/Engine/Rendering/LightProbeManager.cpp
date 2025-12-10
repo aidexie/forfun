@@ -3,7 +3,8 @@
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/LightProbe.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include <algorithm>
 #include <cmath>
@@ -200,7 +201,7 @@ void CLightProbeManager::BlendProbesForPosition(
 
 bool CLightProbeManager::createStructuredBuffer()
 {
-    auto* device = CDX11Context::Instance().GetDevice();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     // 创建 StructuredBuffer（最大容量）
     D3D11_BUFFER_DESC bufferDesc{};
@@ -235,7 +236,7 @@ bool CLightProbeManager::createStructuredBuffer()
 
 bool CLightProbeManager::createConstantBuffer()
 {
-    auto* device = CDX11Context::Instance().GetDevice();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     D3D11_BUFFER_DESC cbDesc{};
     cbDesc.Usage = D3D11_USAGE_DYNAMIC;
@@ -256,7 +257,7 @@ void CLightProbeManager::updateProbeBuffer()
 {
     if (m_probeData.empty()) return;
 
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     HRESULT hr = context->Map(m_probeBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
@@ -271,7 +272,7 @@ void CLightProbeManager::updateProbeBuffer()
 
 void CLightProbeManager::updateConstantBuffer()
 {
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
     HRESULT hr = context->Map(m_cbParams.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);

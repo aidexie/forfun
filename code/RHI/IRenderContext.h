@@ -106,6 +106,11 @@ public:
     // DX11: returns ID3D11Device*
     // DX12: returns ID3D12Device*
     virtual void* GetNativeDevice() = 0;
+    
+    // Get native device context handle (for immediate context)
+    // DX11: returns ID3D11DeviceContext*
+    // DX12: returns ID3D12GraphicsCommandList* (of current command list)
+    virtual void* GetNativeContext() = 0;
 };
 
 } // namespace RHI

@@ -1,7 +1,8 @@
 #include "CubemapRenderer.h"
 #include "RenderPipeline.h"
 #include "ShowFlags.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Engine/Camera.h"
 #include "Engine/Scene.h"
@@ -61,8 +62,8 @@ void CCubemapRenderer::RenderToCubemap(
     ID3D11Texture2D* outputCubemap,
     ID3D11Texture2D* depthBuffer)
 {
-    auto* device = CDX11Context::Instance().GetDevice();
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     // 为每个 face 创建 RTV
     ComPtr<ID3D11RenderTargetView> faceRTVs[6];
@@ -115,7 +116,7 @@ void CCubemapRenderer::RenderCubemapFace(
     ID3D11RenderTargetView* faceRTV,
     ID3D11DepthStencilView* dsv)
 {
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
 
     // 设置 viewport
     D3D11_VIEWPORT viewport{};

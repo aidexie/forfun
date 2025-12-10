@@ -5,7 +5,8 @@
 #include "Engine/Components/ReflectionProbe.h"
 #include "Core/ReflectionProbeAsset.h"
 #include "Core/Loader/KTXLoader.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <DirectXPackedVector.h>
@@ -42,7 +43,7 @@ bool CReflectionProbeManager::Initialize()
     m_probeData.probeCount = 1;
 
     // 更新常量缓冲区
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
 
     m_initialized = true;
@@ -129,7 +130,7 @@ void CReflectionProbeManager::LoadLocalProbesFromScene(CScene& scene)
     // 更新常量缓冲区
     m_probeData.probeCount = m_probeCount;
 
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
 
     CFFLog::Info("[ReflectionProbeManager] Total probes loaded: %d", m_probeCount);
@@ -203,7 +204,7 @@ bool CReflectionProbeManager::LoadGlobalProbe(const std::string& irrPath, const 
     m_probeData.probeCount = m_probeCount;
 
     // Update constant buffer
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     context->UpdateSubresource(m_cbProbes.Get(), 0, nullptr, &m_probeData, 0, 0);
 
     CFFLog::Info("[ReflectionProbeManager] Global probe (index 0) reloaded");
@@ -236,7 +237,7 @@ bool CReflectionProbeManager::LoadBrdfLut(const std::string& brdfLutPath)
 
 bool CReflectionProbeManager::createCubeArrays()
 {
-    auto* device = CDX11Context::Instance().GetDevice();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     // ============================================
@@ -320,7 +321,7 @@ bool CReflectionProbeManager::createCubeArrays()
 
 bool CReflectionProbeManager::createConstantBuffer()
 {
-    auto* device = CDX11Context::Instance().GetDevice();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     D3D11_BUFFER_DESC desc = {};
@@ -344,7 +345,7 @@ bool CReflectionProbeManager::copyCubemapToArray(
     int expectedSize,
     int mipCount)
 {
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context || !srcCubemap || !dstArray) return false;
 
     // 验证源纹理大小
@@ -399,8 +400,8 @@ bool CReflectionProbeManager::loadAndCopyToArray(
 
 void CReflectionProbeManager::fillSliceWithSolidColor(int sliceIndex, float r, float g, float b)
 {
-    auto* device = CDX11Context::Instance().GetDevice();
-    auto* context = CDX11Context::Instance().GetContext();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    auto* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!device || !context) return;
 
     // ============================================

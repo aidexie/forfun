@@ -2,7 +2,8 @@
 #include "ShadowPass.h"
 #include "ShowFlags.h"
 #include "ReflectionProbeManager.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
 #include "Core/GpuMeshResource.h"
@@ -425,7 +426,7 @@ void renderTransparentPass(
 
 bool CSceneRenderer::Initialize()
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
     createPipeline();
@@ -461,7 +462,7 @@ void CSceneRenderer::Render(
     float dt,
     const CShadowPass::Output* shadowData)
 {
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context) return;
 
     // Setup viewport
@@ -549,7 +550,7 @@ void CSceneRenderer::Render(
 
 void CSceneRenderer::createPipeline()
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     std::string vsSource = LoadShaderSource("../source/code/Shader/MainPass.vs.hlsl");
@@ -616,7 +617,7 @@ void CSceneRenderer::createPipeline()
 
 void CSceneRenderer::createRasterStates()
 {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     D3D11_RASTERIZER_DESC rd{};

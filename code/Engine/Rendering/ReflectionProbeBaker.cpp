@@ -3,7 +3,8 @@
 #include "ForwardRenderPipeline.h"
 #include "IBLGenerator.h"
 #include "ShowFlags.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include "Core/ReflectionProbeAsset.h"
@@ -139,7 +140,7 @@ bool CReflectionProbeBaker::BakeProbe(
 
 bool CReflectionProbeBaker::createCubemapRenderTarget(int resolution)
 {
-    auto device = CDX11Context::Instance().GetDevice();
+    auto device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     // Release old resources if they exist
     m_cubemapRT.Reset();
@@ -222,7 +223,7 @@ void CReflectionProbeBaker::generateAndSaveIBL(
     ID3D11Texture2D* envCubemap,
     const std::string& basePath)
 {
-    auto device = CDX11Context::Instance().GetDevice();
+    auto device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     // Create SRV for the environment cubemap
     ComPtr<ID3D11ShaderResourceView> envSRV;

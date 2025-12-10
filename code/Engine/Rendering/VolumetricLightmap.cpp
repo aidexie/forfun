@@ -4,7 +4,8 @@
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <DirectXPackedVector.h>
@@ -865,7 +866,7 @@ bool CVolumetricLightmap::CreateGPUResources()
         return false;
     }
 
-    auto* device = CDX11Context::Instance().GetDevice();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) {
         CFFLog::Error("[VolumetricLightmap] No D3D11 device!");
         return false;

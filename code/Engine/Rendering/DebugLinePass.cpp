@@ -1,6 +1,7 @@
 // Engine/Rendering/DebugLinePass.cpp
 #include "DebugLinePass.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
+#include "RHI/IRenderContext.h"
 #include "Core/FFLog.h"
 #include <d3dcompiler.h>
 #include <fstream>
@@ -45,7 +46,7 @@ void CDebugLinePass::Shutdown() {
 }
 
 void CDebugLinePass::CreateShaders() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     // Load shader source files
@@ -112,7 +113,7 @@ void CDebugLinePass::CreateShaders() {
 }
 
 void CDebugLinePass::CreateBuffers() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return;
 
     // Create dynamic vertex buffer
@@ -189,7 +190,7 @@ void CDebugLinePass::AddAABB(XMFLOAT3 localMin, XMFLOAT3 localMax,
 void CDebugLinePass::UpdateVertexBuffer() {
     if (m_dynamicLines.empty()) return;
 
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context) return;
 
     // Map and upload vertex data
@@ -206,7 +207,7 @@ void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
                             UINT viewportWidth, UINT viewportHeight) {
     if (!m_initialized || m_dynamicLines.empty()) return;
 
-    ID3D11DeviceContext* context = CDX11Context::Instance().GetContext();
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!context) return;
 
     // Update vertex buffer
