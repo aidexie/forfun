@@ -9,6 +9,7 @@
 #include "Editor/PickingUtils.h"
 #include <DirectXMath.h>
 #include <sstream>
+#include <cstdint>
 
 using namespace DirectX;
 
@@ -92,8 +93,8 @@ public:
             XMMATRIX projMatrix = editorCam.GetProjectionMatrix();
 
             // Get viewport size from MainPass
-            UINT vpWidth = ctx.pipeline->GetOffscreenWidth();
-            UINT vpHeight = ctx.pipeline->GetOffscreenHeight();
+            uint32_t vpWidth = ctx.pipeline->GetOffscreenWidth();
+            uint32_t vpHeight = ctx.pipeline->GetOffscreenHeight();
             float screenX = vpWidth / 2.0f;
             float screenY = vpHeight / 2.0f;
 

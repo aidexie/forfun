@@ -1,6 +1,7 @@
 #pragma once
 #include <DirectXMath.h>
 #include <memory>
+#include <cstdint>
 #include "ClusteredLightingPass.h"
 #include "ShadowPass.h"
 #include "RHI/RHIResources.h"
@@ -52,7 +53,7 @@ public:
         CScene& scene,
         RHI::ITexture* hdrRT,
         RHI::ITexture* depthRT,
-        UINT w, UINT h,
+        uint32_t w, uint32_t h,
         float dt,
         const CShadowPass::Output* shadowData
     );

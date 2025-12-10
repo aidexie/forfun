@@ -1,20 +1,14 @@
 #pragma once
+#include "RHI/RHIPointers.h"
 #include <DirectXMath.h>
-#include <wrl/client.h>
 #include <vector>
 #include <cstdint>
 
-// Forward declarations - D3D11 types hidden from public interface
-struct ID3D11Device;
-struct ID3D11DeviceContext;
-struct ID3D11Buffer;
-struct ID3D11ShaderResourceView;
-struct ID3D11UnorderedAccessView;
-struct ID3D11ComputeShader;
-struct ID3D11VertexShader;
-struct ID3D11PixelShader;
-
+// Forward declarations
 class CScene;
+namespace RHI {
+    class ICommandList;
+}
 
 // Clustered Shading parameters
 // Based on configuration: 32×32 tiles, 16 depth slices
@@ -72,25 +66,25 @@ public:
     CClusteredLightingPass();
     ~CClusteredLightingPass();
 
-    // Public interface uses void* to avoid D3D11 header dependency
-    void Initialize(void* device);
+    // Initialize with RHI (no longer needs device parameter)
+    void Initialize();
     void Resize(uint32_t width, uint32_t height);
 
     // Build cluster grid (view-space AABBs for all clusters)
     // Call once per frame when camera changes
-    void BuildClusterGrid(void* context,
+    void BuildClusterGrid(RHI::ICommandList* cmdList,
                           const DirectX::XMMATRIX& projection,
                           float nearZ, float farZ);
 
     // Cull lights into clusters
     // Call once per frame after gathering point lights from scene
-    void CullLights(void* context,
+    void CullLights(RHI::ICommandList* cmdList,
                     CScene* scene,
                     const DirectX::XMMATRIX& view);
 
     // Bind cluster data to MainPass pixel shader
     // Binds: g_ClusterData (t10), g_CompactLightList (t11), g_PointLights (t12)
-    void BindToMainPass(void* context);
+    void BindToMainPass(RHI::ICommandList* cmdList);
 
     // Debug visualization
     enum class EDebugMode {
@@ -99,7 +93,7 @@ public:
         ClusterAABB          // Show cluster bounding boxes
     };
     void SetDebugMode(EDebugMode mode) { m_debugMode = mode; }
-    void RenderDebug(void* context);
+    void RenderDebug(RHI::ICommandList* cmdList);
 
     // Get current cluster grid dimensions
     uint32_t GetNumClustersX() const { return m_numClustersX; }
@@ -107,9 +101,9 @@ public:
     uint32_t GetNumClustersZ() const { return ClusteredConfig::DEPTH_SLICES; }
 
 private:
-    void CreateBuffers(ID3D11Device* device);
-    void CreateShaders(ID3D11Device* device);
-    void CreateDebugShaders(ID3D11Device* device);
+    void CreateBuffers();
+    void CreateShaders();
+    void CreateDebugShaders();
 
     // Screen dimensions
     uint32_t m_screenWidth = 0;
@@ -120,41 +114,31 @@ private:
     uint32_t m_numClustersY = 0;  // ceil(height / TILE_SIZE)
     uint32_t m_totalClusters = 0; // X * Y * Z
 
-    // GPU Buffers
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_clusterAABBBuffer;       // SClusterAABB[totalClusters]
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_clusterDataBuffer;       // SClusterData[totalClusters]
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_compactLightListBuffer;  // uint[MAX_TOTAL_LIGHT_REFS]
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_pointLightBuffer;        // SGpuPointLight[maxLights]
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_globalCounterBuffer;     // uint (atomic counter for light list)
+    // GPU Buffers (RHI)
+    RHI::BufferPtr m_clusterAABBBuffer;       // SClusterAABB[totalClusters]
+    RHI::BufferPtr m_clusterDataBuffer;       // SClusterData[totalClusters]
+    RHI::BufferPtr m_compactLightListBuffer;  // uint[MAX_TOTAL_LIGHT_REFS]
+    RHI::BufferPtr m_pointLightBuffer;        // SGpuPointLight[maxLights]
+    RHI::BufferPtr m_globalCounterBuffer;     // uint (atomic counter for light list)
 
-    // Shader Resource Views (for pixel shader)
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_clusterDataSRV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_compactLightListSRV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_pointLightSRV;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_clusterAABBSRV;
+    // Compute Shaders (RHI)
+    RHI::ShaderPtr m_buildClusterGridCS;
+    RHI::ShaderPtr m_cullLightsCS;
 
-    // Unordered Access Views (for compute shader)
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_clusterAABBUAV;
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_clusterDataUAV;
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_compactLightListUAV;
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_globalCounterUAV;
-
-    // Compute Shaders
-    Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_buildClusterGridCS;
-    Microsoft::WRL::ComPtr<ID3D11ComputeShader> m_cullLightsCS;
-
-    // Constant Buffers
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_clusterCB;  // Projection params, near/far
+    // Constant Buffers (RHI)
+    RHI::BufferPtr m_clusterCB;      // Projection params, near/far
+    RHI::BufferPtr m_lightCullingCB; // Light culling params
 
     // Debug visualization
     EDebugMode m_debugMode = EDebugMode::None;
-    Microsoft::WRL::ComPtr<ID3D11VertexShader> m_debugVS;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_debugHeatmapPS;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_debugAABBPS;
+    RHI::ShaderPtr m_debugVS;
+    RHI::ShaderPtr m_debugHeatmapPS;
+    RHI::ShaderPtr m_debugAABBPS;
 
     // Cached projection parameters for dirty checking
     float m_cachedNearZ = 0.0f;
     float m_cachedFarZ = 0.0f;
     float m_cachedFovY = 0.0f;  // Field of view (from projection matrix)
     bool m_clusterGridDirty = true;  // Force rebuild on first frame
+    bool m_initialized = false;
 };

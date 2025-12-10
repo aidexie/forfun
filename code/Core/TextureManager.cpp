@@ -5,12 +5,8 @@
 #include "DebugPaths.h"
 #include "PathManager.h"
 #include "Loader/TextureLoader.h"
-#include <d3d11.h>
-#include <wrl/client.h>
 #include <codecvt>
 #include <locale>
-
-using Microsoft::WRL::ComPtr;
 
 CTextureManager& CTextureManager::Instance() {
     static CTextureManager instance;
@@ -87,49 +83,26 @@ void CTextureManager::CreateDefaultTextures() {
         return;
     }
 
-    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
-    if (!device) {
-        CFFLog::Error("Failed to create default textures: D3D11 device not available");
-        return;
-    }
+    // Lambda to create solid color 1x1 texture using RHI
+    auto MakeSolidTexture = [&](uint8_t r, uint8_t g, uint8_t b, uint8_t a, RHI::ETextureFormat fmt) -> RHI::ITexture* {
+        // Pack RGBA into uint32
+        uint32_t pixel = (uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24));
 
-    // Lambda to create solid color 1x1 texture
-    auto MakeSolidTexture = [&](uint8_t r, uint8_t g, uint8_t b, uint8_t a, DXGI_FORMAT fmt, RHI::ETextureFormat rhiFmt) -> RHI::ITexture* {
-        D3D11_TEXTURE2D_DESC td{};
-        td.Width = 1;
-        td.Height = 1;
-        td.MipLevels = 1;
-        td.ArraySize = 1;
-        td.Format = fmt;
-        td.SampleDesc.Count = 1;
-        td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        RHI::TextureDesc desc;
+        desc.width = 1;
+        desc.height = 1;
+        desc.mipLevels = 1;
+        desc.arraySize = 1;
+        desc.format = fmt;
+        desc.usage = RHI::ETextureUsage::ShaderResource;
+        desc.debugName = "DefaultTexture";
 
-        uint32_t px = (uint32_t(r) | (uint32_t(g) << 8) | (uint32_t(b) << 16) | (uint32_t(a) << 24));
-        D3D11_SUBRESOURCE_DATA srd{ &px, 4, 0 };
-
-        ComPtr<ID3D11Texture2D> tex;
-        device->CreateTexture2D(&td, &srd, tex.GetAddressOf());
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-        sd.Format = fmt;
-        sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        sd.Texture2D.MipLevels = 1;
-
-        ComPtr<ID3D11ShaderResourceView> srv;
-        device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
-
-        // Wrap into RHI texture - transfer ownership
-        ID3D11Texture2D* rawTex = tex.Detach();
-        ID3D11ShaderResourceView* rawSRV = srv.Detach();
-        return rhiCtx->WrapNativeTexture(rawTex, rawSRV, 1, 1, rhiFmt);
+        return rhiCtx->CreateTexture(desc, &pixel);
     };
 
-    m_defaultWhite.reset(MakeSolidTexture(255, 255, 255, 255,
-        DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, RHI::ETextureFormat::R8G8B8A8_UNORM_SRGB));
-    m_defaultNormal.reset(MakeSolidTexture(128, 128, 255, 255,
-        DXGI_FORMAT_R8G8B8A8_UNORM, RHI::ETextureFormat::R8G8B8A8_UNORM));
-    m_defaultBlack.reset(MakeSolidTexture(0, 0, 0, 255,
-        DXGI_FORMAT_R8G8B8A8_UNORM, RHI::ETextureFormat::R8G8B8A8_UNORM));
+    m_defaultWhite.reset(MakeSolidTexture(255, 255, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM_SRGB));
+    m_defaultNormal.reset(MakeSolidTexture(128, 128, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
+    m_defaultBlack.reset(MakeSolidTexture(0, 0, 0, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
 
     CFFLog::Info("Created default textures (white, normal, black)");
 }
@@ -139,40 +112,10 @@ std::string CTextureManager::ResolveFullPath(const std::string& relativePath) co
 }
 
 RHI::ITexture* CTextureManager::LoadTextureFromFile(const std::string& fullPath, bool srgb) {
-    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
-    if (!rhiCtx) {
-        return nullptr;
-    }
-
-    void* device = rhiCtx->GetNativeDevice();
-    if (!device) {
-        return nullptr;
-    }
-
-    // Convert to wide string
+    // Convert to wide string for WIC loader
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
     std::wstring wpath = converter.from_bytes(fullPath);
 
-    // Use existing WIC loader - returns SRV via void**
-    void* srvPtr = nullptr;
-    if (!LoadTextureWIC(device, wpath, &srvPtr, srgb)) {
-        return nullptr;
-    }
-
-    // Get texture info from SRV
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(srvPtr);
-    Microsoft::WRL::ComPtr<ID3D11Resource> resource;
-    srv->GetResource(resource.GetAddressOf());
-
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
-    resource.As(&texture);
-
-    D3D11_TEXTURE2D_DESC texDesc;
-    texture->GetDesc(&texDesc);
-
-    RHI::ETextureFormat rhiFmt = srgb ? RHI::ETextureFormat::R8G8B8A8_UNORM_SRGB : RHI::ETextureFormat::R8G8B8A8_UNORM;
-
-    // Wrap into RHI texture - transfer ownership
-    ID3D11Texture2D* rawTex = texture.Detach();
-    return rhiCtx->WrapNativeTexture(rawTex, srv, texDesc.Width, texDesc.Height, rhiFmt);
+    // Use RHI-based WIC loader - returns RHI::ITexture* directly
+    return LoadTextureWIC(wpath, srgb);
 }

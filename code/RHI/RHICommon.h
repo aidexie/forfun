@@ -70,6 +70,23 @@ inline bool operator&(ETextureUsage a, ETextureUsage b) {
 }
 
 // ============================================
+// Texture Misc Flags
+// ============================================
+enum class ETextureMiscFlags : uint32_t {
+    None = 0,
+    GenerateMips = 1 << 0,  // Allow mipmap generation via GenerateMips()
+    TextureCube = 1 << 1    // Texture is a cube map (legacy, prefer TextureDesc::isCubemap)
+};
+
+inline ETextureMiscFlags operator|(ETextureMiscFlags a, ETextureMiscFlags b) {
+    return static_cast<ETextureMiscFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline bool operator&(ETextureMiscFlags a, ETextureMiscFlags b) {
+    return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != 0;
+}
+
+// ============================================
 // CPU Access
 // ============================================
 enum class ECPUAccess {

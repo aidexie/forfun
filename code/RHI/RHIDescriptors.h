@@ -35,6 +35,7 @@ struct TextureDesc {
     ETextureFormat format = ETextureFormat::Unknown;
     ETextureUsage usage = ETextureUsage::ShaderResource;
     ECPUAccess cpuAccess = ECPUAccess::None;  // For staging textures: Read or Write
+    ETextureMiscFlags miscFlags = ETextureMiscFlags::None;  // Misc flags (GenerateMips, etc.)
     uint32_t sampleCount = 1;   // For MSAA
     bool isCubemap = false;     // If true, creates a single cubemap (6 faces)
     bool isCubemapArray = false; // If true, creates a cubemap array (arraySize cubes, each with 6 faces)

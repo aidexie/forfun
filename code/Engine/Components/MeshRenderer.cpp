@@ -3,8 +3,6 @@
 #include "Core/MeshResourceManager.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/FFLog.h"
-#include <d3d11.h>
-#include <iostream>
 
 bool SMeshRenderer::EnsureUploaded() {
     if (!meshes.empty()) return true;

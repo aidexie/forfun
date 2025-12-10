@@ -7,8 +7,6 @@
 #include "Core/Loader/HdrLoader.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
-#include <d3d11.h>  // Still needed for legacy convertEquirectToCubemapLegacy
-#include <wrl/client.h>
 #include <vector>
 #include <fstream>
 #include <sstream>
@@ -16,7 +14,6 @@
 
 using namespace DirectX;
 using namespace RHI;
-using Microsoft::WRL::ComPtr;
 
 // Helper function to load shader source from file
 static std::string LoadShaderSource(const std::string& filepath) {
@@ -41,7 +38,7 @@ struct CB_SkyboxTransform {
 bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
     if (m_initialized) return true;
 
-    // Convert equirectangular HDR to cubemap (legacy D3D11 path)
+    // Convert equirectangular HDR to cubemap using RHI
     convertEquirectToCubemapLegacy(hdrPath, cubemapSize);
     if (!m_envTexture) return false;
 
@@ -304,31 +301,20 @@ void CSkybox::createSampler() {
 }
 
 // ============================================
-// Legacy D3D11 Path: HDR to Cubemap Conversion
-// This will be migrated in Phase 6 when per-slice RTV support is added
+// HDR to Cubemap Conversion using RHI
 // ============================================
 
 void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int size) {
-    ID3D11Device* device = static_cast<ID3D11Device*>(CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!device || !context) return;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ICommandList* cmdList = ctx->GetCommandList();
+    if (!ctx || !cmdList) return;
 
     // Load HDR file
     SHdrImage hdrImage;
     if (!LoadHdrFile(hdrPath, hdrImage)) {
+        CFFLog::Error("Skybox: Failed to load HDR file: %s", hdrPath.c_str());
         return;
     }
-
-    // Create equirectangular texture
-    D3D11_TEXTURE2D_DESC texDesc{};
-    texDesc.Width = hdrImage.width;
-    texDesc.Height = hdrImage.height;
-    texDesc.MipLevels = 1;
-    texDesc.ArraySize = 1;
-    texDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-    texDesc.SampleDesc.Count = 1;
-    texDesc.Usage = D3D11_USAGE_DEFAULT;
-    texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
     // Convert RGB to RGBA
     std::vector<float> rgba(hdrImage.width * hdrImage.height * 4);
@@ -339,45 +325,39 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         rgba[i * 4 + 3] = 1.0f;
     }
 
-    D3D11_SUBRESOURCE_DATA initData{};
-    initData.pSysMem = rgba.data();
-    initData.SysMemPitch = hdrImage.width * sizeof(float) * 4;
+    // Create equirectangular texture
+    TextureDesc equirectDesc;
+    equirectDesc.width = hdrImage.width;
+    equirectDesc.height = hdrImage.height;
+    equirectDesc.mipLevels = 1;
+    equirectDesc.format = ETextureFormat::R32G32B32A32_FLOAT;
+    equirectDesc.usage = ETextureUsage::ShaderResource;
+    equirectDesc.debugName = "Skybox_EquirectHDR";
 
-    ComPtr<ID3D11Texture2D> equirectTexture;
-    device->CreateTexture2D(&texDesc, &initData, equirectTexture.GetAddressOf());
+    TexturePtr equirectTexture(ctx->CreateTexture(equirectDesc, rgba.data()));
+    if (!equirectTexture) {
+        CFFLog::Error("Skybox: Failed to create equirectangular texture");
+        return;
+    }
 
-    ComPtr<ID3D11ShaderResourceView> equirectSRV;
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = 1;
-    device->CreateShaderResourceView(equirectTexture.Get(), &srvDesc, equirectSRV.GetAddressOf());
+    // Create cubemap texture with mipmaps (mipLevels = 0 for auto-generate)
+    TextureDesc cubeDesc;
+    cubeDesc.width = size;
+    cubeDesc.height = size;
+    cubeDesc.mipLevels = 0;  // Auto-generate full mip chain
+    cubeDesc.arraySize = 1;
+    cubeDesc.format = ETextureFormat::R16G16B16A16_FLOAT;
+    cubeDesc.usage = ETextureUsage::RenderTarget | ETextureUsage::ShaderResource;
+    cubeDesc.isCubemap = true;
+    cubeDesc.debugName = "Skybox_EnvCubemap";
 
-    // Create cubemap texture with mipmaps
-    D3D11_TEXTURE2D_DESC cubeDesc{};
-    cubeDesc.Width = size;
-    cubeDesc.Height = size;
-    cubeDesc.MipLevels = 0;  // 0 = auto-generate full mip chain
-    cubeDesc.ArraySize = 6;
-    cubeDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    cubeDesc.SampleDesc.Count = 1;
-    cubeDesc.Usage = D3D11_USAGE_DEFAULT;
-    cubeDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    cubeDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE | D3D11_RESOURCE_MISC_GENERATE_MIPS;
+    m_envTexture.reset(ctx->CreateTexture(cubeDesc, nullptr));
+    if (!m_envTexture) {
+        CFFLog::Error("Skybox: Failed to create cubemap texture");
+        return;
+    }
 
-    ComPtr<ID3D11Texture2D> cubeTexture;
-    device->CreateTexture2D(&cubeDesc, nullptr, cubeTexture.GetAddressOf());
-
-    // Create SRV for cubemap (all mip levels)
-    D3D11_SHADER_RESOURCE_VIEW_DESC cubeSRVDesc{};
-    cubeSRVDesc.Format = cubeDesc.Format;
-    cubeSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    cubeSRVDesc.TextureCube.MipLevels = -1;  // -1 = all mip levels
-
-    ComPtr<ID3D11ShaderResourceView> cubeSRV;
-    device->CreateShaderResourceView(cubeTexture.Get(), &cubeSRVDesc, cubeSRV.GetAddressOf());
-
-    // Load conversion shaders from files
+    // Load conversion shaders
     std::string convVsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.vs.hlsl");
     std::string convPsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.ps.hlsl");
 
@@ -387,52 +367,58 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
     }
 
 #if defined(_DEBUG)
-    bool debugConvShaders = true;
+    bool debugShaders = true;
 #else
-    bool debugConvShaders = false;
+    bool debugShaders = false;
 #endif
 
-    // Compile conversion vertex shader
-    SCompiledShader convVsCompiled = CompileShaderFromSource(convVsSource, "main", "vs_5_0", nullptr, debugConvShaders);
+    SCompiledShader convVsCompiled = CompileShaderFromSource(convVsSource, "main", "vs_5_0", nullptr, debugShaders);
     if (!convVsCompiled.success) {
-        CFFLog::Error("=== EQUIRECT CONVERSION VS COMPILATION ERROR ===");
-        CFFLog::Error("%s", convVsCompiled.errorMessage.c_str());
+        CFFLog::Error("EquirectToCubemap VS compile error: %s", convVsCompiled.errorMessage.c_str());
         return;
     }
 
-    // Compile conversion pixel shader
-    SCompiledShader convPsCompiled = CompileShaderFromSource(convPsSource, "main", "ps_5_0", nullptr, debugConvShaders);
+    SCompiledShader convPsCompiled = CompileShaderFromSource(convPsSource, "main", "ps_5_0", nullptr, debugShaders);
     if (!convPsCompiled.success) {
-        CFFLog::Error("=== EQUIRECT CONVERSION PS COMPILATION ERROR ===");
-        CFFLog::Error("%s", convPsCompiled.errorMessage.c_str());
+        CFFLog::Error("EquirectToCubemap PS compile error: %s", convPsCompiled.errorMessage.c_str());
         return;
     }
 
-    ComPtr<ID3D11VertexShader> convVS;
-    ComPtr<ID3D11PixelShader> convPS;
-    device->CreateVertexShader(convVsCompiled.bytecode.data(), convVsCompiled.bytecode.size(), nullptr, convVS.GetAddressOf());
-    device->CreatePixelShader(convPsCompiled.bytecode.data(), convPsCompiled.bytecode.size(), nullptr, convPS.GetAddressOf());
+    // Create shaders
+    ShaderDesc convVsDesc;
+    convVsDesc.type = EShaderType::Vertex;
+    convVsDesc.bytecode = convVsCompiled.bytecode.data();
+    convVsDesc.bytecodeSize = convVsCompiled.bytecode.size();
+    ShaderPtr convVS(ctx->CreateShader(convVsDesc));
+
+    ShaderDesc convPsDesc;
+    convPsDesc.type = EShaderType::Pixel;
+    convPsDesc.bytecode = convPsCompiled.bytecode.data();
+    convPsDesc.bytecodeSize = convPsCompiled.bytecode.size();
+    ShaderPtr convPS(ctx->CreateShader(convPsDesc));
+
+    // Create conversion pipeline state
+    PipelineStateDesc convPsoDesc;
+    convPsoDesc.vertexShader = convVS.get();
+    convPsoDesc.pixelShader = convPS.get();
+    convPsoDesc.inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 }
+    };
+    convPsoDesc.rasterizer.cullMode = ECullMode::None;
+    convPsoDesc.rasterizer.fillMode = EFillMode::Solid;
+    convPsoDesc.depthStencil.depthEnable = false;
+    convPsoDesc.blend.blendEnable = false;
+    convPsoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+
+    PipelineStatePtr convPso(ctx->CreatePipelineState(convPsoDesc));
 
     // Create sampler for conversion
-    D3D11_SAMPLER_DESC sd{};
-    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    sd.MinLOD = 0;
-    sd.MaxLOD = D3D11_FLOAT32_MAX;
-    ComPtr<ID3D11SamplerState> convSampler;
-    device->CreateSamplerState(&sd, convSampler.GetAddressOf());
-
-    // Render to each cubemap face
-    XMMATRIX captureProjection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 1.0f, 0.1f, 10.0f);
-    XMMATRIX captureViews[] = {
-        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 1, 0, 0,1), XMVectorSet(0, 1, 0,1)),  // +X
-        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet(-1, 0, 0,1), XMVectorSet(0, 1, 0,1)),  // -X
-        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 1, 0,1), XMVectorSet(0, 0,-1,1)),  // +Y
-        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0,-1, 0,1), XMVectorSet(0, 0, 1,1)),  // -Y
-        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 0, 1,1), XMVectorSet(0, 1, 0,1)),  // +Z
-        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 0,-1,1), XMVectorSet(0, 1, 0,1))   // -Z
-    };
+    SamplerDesc convSamplerDesc;
+    convSamplerDesc.filter = EFilter::MinMagMipLinear;
+    convSamplerDesc.addressU = ETextureAddressMode::Clamp;
+    convSamplerDesc.addressV = ETextureAddressMode::Clamp;
+    convSamplerDesc.addressW = ETextureAddressMode::Clamp;
+    SamplerPtr convSampler(ctx->CreateSampler(convSamplerDesc));
 
     // Create temporary cube mesh for conversion
     float vertices[] = {
@@ -448,108 +434,72 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         12,14,13, 12,15,14,  16,17,18, 16,18,19,  20,22,21, 20,23,22
     };
 
-    D3D11_BUFFER_DESC vbDesc{};
-    vbDesc.ByteWidth = sizeof(vertices);
-    vbDesc.Usage = D3D11_USAGE_DEFAULT;
-    vbDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA vbData{ vertices, 0, 0 };
-    ComPtr<ID3D11Buffer> tempVB;
-    device->CreateBuffer(&vbDesc, &vbData, tempVB.GetAddressOf());
+    BufferDesc tempVbDesc;
+    tempVbDesc.size = sizeof(vertices);
+    tempVbDesc.usage = EBufferUsage::Vertex;
+    BufferPtr tempVB(ctx->CreateBuffer(tempVbDesc, vertices));
 
-    D3D11_BUFFER_DESC ibDesc{};
-    ibDesc.ByteWidth = sizeof(indices);
-    ibDesc.Usage = D3D11_USAGE_DEFAULT;
-    ibDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA ibData{ indices, 0, 0 };
-    ComPtr<ID3D11Buffer> tempIB;
-    device->CreateBuffer(&ibDesc, &ibData, tempIB.GetAddressOf());
+    BufferDesc tempIbDesc;
+    tempIbDesc.size = sizeof(indices);
+    tempIbDesc.usage = EBufferUsage::Index;
+    BufferPtr tempIB(ctx->CreateBuffer(tempIbDesc, indices));
 
-    D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    // Create constant buffer for view-projection matrix
+    BufferDesc tempCbDesc;
+    tempCbDesc.size = sizeof(XMMATRIX);
+    tempCbDesc.usage = EBufferUsage::Constant;
+    tempCbDesc.cpuAccess = ECPUAccess::Write;
+    BufferPtr tempCB(ctx->CreateBuffer(tempCbDesc, nullptr));
+
+    // Setup capture views for each cubemap face
+    XMMATRIX captureProjection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 1.0f, 0.1f, 10.0f);
+    XMMATRIX captureViews[] = {
+        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 1, 0, 0,1), XMVectorSet(0, 1, 0,1)),  // +X
+        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet(-1, 0, 0,1), XMVectorSet(0, 1, 0,1)),  // -X
+        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 1, 0,1), XMVectorSet(0, 0,-1,1)),  // +Y
+        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0,-1, 0,1), XMVectorSet(0, 0, 1,1)),  // -Y
+        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 0, 1,1), XMVectorSet(0, 1, 0,1)),  // +Z
+        XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 0,-1,1), XMVectorSet(0, 1, 0,1))   // -Z
     };
-    ComPtr<ID3D11InputLayout> tempLayout;
-    device->CreateInputLayout(layout, 1, convVsCompiled.bytecode.data(), convVsCompiled.bytecode.size(), tempLayout.GetAddressOf());
 
-    ComPtr<ID3D11Buffer> tempCB;
-    D3D11_BUFFER_DESC cbDesc{};
-    cbDesc.ByteWidth = sizeof(XMMATRIX);
-    cbDesc.Usage = D3D11_USAGE_DEFAULT;
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    device->CreateBuffer(&cbDesc, nullptr, tempCB.GetAddressOf());
-
-    // Render each face
+    // Render to each cubemap face using RHI
     for (int face = 0; face < 6; ++face) {
-        // Create RTV for this face
-        D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};
-        rtvDesc.Format = cubeDesc.Format;
-        rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-        rtvDesc.Texture2DArray.MipSlice = 0;
-        rtvDesc.Texture2DArray.FirstArraySlice = face;
-        rtvDesc.Texture2DArray.ArraySize = 1;
-
-        ComPtr<ID3D11RenderTargetView> rtv;
-        device->CreateRenderTargetView(cubeTexture.Get(), &rtvDesc, rtv.GetAddressOf());
-
-        // Set render target
-        context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
+        // Set render target to this face
+        cmdList->SetRenderTargetSlice(m_envTexture.get(), face, nullptr);
 
         // Set viewport
-        D3D11_VIEWPORT vp{};
-        vp.Width = (float)size;
-        vp.Height = (float)size;
-        vp.MinDepth = 0.0f;
-        vp.MaxDepth = 1.0f;
-        context->RSSetViewports(1, &vp);
+        cmdList->SetViewport(0, 0, (float)size, (float)size, 0.0f, 1.0f);
 
         // Clear
         float clearColor[] = { 0, 0, 0, 1 };
-        context->ClearRenderTargetView(rtv.Get(), clearColor);
+        cmdList->ClearRenderTarget(m_envTexture.get(), clearColor);
 
-        // Update transform
+        // Update transform constant buffer
         XMMATRIX vp_mat = XMMatrixTranspose(captureViews[face] * captureProjection);
-        context->UpdateSubresource(tempCB.Get(), 0, nullptr, &vp_mat, 0, 0);
+        void* mappedCB = tempCB->Map();
+        if (mappedCB) {
+            memcpy(mappedCB, &vp_mat, sizeof(XMMATRIX));
+            tempCB->Unmap();
+        }
 
-        // Set pipeline
-        context->IASetInputLayout(tempLayout.Get());
-        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        UINT stride = 12, offset = 0;
-        context->IASetVertexBuffers(0, 1, tempVB.GetAddressOf(), &stride, &offset);
-        context->IASetIndexBuffer(tempIB.Get(), DXGI_FORMAT_R32_UINT, 0);
-        context->VSSetShader(convVS.Get(), nullptr, 0);
-        context->PSSetShader(convPS.Get(), nullptr, 0);
-        context->VSSetConstantBuffers(0, 1, tempCB.GetAddressOf());
-        context->PSSetShaderResources(0, 1, equirectSRV.GetAddressOf());
-        context->PSSetSamplers(0, 1, convSampler.GetAddressOf());
+        // Set pipeline state and resources
+        cmdList->SetPipelineState(convPso.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+        cmdList->SetVertexBuffer(0, tempVB.get(), 12, 0);  // 12 = 3 floats * 4 bytes
+        cmdList->SetIndexBuffer(tempIB.get(), EIndexFormat::UInt32, 0);
+        cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, tempCB.get());
+        cmdList->SetShaderResource(EShaderStage::Pixel, 0, equirectTexture.get());
+        cmdList->SetSampler(EShaderStage::Pixel, 0, convSampler.get());
 
         // Draw
-        context->DrawIndexed(36, 0, 0);
+        cmdList->DrawIndexed(36, 0, 0);
     }
 
-    // Unbind resources
-    ID3D11RenderTargetView* nullRTV = nullptr;
-    context->OMSetRenderTargets(1, &nullRTV, nullptr);
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
+    // Unbind render target
+    cmdList->UnbindRenderTargets();
 
-    // Calculate mip level count before generation
-    D3D11_TEXTURE2D_DESC finalDesc;
-    cubeTexture->GetDesc(&finalDesc);
-    int mipCount = finalDesc.MipLevels;
+    // Generate mipmaps
+    cmdList->GenerateMips(m_envTexture.get());
 
-    CFFLog::Info("Skybox: Generating mipmaps for %dx%d cubemap (%d levels)...", size, size, mipCount);
-
-    // Generate mipmaps for the cubemap
-    context->GenerateMips(cubeSRV.Get());
-
-    CFFLog::Info("Skybox: Environment cubemap ready (%dx%d, %d mip levels)", size, size, mipCount);
-
-    // Wrap the D3D11 texture in RHI (transfers ownership)
-    IRenderContext* rhiCtx = CRHIManager::Instance().GetRenderContext();
-    m_envTexture.reset(rhiCtx->WrapNativeTexture(
-        cubeTexture.Detach(),
-        cubeSRV.Detach(),
-        size,
-        size,
-        ETextureFormat::R16G16B16A16_FLOAT
-    ));
+    CFFLog::Info("Skybox: Environment cubemap ready (%dx%d with mipmaps)", size, size);
 }

@@ -57,6 +57,9 @@ public:
         ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel,
         ITexture* src, uint32_t srcArraySlice, uint32_t srcMipLevel) override;
 
+    // Mipmap Generation
+    void GenerateMips(ITexture* texture) override;
+
     // Unbind Operations
     void UnbindRenderTargets() override;
     void UnbindShaderResources(EShaderStage stage, uint32_t startSlot, uint32_t numSlots) override;

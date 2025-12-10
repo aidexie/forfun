@@ -353,5 +353,15 @@ void CDX11CommandList::UnbindShaderResources(EShaderStage stage, uint32_t startS
     }
 }
 
+void CDX11CommandList::GenerateMips(ITexture* texture) {
+    if (!texture) return;
+
+    CDX11Texture* dx11Texture = static_cast<CDX11Texture*>(texture);
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(dx11Texture->GetSRV());
+    if (srv) {
+        m_context->GenerateMips(srv);
+    }
+}
+
 } // namespace DX11
 } // namespace RHI

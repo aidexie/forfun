@@ -134,6 +134,14 @@ public:
         ITexture* src, uint32_t srcArraySlice, uint32_t srcMipLevel) = 0;
 
     // ============================================
+    // Mipmap Generation
+    // ============================================
+
+    // Generate mipmaps for a texture
+    // Texture must have been created with GENERATE_MIPS flag
+    virtual void GenerateMips(ITexture* texture) = 0;
+
+    // ============================================
     // Unbind Operations (for resource hazard prevention)
     // ============================================
 

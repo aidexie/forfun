@@ -315,7 +315,7 @@ bool CSceneRenderer::Initialize()
 
     createPipeline();
 
-    m_clusteredLighting.Initialize(ctx->GetNativeDevice());
+    m_clusteredLighting.Initialize();
 
     return true;
 }
@@ -337,7 +337,7 @@ void CSceneRenderer::Render(
     CScene& scene,
     RHI::ITexture* hdrRT,
     RHI::ITexture* depthRT,
-    UINT w, UINT h,
+    uint32_t w, uint32_t h,
     float dt,
     const CShadowPass::Output* shadowData)
 {
@@ -400,10 +400,9 @@ void CSceneRenderer::Render(
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Clustered lighting setup
-    void* nativeCtx = ctx->GetNativeContext();
     m_clusteredLighting.Resize(w, h);
-    m_clusteredLighting.BuildClusterGrid(nativeCtx, proj, camera.nearZ, camera.farZ);
-    m_clusteredLighting.CullLights(nativeCtx, &scene, view);
+    m_clusteredLighting.BuildClusterGrid(cmdList, proj, camera.nearZ, camera.farZ);
+    m_clusteredLighting.CullLights(cmdList, &scene, view);
 
     // Update clustered params constant buffer (b3)
     CB_ClusteredParams clusteredParams{};
@@ -419,7 +418,7 @@ void CSceneRenderer::Render(
         m_cbClusteredParams->Unmap();
     }
     cmdList->SetConstantBuffer(EShaderStage::Pixel, 3, m_cbClusteredParams.get());
-    m_clusteredLighting.BindToMainPass(nativeCtx);
+    m_clusteredLighting.BindToMainPass(cmdList);
 
     // Collect render items
     std::vector<RenderItem> opaqueItems;

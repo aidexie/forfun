@@ -232,11 +232,14 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
         if (desc.isCubemap || desc.isCubemapArray) {
             texDesc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
         }
-    }
 
-    if (desc.mipLevels == 0 && !isStaging) {
-        texDesc.MipLevels = 0;
-        texDesc.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
+        // Check for generate mips flag (either via miscFlags or mipLevels == 0)
+        if ((desc.miscFlags & ETextureMiscFlags::GenerateMips) || desc.mipLevels == 0) {
+            texDesc.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
+            if (desc.mipLevels == 0) {
+                texDesc.MipLevels = 0;  // Let D3D11 calculate mip levels
+            }
+        }
     }
 
     D3D11_SUBRESOURCE_DATA* pInitData = nullptr;

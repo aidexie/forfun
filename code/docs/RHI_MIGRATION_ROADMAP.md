@@ -256,10 +256,50 @@ Phase 7 (Header RHI 重构) ✅
 
 **最终状态 (2025-12-10)**: 🎉 **RHI 迁移全部完成！**
 所有 Engine/Rendering/ 目录下的 IBL/Probe 相关 header 文件已完全清理 D3D11 依赖。
-保留 D3D11 引用的文件:
-- `ClusteredLightingPass.h/.cpp` - Compute shader 密集使用，需要先扩展 RHI 支持 UAV/Compute (Phase 8 未来工作)
-- Editor debug panel (.cpp 内部实现，用于 ImGui 可视化)
-- Core loaders (.cpp 内部实现，用于资源加载)
+
+---
+
+### Phase 8: 剩余模块 RHI 迁移 (进行中)
+
+**目标**: 迁移剩余的渲染和工具模块到 RHI
+
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 8.1 | `MeshRenderer.cpp` | 低 | ✅ 完成 | 移除未使用的 d3d11.h |
+| 8.2 | `TextureManager.cpp` | 中 | ✅ 完成 | CreateDefaultTextures 改用 RHI::CreateTexture |
+| 8.3 | `Skybox.cpp` | 高 | ✅ 完成 | equirect→cubemap 转换改用 100% RHI |
+| 8.4 | `ClusteredLightingPass` | 很高 | ✅ 完成 | header 和 cpp 完全 RHI 化 |
+| 8.5 | `SceneRenderer.h/cpp` | 中 | ✅ 完成 | UINT 改 uint32_t，调用 ClusteredLighting 改用 RHI |
+| 8.6 | `TestRayCast.cpp` | 低 | ✅ 完成 | UINT 改 uint32_t |
+| 8.7 | `TextureLoader.h/cpp` | 中 | ✅ 完成 | 接口返回 RHI::ITexture*，内部使用 RHI 创建纹理 |
+| 8.8 | `TextureManager.cpp` | 中 | ✅ 完成 | 完全移除 D3D11 依赖，使用 RHI TextureLoader |
+
+**RHI 扩展 (Phase 8)**:
+- `ICommandList::GenerateMips()` - Mipmap 生成
+- `ETextureMiscFlags::GenerateMips` - 纹理 misc flags 支持
+
+**保留 D3D11 的文件 (允许):**
+- `RHI/DX11/*` - RHI 后端实现
+- `main.cpp` - ImGui DX11 后端
+- `Editor/Panels_IrradianceDebug.cpp` - Debug panel (per-face SRV 创建)
+- `Core/Loader/TextureLoader.cpp` - WIC 加载 (内部 WIC COM 接口，但输出 RHI::ITexture)
+- `Core/Loader/KTXLoader.cpp` - KTX 加载器 (内部实现)
+- `Core/Exporter/*.cpp` - 导出器 (内部实现)
+- `Core/Testing/Screenshot.cpp` - 截图功能 (内部实现)
+- `Core/DebugEvent.cpp` - GPU 调试事件 (内部实现)
+
+**Phase 8 状态**: ✅ 完成 - 所有模块迁移成功
+
+---
+
+## 剩余工作：无 (所有核心迁移完成)
+
+**已迁移的 ClusteredLightingPass (Phase 8.4)**:
+- `ClusteredLightingPass.h`: ComPtr 改为 RHI::BufferPtr/ShaderPtr
+- `ClusteredLightingPass.cpp`: 使用 RHI API (CreateBuffer, CreateShader, Map/Unmap)
+- 函数签名从 `void*` 改为 `RHI::ICommandList*`
+- Compute Shader 使用 `RHI::EShaderType::Compute` + `RHI::ComputePipelineDesc`
+- UAV/SRV 绑定使用 `SetUnorderedAccess()` / `SetShaderResource()`
 
 ---
 

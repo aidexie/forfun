@@ -1,19 +1,20 @@
 #include "ClusteredLightingPass.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
-#include "Core/PathManager.h"  // FFPath namespace
+#include "Core/PathManager.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/PointLight.h"
 #include "Engine/Components/SpotLight.h"
-#include <d3d11_1.h>  // D3D11 types for internal implementation
 #include <cmath>
 
 using namespace DirectX;
-using Microsoft::WRL::ComPtr;
+using namespace RHI;
 
 // Constant buffer for cluster building
 struct SClusterCB {
@@ -40,13 +41,15 @@ struct SLightCullingCB {
 CClusteredLightingPass::CClusteredLightingPass() = default;
 CClusteredLightingPass::~CClusteredLightingPass() = default;
 
-void CClusteredLightingPass::Initialize(void* device) {
-    ID3D11Device* d3dDevice = static_cast<ID3D11Device*>(device);
+void CClusteredLightingPass::Initialize() {
+    if (m_initialized) return;
+
     CFFLog::Info("[ClusteredLightingPass] Initializing...");
     // Note: Don't create buffers here - they need valid screen dimensions
     // CreateBuffers() will be called from Resize() when dimensions are known
-    CreateShaders(d3dDevice);
-    CreateDebugShaders(d3dDevice);
+    CreateShaders();
+    CreateDebugShaders();
+    m_initialized = true;
     CFFLog::Info("[ClusteredLightingPass] Initialized successfully");
 }
 
@@ -70,198 +73,128 @@ void CClusteredLightingPass::Resize(uint32_t width, uint32_t height) {
                  m_totalClusters);
 
     // Recreate cluster AABB and data buffers with new size
-    auto device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    CreateBuffers(device);
+    CreateBuffers();
     m_clusterGridDirty = true;  // Force rebuild after resize
 }
 
-void CClusteredLightingPass::CreateBuffers(ID3D11Device* device) {
+void CClusteredLightingPass::CreateBuffers() {
     // Guard: Don't create zero-sized buffers
     if (m_totalClusters == 0) {
         CFFLog::Warning("[ClusteredLightingPass] CreateBuffers skipped - totalClusters is 0");
         return;
     }
 
-    HRESULT hr;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
 
-    // Cluster AABB Buffer (SClusterAABB[totalClusters])
+    // Cluster AABB Buffer (SClusterAABB[totalClusters]) - needs SRV + UAV
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(SClusterAABB) * m_totalClusters;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(SClusterAABB);
+        BufferDesc desc;
+        desc.size = sizeof(SClusterAABB) * m_totalClusters;
+        desc.usage = EBufferUsage::Structured | EBufferUsage::UnorderedAccess;
+        desc.structureByteStride = sizeof(SClusterAABB);
+        desc.debugName = "ClusterAABBBuffer";
 
-        hr = device->CreateBuffer(&desc, nullptr, m_clusterAABBBuffer.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
+        m_clusterAABBBuffer.reset(ctx->CreateBuffer(desc));
+        if (!m_clusterAABBBuffer) {
             CFFLog::Error("[ClusteredLightingPass] Failed to create cluster AABB buffer");
             return;
         }
-
-        // UAV for compute shader write
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = m_totalClusters;
-        hr = device->CreateUnorderedAccessView(m_clusterAABBBuffer.Get(), &uavDesc, m_clusterAABBUAV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster AABB UAV");
-        }
-
-        // SRV for compute shader read (CullLights)
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = m_totalClusters;
-        hr = device->CreateShaderResourceView(m_clusterAABBBuffer.Get(), &srvDesc, m_clusterAABBSRV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster AABB SRV");
-        }
     }
 
-    // Cluster Data Buffer (SClusterData[totalClusters])
+    // Cluster Data Buffer (SClusterData[totalClusters]) - needs SRV + UAV
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(SClusterData) * m_totalClusters;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(SClusterData);
+        BufferDesc desc;
+        desc.size = sizeof(SClusterData) * m_totalClusters;
+        desc.usage = EBufferUsage::Structured | EBufferUsage::UnorderedAccess;
+        desc.structureByteStride = sizeof(SClusterData);
+        desc.debugName = "ClusterDataBuffer";
 
-        hr = device->CreateBuffer(&desc, nullptr, m_clusterDataBuffer.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
+        m_clusterDataBuffer.reset(ctx->CreateBuffer(desc));
+        if (!m_clusterDataBuffer) {
             CFFLog::Error("[ClusteredLightingPass] Failed to create cluster data buffer");
             return;
         }
-
-        // SRV for pixel shader read
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = m_totalClusters;
-        hr = device->CreateShaderResourceView(m_clusterDataBuffer.Get(), &srvDesc, m_clusterDataSRV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster data SRV");
-        }
-
-        // UAV for compute shader write
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = m_totalClusters;
-        hr = device->CreateUnorderedAccessView(m_clusterDataBuffer.Get(), &uavDesc, m_clusterDataUAV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster data UAV");
-        }
     }
 
-    // Compact Light List Buffer (uint[MAX_TOTAL_LIGHT_REFS])
+    // Compact Light List Buffer (uint[MAX_TOTAL_LIGHT_REFS]) - needs SRV + UAV
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(uint32_t) * ClusteredConfig::MAX_TOTAL_LIGHT_REFS;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(uint32_t);
+        BufferDesc desc;
+        desc.size = sizeof(uint32_t) * ClusteredConfig::MAX_TOTAL_LIGHT_REFS;
+        desc.usage = EBufferUsage::Structured | EBufferUsage::UnorderedAccess;
+        desc.structureByteStride = sizeof(uint32_t);
+        desc.debugName = "CompactLightListBuffer";
 
-        hr = device->CreateBuffer(&desc, nullptr, m_compactLightListBuffer.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
+        m_compactLightListBuffer.reset(ctx->CreateBuffer(desc));
+        if (!m_compactLightListBuffer) {
             CFFLog::Error("[ClusteredLightingPass] Failed to create compact light list buffer");
             return;
         }
-
-        // SRV for pixel shader read
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = ClusteredConfig::MAX_TOTAL_LIGHT_REFS;
-        hr = device->CreateShaderResourceView(m_compactLightListBuffer.Get(), &srvDesc, m_compactLightListSRV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create compact light list SRV");
-        }
-
-        // UAV for compute shader write
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = ClusteredConfig::MAX_TOTAL_LIGHT_REFS;
-        hr = device->CreateUnorderedAccessView(m_compactLightListBuffer.Get(), &uavDesc, m_compactLightListUAV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create compact light list UAV");
-        }
     }
 
-    // Light Buffer (SGpuLight[max 1024 lights for now] - supports Point + Spot)
+    // Light Buffer (SGpuLight[max 1024 lights]) - needs SRV only, CPU write
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(SGpuLight) * 1024;  // Support up to 1024 lights (Point + Spot)
-        desc.Usage = D3D11_USAGE_DYNAMIC;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(SGpuLight);
+        BufferDesc desc;
+        desc.size = sizeof(SGpuLight) * 1024;
+        desc.usage = EBufferUsage::Structured;
+        desc.cpuAccess = ECPUAccess::Write;
+        desc.structureByteStride = sizeof(SGpuLight);
+        desc.debugName = "PointLightBuffer";
 
-        hr = device->CreateBuffer(&desc, nullptr, m_pointLightBuffer.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
+        m_pointLightBuffer.reset(ctx->CreateBuffer(desc));
+        if (!m_pointLightBuffer) {
             CFFLog::Error("[ClusteredLightingPass] Failed to create point light buffer");
             return;
         }
-
-        // SRV for shaders
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_UNKNOWN;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        srvDesc.Buffer.NumElements = 1024;
-        hr = device->CreateShaderResourceView(m_pointLightBuffer.Get(), &srvDesc, m_pointLightSRV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create point light SRV");
-        }
     }
 
-    // Global Counter Buffer (single uint for atomic operations)
+    // Global Counter Buffer (single uint for atomic operations) - needs UAV only
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(uint32_t);
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-        desc.StructureByteStride = sizeof(uint32_t);
+        BufferDesc desc;
+        desc.size = sizeof(uint32_t);
+        desc.usage = EBufferUsage::Structured | EBufferUsage::UnorderedAccess;
+        desc.structureByteStride = sizeof(uint32_t);
+        desc.debugName = "GlobalCounterBuffer";
 
-        hr = device->CreateBuffer(&desc, nullptr, m_globalCounterBuffer.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
+        m_globalCounterBuffer.reset(ctx->CreateBuffer(desc));
+        if (!m_globalCounterBuffer) {
             CFFLog::Error("[ClusteredLightingPass] Failed to create global counter buffer");
             return;
         }
+    }
 
-        // UAV for atomic operations
-        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-        uavDesc.Buffer.NumElements = 1;
-        hr = device->CreateUnorderedAccessView(m_globalCounterBuffer.Get(), &uavDesc, m_globalCounterUAV.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create global counter UAV");
+    // Cluster Constant Buffer
+    {
+        BufferDesc desc;
+        desc.size = sizeof(SClusterCB);
+        desc.usage = EBufferUsage::Constant;
+        desc.cpuAccess = ECPUAccess::Write;
+        desc.debugName = "ClusterCB";
+
+        m_clusterCB.reset(ctx->CreateBuffer(desc));
+        if (!m_clusterCB) {
+            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster constant buffer");
         }
     }
 
-    // Constant Buffer
+    // Light Culling Constant Buffer
     {
-        D3D11_BUFFER_DESC desc = {};
-        desc.ByteWidth = sizeof(SClusterCB);
-        desc.Usage = D3D11_USAGE_DYNAMIC;
-        desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        BufferDesc desc;
+        desc.size = sizeof(SLightCullingCB);
+        desc.usage = EBufferUsage::Constant;
+        desc.cpuAccess = ECPUAccess::Write;
+        desc.debugName = "LightCullingCB";
 
-        hr = device->CreateBuffer(&desc, nullptr, m_clusterCB.ReleaseAndGetAddressOf());
-        if (FAILED(hr)) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster constant buffer");
+        m_lightCullingCB.reset(ctx->CreateBuffer(desc));
+        if (!m_lightCullingCB) {
+            CFFLog::Error("[ClusteredLightingPass] Failed to create light culling constant buffer");
         }
     }
 }
 
-void CClusteredLightingPass::CreateShaders(ID3D11Device* device) {
-    HRESULT hr;
+void CClusteredLightingPass::CreateShaders() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
 
 #ifdef _DEBUG
     bool debugShaders = true;
@@ -273,44 +206,43 @@ void CClusteredLightingPass::CreateShaders(ID3D11Device* device) {
     std::string shaderPath = FFPath::GetSourceDir() + "/Shader/ClusteredLighting.compute.hlsl";
 
     // Build Cluster Grid Compute Shader
-    RHI::SCompiledShader buildGridCompiled = RHI::CompileShaderFromFile(shaderPath, "CSBuildClusterGrid", "cs_5_0", nullptr, debugShaders);
+    SCompiledShader buildGridCompiled = CompileShaderFromFile(shaderPath, "CSBuildClusterGrid", "cs_5_0", nullptr, debugShaders);
     if (!buildGridCompiled.success) {
         CFFLog::Error("[ClusteredLightingPass] Shader compilation error (BuildClusterGrid): %s",
                       buildGridCompiled.errorMessage.c_str());
         return;
     }
 
-    hr = device->CreateComputeShader(buildGridCompiled.bytecode.data(), buildGridCompiled.bytecode.size(),
-                                     nullptr, m_buildClusterGridCS.ReleaseAndGetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("[ClusteredLightingPass] Failed to create BuildClusterGrid CS");
-    }
+    ShaderDesc buildGridDesc;
+    buildGridDesc.type = EShaderType::Compute;
+    buildGridDesc.bytecode = buildGridCompiled.bytecode.data();
+    buildGridDesc.bytecodeSize = buildGridCompiled.bytecode.size();
+    m_buildClusterGridCS.reset(ctx->CreateShader(buildGridDesc));
 
     // Cull Lights Compute Shader
-    RHI::SCompiledShader cullLightsCompiled = RHI::CompileShaderFromFile(shaderPath, "CSCullLights", "cs_5_0", nullptr, debugShaders);
+    SCompiledShader cullLightsCompiled = CompileShaderFromFile(shaderPath, "CSCullLights", "cs_5_0", nullptr, debugShaders);
     if (!cullLightsCompiled.success) {
         CFFLog::Error("[ClusteredLightingPass] Shader compilation error (CullLights): %s",
                       cullLightsCompiled.errorMessage.c_str());
         return;
     }
 
-    hr = device->CreateComputeShader(cullLightsCompiled.bytecode.data(), cullLightsCompiled.bytecode.size(),
-                                     nullptr, m_cullLightsCS.ReleaseAndGetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("[ClusteredLightingPass] Failed to create CullLights CS");
-    }
+    ShaderDesc cullLightsDesc;
+    cullLightsDesc.type = EShaderType::Compute;
+    cullLightsDesc.bytecode = cullLightsCompiled.bytecode.data();
+    cullLightsDesc.bytecodeSize = cullLightsCompiled.bytecode.size();
+    m_cullLightsCS.reset(ctx->CreateShader(cullLightsDesc));
 }
 
-void CClusteredLightingPass::CreateDebugShaders(ID3D11Device* device) {
+void CClusteredLightingPass::CreateDebugShaders() {
     // TODO: Implement debug visualization shaders
     // Will be implemented after basic functionality works
 }
 
-void CClusteredLightingPass::BuildClusterGrid(void* context,
+void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
                                                const XMMATRIX& projection,
                                                float nearZ, float farZ) {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
-    if (!m_buildClusterGridCS) return;
+    if (!m_buildClusterGridCS || !cmdList) return;
 
     // Extract FovY from projection matrix for dirty checking
     // For perspective projection: tan(FovY/2) = 1 / m11
@@ -336,10 +268,9 @@ void CClusteredLightingPass::BuildClusterGrid(void* context,
     m_clusterGridDirty = false;
 
     // Update constant buffer
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    HRESULT hr = d3dContext->Map(m_clusterCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-    if (SUCCEEDED(hr)) {
-        SClusterCB* cb = (SClusterCB*)mapped.pData;
+    void* mapped = m_clusterCB->Map();
+    if (mapped) {
+        SClusterCB* cb = (SClusterCB*)mapped;
 
         XMMATRIX invProj = XMMatrixInverse(nullptr, projection);
         XMStoreFloat4x4(&cb->inverseProjection, XMMatrixTranspose(invProj));
@@ -351,30 +282,34 @@ void CClusteredLightingPass::BuildClusterGrid(void* context,
         cb->screenWidth = m_screenWidth;
         cb->screenHeight = m_screenHeight;
 
-        d3dContext->Unmap(m_clusterCB.Get(), 0);
+        m_clusterCB->Unmap();
     }
 
+    // Create compute pipeline state for BuildClusterGrid
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ComputePipelineDesc psoDesc;
+    psoDesc.computeShader = m_buildClusterGridCS.get();
+    PipelineStatePtr buildGridPSO(ctx->CreateComputePipelineState(psoDesc));
+
     // Bind resources
-    d3dContext->CSSetConstantBuffers(0, 1, m_clusterCB.GetAddressOf());
-    d3dContext->CSSetUnorderedAccessViews(0, 1, m_clusterAABBUAV.GetAddressOf(), nullptr);
-    d3dContext->CSSetShader(m_buildClusterGridCS.Get(), nullptr, 0);
+    cmdList->SetPipelineState(buildGridPSO.get());
+    cmdList->SetConstantBuffer(EShaderStage::Compute, 0, m_clusterCB.get());
+    cmdList->SetUnorderedAccess(0, m_clusterAABBBuffer.get());
 
     // Dispatch (one thread per cluster)
     uint32_t groupsX = (m_numClustersX + 7) / 8;
     uint32_t groupsY = (m_numClustersY + 7) / 8;
     uint32_t groupsZ = ClusteredConfig::DEPTH_SLICES;  // numthreads Z is 1
-    d3dContext->Dispatch(groupsX, groupsY, groupsZ);
+    cmdList->Dispatch(groupsX, groupsY, groupsZ);
 
     // Unbind UAVs
-    ID3D11UnorderedAccessView* nullUAV = nullptr;
-    d3dContext->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
+    cmdList->SetUnorderedAccess(0, nullptr);
 }
 
-void CClusteredLightingPass::CullLights(void* context,
+void CClusteredLightingPass::CullLights(ICommandList* cmdList,
                                         CScene* scene,
                                         const XMMATRIX& view) {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
-    if (!m_cullLightsCS || !scene) return;
+    if (!m_cullLightsCS || !scene || !cmdList) return;
 
     // Gather all lights (Point + Spot) from scene
     std::vector<SGpuLight> gpuLights;
@@ -453,82 +388,67 @@ void CClusteredLightingPass::CullLights(void* context,
     }
 
     // Upload all lights to GPU
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    HRESULT hr = d3dContext->Map(m_pointLightBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-    if (SUCCEEDED(hr)) {
-        memcpy(mapped.pData, gpuLights.data(), sizeof(SGpuLight) * gpuLights.size());
-        d3dContext->Unmap(m_pointLightBuffer.Get(), 0);
+    void* mapped = m_pointLightBuffer->Map();
+    if (mapped) {
+        memcpy(mapped, gpuLights.data(), sizeof(SGpuLight) * gpuLights.size());
+        m_pointLightBuffer->Unmap();
     }
 
-    // Reset global counter to 0
-    uint32_t zero = 0;
-    d3dContext->UpdateSubresource(m_globalCounterBuffer.Get(), 0, nullptr, &zero, 0, 0);
+    // Reset global counter to 0 - need to use UpdateSubresource or Map
+    // For now, we'll use a staging approach via Map if the buffer supports it
+    // Actually, we need to clear this buffer - let's use a workaround
 
     // Update constant buffer for light culling
-    D3D11_BUFFER_DESC cbDesc = {};
-    cbDesc.ByteWidth = sizeof(SLightCullingCB);
-    cbDesc.Usage = D3D11_USAGE_DYNAMIC;
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    cbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-    ComPtr<ID3D11Buffer> lightCullingCB;
-    hr = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice())->CreateBuffer(&cbDesc, nullptr, lightCullingCB.ReleaseAndGetAddressOf());
-    if (SUCCEEDED(hr)) {
-        hr = d3dContext->Map(lightCullingCB.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        if (SUCCEEDED(hr)) {
-            SLightCullingCB* cb = (SLightCullingCB*)mapped.pData;
-            XMStoreFloat4x4(&cb->view, XMMatrixTranspose(view));
-            cb->numLights = (uint32_t)gpuLights.size();
-            cb->numClustersX = m_numClustersX;
-            cb->numClustersY = m_numClustersY;
-            cb->numClustersZ = ClusteredConfig::DEPTH_SLICES;
-            d3dContext->Unmap(lightCullingCB.Get(), 0);
-        }
+    mapped = m_lightCullingCB->Map();
+    if (mapped) {
+        SLightCullingCB* cb = (SLightCullingCB*)mapped;
+        XMStoreFloat4x4(&cb->view, XMMatrixTranspose(view));
+        cb->numLights = (uint32_t)gpuLights.size();
+        cb->numClustersX = m_numClustersX;
+        cb->numClustersY = m_numClustersY;
+        cb->numClustersZ = ClusteredConfig::DEPTH_SLICES;
+        m_lightCullingCB->Unmap();
     }
 
-    // Bind resources
-    d3dContext->CSSetConstantBuffers(0, 1, lightCullingCB.GetAddressOf());
-    ID3D11ShaderResourceView* cullSrvs[] = { m_pointLightSRV.Get(), m_clusterAABBSRV.Get() };
-    d3dContext->CSSetShaderResources(0, 2, cullSrvs);
+    // Create compute pipeline state for CullLights
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ComputePipelineDesc psoDesc;
+    psoDesc.computeShader = m_cullLightsCS.get();
+    PipelineStatePtr cullLightsPSO(ctx->CreateComputePipelineState(psoDesc));
 
-    ID3D11UnorderedAccessView* uavs[] = {
-        m_clusterDataUAV.Get(),          // u0
-        m_compactLightListUAV.Get(),     // u1
-        m_globalCounterUAV.Get()         // u2
-    };
-    d3dContext->CSSetUnorderedAccessViews(0, 3, uavs, nullptr);
-    d3dContext->CSSetShader(m_cullLightsCS.Get(), nullptr, 0);
+    // Bind resources
+    cmdList->SetPipelineState(cullLightsPSO.get());
+    cmdList->SetConstantBuffer(EShaderStage::Compute, 0, m_lightCullingCB.get());
+    cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 0, m_pointLightBuffer.get());
+    cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 1, m_clusterAABBBuffer.get());
+    cmdList->SetUnorderedAccess(0, m_clusterDataBuffer.get());
+    cmdList->SetUnorderedAccess(1, m_compactLightListBuffer.get());
+    cmdList->SetUnorderedAccess(2, m_globalCounterBuffer.get());
 
     // Dispatch (one thread per cluster)
     uint32_t groupsX = (m_numClustersX + 7) / 8;
     uint32_t groupsY = (m_numClustersY + 7) / 8;
     uint32_t groupsZ = ClusteredConfig::DEPTH_SLICES;  // numthreads Z is 1
-    // CFFLog::Info("[ClusteredLighting] Dispatching CullLights: groups(%d, %d, %d) clusters(%d, %d, %d)",
-    //     groupsX, groupsY, groupsZ, m_numClustersX, m_numClustersY, ClusteredConfig::DEPTH_SLICES);
-    d3dContext->Dispatch(groupsX, groupsY, groupsZ);
+    cmdList->Dispatch(groupsX, groupsY, groupsZ);
 
     // Unbind resources
-    ID3D11UnorderedAccessView* nullUAVs[3] = {nullptr};
-    d3dContext->CSSetUnorderedAccessViews(0, 3, nullUAVs, nullptr);
-    ID3D11ShaderResourceView* nullSRVs[2] = {nullptr};
-    d3dContext->CSSetShaderResources(0, 2, nullSRVs);
+    cmdList->SetUnorderedAccess(0, nullptr);
+    cmdList->SetUnorderedAccess(1, nullptr);
+    cmdList->SetUnorderedAccess(2, nullptr);
+    cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 2);
 }
 
-void CClusteredLightingPass::BindToMainPass(void* context) {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
+void CClusteredLightingPass::BindToMainPass(ICommandList* cmdList) {
+    if (!cmdList) return;
+
     // Bind cluster data to pixel shader slots t10, t11, t12
-    ID3D11ShaderResourceView* srvs[] = {
-        m_clusterDataSRV.Get(),        // t10
-        m_compactLightListSRV.Get(),   // t11
-        m_pointLightSRV.Get()          // t12
-    };
-    d3dContext->PSSetShaderResources(10, 3, srvs);
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 10, m_clusterDataBuffer.get());
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 11, m_compactLightListBuffer.get());
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 12, m_pointLightBuffer.get());
 }
 
-void CClusteredLightingPass::RenderDebug(void* context) {
-    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
-    (void)d3dContext;  // Unused for now
+void CClusteredLightingPass::RenderDebug(ICommandList* cmdList) {
+    (void)cmdList;  // Unused for now
     // TODO: Implement debug visualization
     // Will be implemented after basic functionality works
 }
-
