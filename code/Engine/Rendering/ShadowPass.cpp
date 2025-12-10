@@ -113,17 +113,17 @@ bool CShadowPass::Initialize()
 
     vsBlob->Release();
 
-    // Constant buffers (GPU-writable for UpdateSubresource pattern)
+    // Constant buffers (CPU-writable for Map/Unmap pattern)
     BufferDesc cbLightDesc;
     cbLightDesc.size = sizeof(CB_LightSpace);
     cbLightDesc.usage = EBufferUsage::Constant;
-    cbLightDesc.cpuAccess = ECPUAccess::None;  // GPU-writable via UpdateSubresource
+    cbLightDesc.cpuAccess = ECPUAccess::Write;
     m_cbLightSpace.reset(ctx->CreateBuffer(cbLightDesc, nullptr));
 
     BufferDesc cbObjDesc;
     cbObjDesc.size = sizeof(CB_Object);
     cbObjDesc.usage = EBufferUsage::Constant;
-    cbObjDesc.cpuAccess = ECPUAccess::None;
+    cbObjDesc.cpuAccess = ECPUAccess::Write;
     m_cbObject.reset(ctx->CreateBuffer(cbObjDesc, nullptr));
 
     // Create default 1x1 white shadow map (depth=1.0, no shadow)
@@ -132,12 +132,9 @@ bool CShadowPass::Initialize()
         desc.debugName = "Default_ShadowMap";
         m_defaultShadowMap.reset(ctx->CreateTexture(desc, nullptr));
 
-        // Clear to 1.0 (no shadow) via D3D11 context
-        ID3D11DeviceContext* d3dCtx = static_cast<ID3D11DeviceContext*>(ctx->GetNativeContext());
-        ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(m_defaultShadowMap->GetDSV());
-        if (dsv && d3dCtx) {
-            d3dCtx->ClearDepthStencilView(dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
-        }
+        // Clear to 1.0 (no shadow) via RHI
+        ICommandList* cmdList = ctx->GetCommandList();
+        cmdList->ClearDepthStencil(m_defaultShadowMap.get(), true, 1.0f, false, 0);
     }
 
     // Create shadow sampler (Comparison sampler for PCF)
@@ -432,10 +429,8 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     float shadowDistance = light->shadow_distance;
     uint32_t shadowMapSize = (uint32_t)light->GetShadowMapResolution();
 
-    // Unbind resources before recreating shadow maps to avoid hazards
-    ID3D11ShaderResourceView* nullSRV[8] = { nullptr };
-    d3dCtx->PSSetShaderResources(0, 8, nullSRV);
-    d3dCtx->OMSetRenderTargets(0, nullptr, nullptr);
+    // Unbind render targets to avoid hazards (D3D11-specific until RHI has render target management)
+    cmdList->SetRenderTargets(0, nullptr, nullptr);
 
     // Ensure shadow map array resources
     ensureShadowMapArray(shadowMapSize, cascadeCount);
@@ -467,17 +462,20 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
         float cascadeFar = splits[cascadeIndex + 1];
         XMMATRIX lightSpaceVP = calculateTightLightMatrix(subFrustumCorners, light, cascadeFar);
 
-        // Update light space constant buffer via D3D11 (UpdateSubresource)
+        // Update light space constant buffer via RHI Map/Unmap
         CB_LightSpace cbLight;
         cbLight.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
-        d3dCtx->UpdateSubresource(static_cast<ID3D11Buffer*>(m_cbLightSpace->GetNativeHandle()),
-                                  0, nullptr, &cbLight, 0, 0);
+        void* mappedLight = m_cbLightSpace->Map();
+        if (mappedLight) {
+            memcpy(mappedLight, &cbLight, sizeof(CB_LightSpace));
+            m_cbLightSpace->Unmap();
+        }
 
-        // Bind this cascade's DSV (D3D11-specific until Phase 6 RHI extension)
+        // Bind this cascade's DSV (D3D11-specific until Phase 6 RHI per-slice DSV support)
         ID3D11RenderTargetView* nullRTV = nullptr;
         d3dCtx->OMSetRenderTargets(0, &nullRTV, m_shadowDSVs[cascadeIndex].Get());
 
-        // Clear depth for this cascade
+        // Clear depth for this cascade (D3D11-specific until Phase 6 per-slice clear)
         d3dCtx->ClearDepthStencilView(m_shadowDSVs[cascadeIndex].Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 
         // Render all objects to this cascade
@@ -499,11 +497,14 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
             for (auto& gpuMesh : meshRenderer->meshes) {
                 if (!gpuMesh) continue;
 
-                // Update object constant buffer via D3D11
+                // Update object constant buffer via RHI Map/Unmap
                 CB_Object cbObj;
                 cbObj.world = XMMatrixTranspose(worldMatrix);
-                d3dCtx->UpdateSubresource(static_cast<ID3D11Buffer*>(m_cbObject->GetNativeHandle()),
-                                          0, nullptr, &cbObj, 0, 0);
+                void* mappedObj = m_cbObject->Map();
+                if (mappedObj) {
+                    memcpy(mappedObj, &cbObj, sizeof(CB_Object));
+                    m_cbObject->Unmap();
+                }
 
                 // Bind vertex/index buffers via RHI
                 cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
@@ -520,7 +521,7 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     }
 
     // Unbind DSV to allow reading as SRV in MainPass
-    d3dCtx->OMSetRenderTargets(0, nullptr, nullptr);
+    cmdList->SetRenderTargets(0, nullptr, nullptr);
 
     // Update output bundle
     m_output.cascadeCount = cascadeCount;
