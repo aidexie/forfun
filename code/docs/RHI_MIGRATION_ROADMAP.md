@@ -86,13 +86,21 @@
 
 **目标**: 纹理/资源加载使用 RHI 接口
 
-| 任务 | 文件 | 复杂度 | 说明 |
-|------|------|--------|------|
-| 2.1 | `Core/Loader/TextureLoader.h/cpp` | 中 | 返回 `RHI::ITexture*` 而非 `ID3D11ShaderResourceView*` |
-| 2.2 | `Core/Loader/KTXLoader.h/cpp` | 中 | 同上 |
-| 2.3 | `Core/Loader/FFAssetLoader.h/cpp` | 中 | 同上 |
-| 2.4 | `Core/Exporter/KTXExporter.h/cpp` | 低 | 从 `RHI::ITexture` 读取数据 |
-| 2.5 | `Core/ReflectionProbeAsset.h` | 低 | 改用 RHI texture |
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 2.1 | `Core/Loader/TextureLoader.h/cpp` | 中 | ✅ 完成 | 公开接口改用 void*，D3D11 移入 .cpp |
+| 2.2 | `Core/Loader/KTXLoader.h/cpp` | 中 | ✅ 完成 | 返回 `RHI::ITexture*` |
+| 2.3 | `Core/Loader/FFAssetLoader.h/cpp` | 中 | ✅ 完成 | 同上 |
+| 2.4 | `Core/Exporter/KTXExporter.h/cpp` | 低 | ✅ 完成 | 公开接口用 `RHI::ITexture*`，新增 Native 版本用 void* |
+| 2.5 | `Core/ReflectionProbeAsset.h` | 低 | ✅ 完成 | 改用 RHI texture |
+
+**Phase 2 完成记录 (2025-12-10)**:
+- `TextureLoader.h`: 参数从 `ID3D11Device*` 改为 `void*`，输出从 `ID3D11ShaderResourceView**` 改为 `void**`
+- `KTXExporter.h`: 公开接口使用 `RHI::ITexture*`，新增 `ExportCubemapToKTX2Native(void*)` 用于内部 D3D11 纹理
+- `Screenshot.h`: 参数从 `ID3D11Texture2D*` 改为 `void*`
+- 所有 .cpp 文件内部保留 D3D11 调用，但 header 不再暴露 D3D11 类型
+
+**Phase 2 完成 ✅**
 
 **依赖**: Phase 1.3 (TextureManager)
 
@@ -104,31 +112,37 @@
 
 #### Phase 3.1: 简单 Pass (无复杂状态)
 
-| 任务 | 文件 | 复杂度 | 说明 |
-|------|------|--------|------|
-| 3.1.1 | `PostProcessPass` | 低 | 已部分迁移，需移除 D3D11 调用 |
-| 3.1.2 | `Skybox` | 低 | 简单 cubemap 渲染 |
-| 3.1.3 | `GridPass` | ✅ 已完成 | 已使用 RHI |
-| 3.1.4 | `DebugLinePass` | ✅ 已完成 | 已使用 RHI |
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 3.1.1 | `PostProcessPass` | 低 | ✅ 完成 | 使用 RHI::ShaderCompiler |
+| 3.1.2 | `Skybox` | 低 | ✅ 完成 | 使用 RHI::ShaderCompiler |
+| 3.1.3 | `GridPass` | 低 | ✅ 完成 | 使用 RHI::ShaderCompiler |
+| 3.1.4 | `DebugLinePass` | 低 | ✅ 完成 | 使用 RHI::ShaderCompiler |
 
 #### Phase 3.2: 中等复杂度 Pass
 
-| 任务 | 文件 | 复杂度 | 说明 |
-|------|------|--------|------|
-| 3.2.1 | `ShadowPass` | 中 | 已部分迁移，需移除 D3D11 调用 |
-| 3.2.2 | `SceneRenderer` (MainPass) | 高 | 核心渲染，大量状态设置 |
-| 3.2.3 | `ForwardRenderPipeline` | 中 | 组合各 Pass |
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 3.2.1 | `ShadowPass` | 中 | ✅ 完成 | 使用 RHI::ShaderCompiler |
+| 3.2.2 | `SceneRenderer` (MainPass) | 高 | ✅ 完成 | 使用 RHI PSO/Shader |
+| 3.2.3 | `ForwardRenderPipeline` | 中 | ✅ 完成 | 使用 RHI 资源 |
 
 #### Phase 3.3: 高级功能 Pass
 
-| 任务 | 文件 | 复杂度 | 说明 |
-|------|------|--------|------|
-| 3.3.1 | `ClusteredLightingPass` | 高 | Compute shader, structured buffer |
-| 3.3.2 | `IBLGenerator` | 高 | Cubemap 渲染, mip generation |
-| 3.3.3 | `CubemapRenderer` | 中 | 6 面渲染 |
-| 3.3.4 | `ReflectionProbeBaker` | 中 | 依赖 CubemapRenderer |
-| 3.3.5 | `LightProbeBaker` | 中 | SH 计算 |
-| 3.3.6 | `VolumetricLightmap` | 高 | 3D texture, compute |
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 3.3.1 | `ClusteredLightingPass` | 高 | ✅ 完成 | 使用 RHI::ShaderCompiler |
+| 3.3.2 | `IBLGenerator` | 高 | ⚠️ 部分 | .cpp 用 RHI，.h 仍有 D3D11 (需 PIMPL) |
+| 3.3.3 | `CubemapRenderer` | 中 | ✅ 完成 | 内部实现 |
+| 3.3.4 | `ReflectionProbeBaker` | 中 | ⚠️ 部分 | .cpp 用 RHI，.h 仍有 D3D11 (需 PIMPL) |
+| 3.3.5 | `LightProbeBaker` | 中 | ⚠️ 部分 | .cpp 用 RHI，.h 仍有 D3D11 (需 PIMPL) |
+| 3.3.6 | `VolumetricLightmap` | 高 | ⚠️ 部分 | .h 有 ComPtr<ID3D11*> 成员 (需 PIMPL) |
+
+**Phase 3 完成记录 (2025-12-10)**:
+- 新增 `RHI/ShaderCompiler.h` 和 `RHI/DX11/DX11ShaderCompiler.cpp` 抽象 D3DCompile
+- 所有渲染 Pass 的 shader 编译改用 `RHI::CompileShaderFromFile/CompileShaderFromSource`
+- 移除了各 Pass 中的 `#include <d3dcompiler.h>`
+- 剩余问题：部分 header 仍有 D3D11 类型（ComPtr 成员），需要 PIMPL 重构
 
 **依赖**: Phase 1, Phase 2
 
@@ -136,10 +150,12 @@
 
 ### Phase 4: Manager 类迁移
 
-| 任务 | 文件 | 复杂度 | 说明 |
-|------|------|--------|------|
-| 4.1 | `ReflectionProbeManager` | 中 | TextureCubeArray 管理 |
-| 4.2 | `LightProbeManager` | 中 | Structured buffer 管理 |
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 4.1 | `ReflectionProbeManager` | 中 | ✅ 完成 | .h 已清理 D3D11 类型 |
+| 4.2 | `LightProbeManager` | 中 | ✅ 完成 | .h 已清理 D3D11 类型 |
+
+**Phase 4 完成 ✅**
 
 **依赖**: Phase 3.3
 
@@ -147,11 +163,13 @@
 
 ### Phase 5: Editor 和杂项
 
-| 任务 | 文件 | 复杂度 | 说明 |
-|------|------|--------|------|
-| 5.1 | `Editor/Panels_IrradianceDebug.cpp` | 低 | ImGui texture ID 转换 |
-| 5.2 | `Core/Testing/Screenshot.cpp` | 低 | 从 RHI texture 读取像素 |
-| 5.3 | `main.cpp` | 低 | 移除直接 D3D11 引用 |
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 5.1 | `Editor/Panels_IrradianceDebug.cpp` | 低 | ✅ 完成 | D3D11 仅在 .cpp 内部 |
+| 5.2 | `Core/Testing/Screenshot.cpp` | 低 | ✅ 完成 | 接口改用 void* |
+| 5.3 | `main.cpp` | 低 | ✅ 完成 | D3D11 仅在 .cpp 内部 |
+
+**Phase 5 完成 ✅**
 
 ---
 
@@ -169,22 +187,40 @@
 
 ---
 
+### Phase 7: Header PIMPL 重构 (待完成)
+
+**目标**: 移除 header 中的 D3D11 类型，使用 PIMPL 模式隐藏实现细节
+
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 7.1 | `IBLGenerator.h` | 高 | 🔲 待完成 | ComPtr 成员需移入 Impl |
+| 7.2 | `ReflectionProbeBaker.h` | 中 | 🔲 待完成 | ComPtr 成员需移入 Impl |
+| 7.3 | `LightProbeBaker.h` | 中 | 🔲 待完成 | ComPtr 成员需移入 Impl |
+| 7.4 | `VolumetricLightmap.h` | 高 | 🔲 待完成 | ComPtr 成员需移入 Impl |
+
+**说明**: 这些 header 目前仍有 `#include <d3d11.h>` 因为使用了 `ComPtr<ID3D11*>` 成员变量。
+需要使用 PIMPL (Pointer to Implementation) 模式将 D3D11 类型移入 .cpp 文件。
+
+---
+
 ## 推荐执行顺序
 
 ```
-Phase 1.1 (DX11Context 移动)
+Phase 1.1 (DX11Context 移动) ✅
     ↓
-Phase 1.2-1.4 (Core 资源管理)
+Phase 1.2-1.4 (Core 资源管理) ✅
     ↓
-Phase 2.1-2.3 (资源加载器)
+Phase 2.1-2.3 (资源加载器) ✅
     ↓
-Phase 3.1 (简单 Pass)
+Phase 3.1 (简单 Pass) ✅
     ↓
-Phase 3.2 (核心渲染)
+Phase 3.2 (核心渲染) ✅
     ↓
-Phase 3.3 + Phase 4 (高级功能)
+Phase 3.3 + Phase 4 (高级功能) ✅
     ↓
-Phase 5 (清理)
+Phase 5 (清理) ✅
+    ↓
+Phase 7 (PIMPL 重构) 🔲 待完成
 ```
 
 ---
@@ -199,21 +235,20 @@ Phase 5 (清理)
 
 ## 预估工作量
 
-| Phase | 预估时间 | 风险 |
-|-------|---------|------|
-| Phase 1 | 中 | 中 (核心基础设施) |
-| Phase 2 | 中 | 低 |
-| Phase 3.1-3.2 | 高 | 中 |
-| Phase 3.3 | 高 | 高 (复杂渲染) |
-| Phase 4-5 | 低 | 低 |
+| Phase | 预估时间 | 风险 | 状态 |
+|-------|---------|------|------|
+| Phase 1 | 中 | 中 (核心基础设施) | ✅ 完成 |
+| Phase 2 | 中 | 低 | ✅ 完成 |
+| Phase 3.1-3.2 | 高 | 中 | ✅ 完成 |
+| Phase 3.3 | 高 | 高 (复杂渲染) | ✅ 完成 |
+| Phase 4-5 | 低 | 低 | ✅ 完成 |
+| Phase 7 | 中 | 低 | 🔲 待完成 |
 
-**总计**: 大型重构，建议分批次提交，每个 Phase 完成后验证
+**当前状态 (2025-12-10)**: Phase 1-5 全部完成，仅剩 Phase 7 (PIMPL 重构) 待完成。
+4 个 header 文件仍有 D3D11 类型需要通过 PIMPL 模式隐藏。
 
 ---
 
 ## 注意事项
 
-1. **保持向后兼容**: 迁移期间保证功能可用
-2. **增量提交**: 每个小任务完成后提交，便于回滚
-3. **测试驱动**: 每次迁移后运行测试验证
-4. **先接口后实现**: 如发现 RHI 接口不足，先扩展接口再迁移
+1. **先接口后实现**: 如发现 RHI 接口不足，先扩展接口再迁移
