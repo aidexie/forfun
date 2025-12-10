@@ -12,7 +12,9 @@
       "Bash(cmake --build:*)",
       "Bash(git checkout:*)",
       "Bash(grep:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(done)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []
