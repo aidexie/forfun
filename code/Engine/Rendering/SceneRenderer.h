@@ -4,6 +4,7 @@
 #include <DirectXMath.h>
 #include "ClusteredLightingPass.h"
 #include "ShadowPass.h"
+#include "RHI/RHIResources.h"
 
 // Forward declarations
 class CScene;
@@ -42,16 +43,16 @@ public:
     // 参数：
     // - camera: 渲染使用的相机
     // - scene: 要渲染的场景
-    // - hdrRTV: HDR render target (R16G16B16A16_FLOAT 格式)
-    // - dsv: Depth stencil view
+    // - hdrRT: HDR render target texture (via RHI)
+    // - depthRT: Depth stencil texture (via RHI)
     // - w, h: 渲染分辨率
     // - dt: Delta time
     // - shadowData: 阴影数据（可选，nullptr = 无阴影）
     void Render(
         const CCamera& camera,
         CScene& scene,
-        ID3D11RenderTargetView* hdrRTV,
-        ID3D11DepthStencilView* dsv,
+        RHI::ITexture* hdrRT,
+        RHI::ITexture* depthRT,
         UINT w, UINT h,
         float dt,
         const CShadowPass::Output* shadowData

@@ -1,17 +1,23 @@
 #include "Skybox.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/Loader/HdrLoader.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
 #include <d3dcompiler.h>
+#include <d3d11.h>
+#include <wrl/client.h>
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <cstring>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
 using namespace DirectX;
+using namespace RHI;
 using Microsoft::WRL::ComPtr;
 
 // Helper function to load shader source from file
@@ -35,11 +41,11 @@ struct CB_SkyboxTransform {
 };
 
 bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    if (m_initialized) return true;
 
-    // Convert equirectangular HDR to cubemap
-    convertEquirectToCubemap(hdrPath, cubemapSize);
+    // Convert equirectangular HDR to cubemap (legacy D3D11 path)
+    convertEquirectToCubemapLegacy(hdrPath, cubemapSize);
+    if (!m_envTexture) return false;
 
     // Create cube mesh
     createCubeMesh();
@@ -47,44 +53,23 @@ bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
     // Create shaders
     createShaders();
 
+    // Create pipeline state
+    createPipelineState();
+
     // Create constant buffer
-    D3D11_BUFFER_DESC cbd{};
-    cbd.ByteWidth = sizeof(CB_SkyboxTransform);
-    cbd.Usage = D3D11_USAGE_DEFAULT;
-    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    device->CreateBuffer(&cbd, nullptr, m_cbTransform.GetAddressOf());
+    createConstantBuffer();
 
     // Create sampler
-    D3D11_SAMPLER_DESC sd{};
-    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    sd.MinLOD = 0;
-    sd.MaxLOD = D3D11_FLOAT32_MAX;
-    device->CreateSamplerState(&sd, m_sampler.GetAddressOf());
+    createSampler();
 
-    // Create rasterizer state (no culling for skybox)
-    D3D11_RASTERIZER_DESC rd{};
-    rd.FillMode = D3D11_FILL_SOLID;
-    rd.CullMode = D3D11_CULL_NONE;
-    rd.FrontCounterClockwise = FALSE;
-    rd.DepthClipEnable = TRUE;
-    device->CreateRasterizerState(&rd, m_rasterState.GetAddressOf());
-
-    // Create depth stencil state (depth test but no write)
-    D3D11_DEPTH_STENCIL_DESC dsd{};
-    dsd.DepthEnable = TRUE;
-    dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;  // No depth write
-    dsd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;  // Draw at far plane
-    device->CreateDepthStencilState(&dsd, m_depthState.GetAddressOf());
-
+    m_initialized = true;
     return true;
 }
 
 bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
+    if (m_initialized) return true;
+
     m_envPathKTX2 = ktx2Path;
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
 
     // Load cubemap from KTX2 (returns RHI texture with SRV)
     RHI::ITexture* rhiTexture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
@@ -93,17 +78,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
         return false;
     }
 
-    // Get native D3D11 resources from RHI texture
-    // Note: The RHI texture owns these resources, we just borrow the pointers
-    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
-
-    // Store the RHI texture to keep it alive
-    m_rhiEnvTexture.reset(rhiTexture);
-
-    // Store the native pointers for rendering
-    m_envTexture = texture;
-    m_envCubemap = srv;
+    m_envTexture.reset(rhiTexture);
 
     // Create cube mesh
     createCubeMesh();
@@ -111,81 +86,38 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     // Create shaders
     createShaders();
 
+    // Create pipeline state
+    createPipelineState();
+
     // Create constant buffer
-    D3D11_BUFFER_DESC cbd{};
-    cbd.ByteWidth = sizeof(CB_SkyboxTransform);
-    cbd.Usage = D3D11_USAGE_DEFAULT;
-    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    HRESULT hr = device->CreateBuffer(&cbd, nullptr, m_cbTransform.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Skybox: Failed to create constant buffer");
-        return false;
-    }
+    createConstantBuffer();
 
     // Create sampler
-    D3D11_SAMPLER_DESC samplerDesc{};
-    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-    hr = device->CreateSamplerState(&samplerDesc, m_sampler.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Skybox: Failed to create sampler");
-        return false;
-    }
+    createSampler();
 
-    // Create rasterizer state (no culling for skybox)
-    D3D11_RASTERIZER_DESC rasterDesc{};
-    rasterDesc.FillMode = D3D11_FILL_SOLID;
-    rasterDesc.CullMode = D3D11_CULL_NONE;
-    hr = device->CreateRasterizerState(&rasterDesc, m_rasterState.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Skybox: Failed to create rasterizer state");
-        return false;
-    }
-
-    // Create depth stencil state (skybox rendered at max depth)
-    D3D11_DEPTH_STENCIL_DESC depthDesc{};
-    depthDesc.DepthEnable = TRUE;
-    depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    depthDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-    hr = device->CreateDepthStencilState(&depthDesc, m_depthState.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("Skybox: Failed to create depth stencil state");
-        return false;
-    }
-
-    CFFLog::Info("Skybox: Initialized from KTX2 (%dx%d)", m_rhiEnvTexture->GetWidth(), m_rhiEnvTexture->GetHeight());
+    m_initialized = true;
+    CFFLog::Info("Skybox: Initialized from KTX2 (%dx%d)", m_envTexture->GetWidth(), m_envTexture->GetHeight());
 
     return true;
 }
 
 void CSkybox::Shutdown() {
-    // Release RHI texture (which owns the D3D11 resources if loaded from KTX2)
-    m_rhiEnvTexture.reset();
-    m_envTexture = nullptr;
-    m_envCubemap = nullptr;
-
-    // Release owned resources (HDR path)
-    m_ownedEnvTexture.Reset();
-    m_ownedEnvCubemap.Reset();
-
-    // Release rendering resources
-    m_vs.Reset();
-    m_ps.Reset();
-    m_inputLayout.Reset();
-    m_vertexBuffer.Reset();
-    m_indexBuffer.Reset();
-    m_cbTransform.Reset();
-    m_sampler.Reset();
-    m_rasterState.Reset();
-    m_depthState.Reset();
+    m_pso.reset();
+    m_vs.reset();
+    m_ps.reset();
+    m_vertexBuffer.reset();
+    m_indexBuffer.reset();
+    m_constantBuffer.reset();
+    m_sampler.reset();
+    m_envTexture.reset();
+    m_initialized = false;
 }
 
 void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!context || !m_envCubemap) return;
+    if (!m_initialized || !m_envTexture || !m_pso) return;
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ICommandList* cmdList = ctx->GetCommandList();
 
     // Remove translation from view matrix
     XMMATRIX viewNoTranslation = view;
@@ -194,39 +126,208 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     // Update constant buffer
     CB_SkyboxTransform cb;
     cb.viewProj = XMMatrixTranspose(viewNoTranslation * proj);
-    context->UpdateSubresource(m_cbTransform.Get(), 0, nullptr, &cb, 0, 0);
 
-    // Set render states
-    context->RSSetState(m_rasterState.Get());
-    context->OMSetDepthStencilState(m_depthState.Get(), 0);
+    void* mappedData = m_constantBuffer->Map();
+    if (mappedData) {
+        memcpy(mappedData, &cb, sizeof(CB_SkyboxTransform));
+        m_constantBuffer->Unmap();
+    }
 
-    // Set pipeline
-    context->IASetInputLayout(m_inputLayout.Get());
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    // Set pipeline state (includes rasterizer, depth stencil, blend states)
+    cmdList->SetPipelineState(m_pso.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
 
-    UINT stride = sizeof(SkyboxVertex);
-    UINT offset = 0;
-    context->IASetVertexBuffers(0, 1, m_vertexBuffer.GetAddressOf(), &stride, &offset);
-    context->IASetIndexBuffer(m_indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
+    // Set vertex and index buffers
+    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(SkyboxVertex), 0);
+    cmdList->SetIndexBuffer(m_indexBuffer.get(), EIndexFormat::UInt32, 0);
 
-    context->VSSetShader(m_vs.Get(), nullptr, 0);
-    context->PSSetShader(m_ps.Get(), nullptr, 0);
-    context->VSSetConstantBuffers(0, 1, m_cbTransform.GetAddressOf());
+    // Set constant buffer
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_constantBuffer.get());
 
-    context->PSSetShaderResources(0, 1, &m_envCubemap);
-    context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
+    // Set texture and sampler
+    cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_envTexture.get());
+    cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Draw
-    context->DrawIndexed(m_indexCount, 0, 0);
-
-    // Unbind resources
-    ID3D11ShaderResourceView* nullSRV = nullptr;
-    context->PSSetShaderResources(0, 1, &nullSRV);
+    cmdList->DrawIndexed(m_indexCount, 0, 0);
 }
 
-void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
+void CSkybox::createCubeMesh() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Cube vertices (positions only)
+    SkyboxVertex vertices[] = {
+        // Front face
+        {{-1.0f, -1.0f, -1.0f}}, {{ 1.0f, -1.0f, -1.0f}}, {{ 1.0f,  1.0f, -1.0f}}, {{-1.0f,  1.0f, -1.0f}},
+        // Back face
+        {{-1.0f, -1.0f,  1.0f}}, {{ 1.0f, -1.0f,  1.0f}}, {{ 1.0f,  1.0f,  1.0f}}, {{-1.0f,  1.0f,  1.0f}},
+        // Left face
+        {{-1.0f, -1.0f, -1.0f}}, {{-1.0f,  1.0f, -1.0f}}, {{-1.0f,  1.0f,  1.0f}}, {{-1.0f, -1.0f,  1.0f}},
+        // Right face
+        {{ 1.0f, -1.0f, -1.0f}}, {{ 1.0f,  1.0f, -1.0f}}, {{ 1.0f,  1.0f,  1.0f}}, {{ 1.0f, -1.0f,  1.0f}},
+        // Top face
+        {{-1.0f,  1.0f, -1.0f}}, {{ 1.0f,  1.0f, -1.0f}}, {{ 1.0f,  1.0f,  1.0f}}, {{-1.0f,  1.0f,  1.0f}},
+        // Bottom face
+        {{-1.0f, -1.0f, -1.0f}}, {{ 1.0f, -1.0f, -1.0f}}, {{ 1.0f, -1.0f,  1.0f}}, {{-1.0f, -1.0f,  1.0f}}
+    };
+
+    uint32_t indices[] = {
+        0, 1, 2,  0, 2, 3,    // Front
+        4, 6, 5,  4, 7, 6,    // Back
+        8, 9,10,  8,10,11,    // Left
+        12,14,13, 12,15,14,   // Right
+        16,17,18, 16,18,19,   // Top
+        20,22,21, 20,23,22    // Bottom
+    };
+
+    m_indexCount = 36;
+
+    // Create vertex buffer
+    BufferDesc vbDesc;
+    vbDesc.size = sizeof(vertices);
+    vbDesc.usage = EBufferUsage::Vertex;
+    vbDesc.cpuAccess = ECPUAccess::None;
+    m_vertexBuffer.reset(ctx->CreateBuffer(vbDesc, vertices));
+
+    // Create index buffer
+    BufferDesc ibDesc;
+    ibDesc.size = sizeof(indices);
+    ibDesc.usage = EBufferUsage::Index;
+    ibDesc.cpuAccess = ECPUAccess::None;
+    m_indexBuffer.reset(ctx->CreateBuffer(ibDesc, indices));
+}
+
+void CSkybox::createShaders() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Load shader source from files (paths relative to E:\forfun\assets working directory)
+    std::string vsSource = LoadShaderSource("../source/code/Shader/Skybox.vs.hlsl");
+    std::string psSource = LoadShaderSource("../source/code/Shader/Skybox.ps.hlsl");
+
+    if (vsSource.empty() || psSource.empty()) {
+        CFFLog::Error("Failed to load Skybox shader files!");
+        return;
+    }
+
+    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    compileFlags |= D3DCOMPILE_DEBUG;
+#endif
+
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* psBlob = nullptr;
+    ID3DBlob* err = nullptr;
+
+    // Compile Vertex Shader
+    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "Skybox.vs.hlsl", nullptr, nullptr,
+                           "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            CFFLog::Error("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
+        }
+        return;
+    }
+
+    // Compile Pixel Shader
+    hr = D3DCompile(psSource.c_str(), psSource.size(), "Skybox.ps.hlsl", nullptr, nullptr,
+                   "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            CFFLog::Error("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===");
+            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
+        }
+        vsBlob->Release();
+        return;
+    }
+
+    // Create shader objects using RHI
+    ShaderDesc vsDesc;
+    vsDesc.type = EShaderType::Vertex;
+    vsDesc.bytecode = vsBlob->GetBufferPointer();
+    vsDesc.bytecodeSize = vsBlob->GetBufferSize();
+    m_vs.reset(ctx->CreateShader(vsDesc));
+
+    ShaderDesc psDesc;
+    psDesc.type = EShaderType::Pixel;
+    psDesc.bytecode = psBlob->GetBufferPointer();
+    psDesc.bytecodeSize = psBlob->GetBufferSize();
+    m_ps.reset(ctx->CreateShader(psDesc));
+
+    vsBlob->Release();
+    psBlob->Release();
+}
+
+void CSkybox::createPipelineState() {
+    if (!m_vs || !m_ps) return;
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs.get();
+    psoDesc.pixelShader = m_ps.get();
+
+    // Input layout: POSITION only
+    psoDesc.inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 }
+    };
+
+    // Rasterizer state: no culling for skybox
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.depthClipEnable = true;
+
+    // Depth stencil state: depth test but no write (skybox at far plane)
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+
+    // Blend state: no blending
+    psoDesc.blend.blendEnable = false;
+
+    // Primitive topology
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+
+    m_pso.reset(ctx->CreatePipelineState(psoDesc));
+}
+
+void CSkybox::createConstantBuffer() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    BufferDesc cbDesc;
+    cbDesc.size = sizeof(CB_SkyboxTransform);
+    cbDesc.usage = EBufferUsage::Constant;
+    cbDesc.cpuAccess = ECPUAccess::Write;
+    m_constantBuffer.reset(ctx->CreateBuffer(cbDesc, nullptr));
+}
+
+void CSkybox::createSampler() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    SamplerDesc samplerDesc;
+    samplerDesc.filter = EFilter::MinMagMipLinear;
+    samplerDesc.addressU = ETextureAddressMode::Wrap;
+    samplerDesc.addressV = ETextureAddressMode::Wrap;
+    samplerDesc.addressW = ETextureAddressMode::Wrap;
+
+    m_sampler.reset(ctx->CreateSampler(samplerDesc));
+}
+
+// ============================================
+// Legacy D3D11 Path: HDR to Cubemap Conversion
+// This will be migrated in Phase 6 when per-slice RTV support is added
+// ============================================
+
+void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int size) {
+    ID3D11Device* device = static_cast<ID3D11Device*>(CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(CRHIManager::Instance().GetRenderContext()->GetNativeContext());
     if (!device || !context) return;
 
     // Load HDR file
@@ -279,19 +380,19 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     cubeDesc.SampleDesc.Count = 1;
     cubeDesc.Usage = D3D11_USAGE_DEFAULT;
     cubeDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    cubeDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE | D3D11_RESOURCE_MISC_GENERATE_MIPS;  // Enable mipmap generation
-    device->CreateTexture2D(&cubeDesc, nullptr, m_ownedEnvTexture.GetAddressOf());
+    cubeDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE | D3D11_RESOURCE_MISC_GENERATE_MIPS;
+
+    ComPtr<ID3D11Texture2D> cubeTexture;
+    device->CreateTexture2D(&cubeDesc, nullptr, cubeTexture.GetAddressOf());
 
     // Create SRV for cubemap (all mip levels)
     D3D11_SHADER_RESOURCE_VIEW_DESC cubeSRVDesc{};
     cubeSRVDesc.Format = cubeDesc.Format;
     cubeSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
     cubeSRVDesc.TextureCube.MipLevels = -1;  // -1 = all mip levels
-    device->CreateShaderResourceView(m_ownedEnvTexture.Get(), &cubeSRVDesc, m_ownedEnvCubemap.GetAddressOf());
 
-    // Set raw pointers for rendering
-    m_envTexture = m_ownedEnvTexture.Get();
-    m_envCubemap = m_ownedEnvCubemap.Get();
+    ComPtr<ID3D11ShaderResourceView> cubeSRV;
+    device->CreateShaderResourceView(cubeTexture.Get(), &cubeSRVDesc, cubeSRV.GetAddressOf());
 
     // Load conversion shaders from files
     std::string convVsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.vs.hlsl");
@@ -335,6 +436,16 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     ComPtr<ID3D11PixelShader> convPS;
     device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, convVS.GetAddressOf());
     device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, convPS.GetAddressOf());
+
+    // Create sampler for conversion
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sd.MinLOD = 0;
+    sd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> convSampler;
+    device->CreateSamplerState(&sd, convSampler.GetAddressOf());
 
     // Render to each cubemap face
     XMMATRIX captureProjection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 1.0f, 0.1f, 10.0f);
@@ -401,7 +512,7 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
         rtvDesc.Texture2DArray.ArraySize = 1;
 
         ComPtr<ID3D11RenderTargetView> rtv;
-        device->CreateRenderTargetView(m_ownedEnvTexture.Get(), &rtvDesc, rtv.GetAddressOf());
+        device->CreateRenderTargetView(cubeTexture.Get(), &rtvDesc, rtv.GetAddressOf());
 
         // Set render target
         context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
@@ -432,7 +543,7 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
         context->PSSetShader(convPS.Get(), nullptr, 0);
         context->VSSetConstantBuffers(0, 1, tempCB.GetAddressOf());
         context->PSSetShaderResources(0, 1, equirectSRV.GetAddressOf());
-        context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
+        context->PSSetSamplers(0, 1, convSampler.GetAddressOf());
 
         // Draw
         context->DrawIndexed(36, 0, 0);
@@ -446,113 +557,23 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
 
     // Calculate mip level count before generation
     D3D11_TEXTURE2D_DESC finalDesc;
-    m_ownedEnvTexture->GetDesc(&finalDesc);
+    cubeTexture->GetDesc(&finalDesc);
     int mipCount = finalDesc.MipLevels;
 
     CFFLog::Info("Skybox: Generating mipmaps for %dx%d cubemap (%d levels)...", size, size, mipCount);
 
     // Generate mipmaps for the cubemap
-    context->GenerateMips(m_ownedEnvCubemap.Get());
+    context->GenerateMips(cubeSRV.Get());
 
     CFFLog::Info("Skybox: Environment cubemap ready (%dx%d, %d mip levels)", size, size, mipCount);
-}
 
-void CSkybox::createCubeMesh() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
-
-    // Cube vertices (positions only)
-    SkyboxVertex vertices[] = {
-        // Front face
-        {{-1.0f, -1.0f, -1.0f}}, {{ 1.0f, -1.0f, -1.0f}}, {{ 1.0f,  1.0f, -1.0f}}, {{-1.0f,  1.0f, -1.0f}},
-        // Back face
-        {{-1.0f, -1.0f,  1.0f}}, {{ 1.0f, -1.0f,  1.0f}}, {{ 1.0f,  1.0f,  1.0f}}, {{-1.0f,  1.0f,  1.0f}},
-        // Left face
-        {{-1.0f, -1.0f, -1.0f}}, {{-1.0f,  1.0f, -1.0f}}, {{-1.0f,  1.0f,  1.0f}}, {{-1.0f, -1.0f,  1.0f}},
-        // Right face
-        {{ 1.0f, -1.0f, -1.0f}}, {{ 1.0f,  1.0f, -1.0f}}, {{ 1.0f,  1.0f,  1.0f}}, {{ 1.0f, -1.0f,  1.0f}},
-        // Top face
-        {{-1.0f,  1.0f, -1.0f}}, {{ 1.0f,  1.0f, -1.0f}}, {{ 1.0f,  1.0f,  1.0f}}, {{-1.0f,  1.0f,  1.0f}},
-        // Bottom face
-        {{-1.0f, -1.0f, -1.0f}}, {{ 1.0f, -1.0f, -1.0f}}, {{ 1.0f, -1.0f,  1.0f}}, {{-1.0f, -1.0f,  1.0f}}
-    };
-
-    uint32_t indices[] = {
-        0, 1, 2,  0, 2, 3,    // Front
-        4, 6, 5,  4, 7, 6,    // Back
-        8, 9,10,  8,10,11,    // Left
-        12,14,13, 12,15,14,   // Right
-        16,17,18, 16,18,19,   // Top
-        20,22,21, 20,23,22    // Bottom
-    };
-
-    m_indexCount = 36;
-
-    // Create vertex buffer
-    D3D11_BUFFER_DESC vbd{};
-    vbd.ByteWidth = sizeof(vertices);
-    vbd.Usage = D3D11_USAGE_DEFAULT;
-    vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA vbData{ vertices, 0, 0 };
-    device->CreateBuffer(&vbd, &vbData, m_vertexBuffer.GetAddressOf());
-
-    // Create index buffer
-    D3D11_BUFFER_DESC ibd{};
-    ibd.ByteWidth = sizeof(indices);
-    ibd.Usage = D3D11_USAGE_DEFAULT;
-    ibd.BindFlags = D3D11_BIND_INDEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA ibData{ indices, 0, 0 };
-    device->CreateBuffer(&ibd, &ibData, m_indexBuffer.GetAddressOf());
-}
-
-void CSkybox::createShaders() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
-
-    // Load shader source from files (paths relative to E:\forfun\assets working directory)
-    std::string vsSource = LoadShaderSource("../source/code/Shader/Skybox.vs.hlsl");
-    std::string psSource = LoadShaderSource("../source/code/Shader/Skybox.ps.hlsl");
-
-    if (vsSource.empty() || psSource.empty()) {
-        CFFLog::Error("Failed to load Skybox shader files!");
-        return;
-    }
-
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
-#if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
-#endif
-
-    ComPtr<ID3DBlob> vsBlob, psBlob, err;
-
-    // Compile Vertex Shader
-    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "Skybox.vs.hlsl", nullptr, nullptr,
-                           "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
-        return;
-    }
-
-    // Compile Pixel Shader
-    hr = D3DCompile(psSource.c_str(), psSource.size(), "Skybox.ps.hlsl", nullptr, nullptr,
-                   "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
-        return;
-    }
-
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
-
-    // Create input layout
-    D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
-    };
-    device->CreateInputLayout(layout, 1, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
+    // Wrap the D3D11 texture in RHI (transfers ownership)
+    IRenderContext* rhiCtx = CRHIManager::Instance().GetRenderContext();
+    m_envTexture.reset(rhiCtx->WrapNativeTexture(
+        cubeTexture.Detach(),
+        cubeSRV.Detach(),
+        size,
+        size,
+        ETextureFormat::R16G16B16A16_FLOAT
+    ));
 }

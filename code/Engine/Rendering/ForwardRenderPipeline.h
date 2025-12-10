@@ -5,8 +5,8 @@
 #include "PostProcessPass.h"
 #include "DebugLinePass.h"
 #include "GridPass.h"
+#include "RHI/RHIPointers.h"
 #include <d3d11.h>
-#include <wrl/client.h>
 
 // ============================================
 // CForwardRenderPipeline - Forward 渲染流程
@@ -38,10 +38,14 @@ public:
     void Render(const RenderContext& ctx) override;
 
     // 访问离屏纹理（用于 ImGui 显示）
-    ID3D11ShaderResourceView* GetOffscreenSRV() const { return m_offLDR.srv.Get(); }
-    ID3D11Texture2D* GetOffscreenTexture() const { return m_offLDR.color.Get(); }
-    unsigned int GetOffscreenWidth() const { return m_offLDR.w; }
-    unsigned int GetOffscreenHeight() const { return m_offLDR.h; }
+    ID3D11ShaderResourceView* GetOffscreenSRV() const {
+        return m_offLDR ? static_cast<ID3D11ShaderResourceView*>(m_offLDR->GetSRV()) : nullptr;
+    }
+    ID3D11Texture2D* GetOffscreenTexture() const {
+        return m_offLDR ? static_cast<ID3D11Texture2D*>(m_offLDR->GetNativeHandle()) : nullptr;
+    }
+    unsigned int GetOffscreenWidth() const { return m_offscreenWidth; }
+    unsigned int GetOffscreenHeight() const { return m_offscreenHeight; }
 
     // 访问内部 Pass（用于特殊需求）
     CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
@@ -60,24 +64,11 @@ private:
     CPostProcessPass m_postProcess;
 
     // ============================================
-    // 离屏目标（HDR + LDR）
+    // 离屏目标（HDR + LDR）使用 RHI 管理
     // ============================================
-    struct Offscreen {
-        Microsoft::WRL::ComPtr<ID3D11Texture2D> color;
-        Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rtv;
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
-        Microsoft::WRL::ComPtr<ID3D11Texture2D> depth;
-        Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsv;
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> depthSRV;
-        unsigned int w = 0, h = 0;
-
-        void Reset() {
-            color.Reset(); rtv.Reset(); srv.Reset();
-            depth.Reset(); dsv.Reset(); depthSRV.Reset();
-            w = 0; h = 0;
-        }
-    };
-
-    Offscreen m_off;    // HDR 中间目标（R16G16B16A16_FLOAT）
-    Offscreen m_offLDR; // LDR 最终目标（R8G8B8A8_UNORM_SRGB RTV + R8G8B8A8_UNORM SRV）
+    RHI::TexturePtr m_offHDR;        // HDR 中间目标（R16G16B16A16_FLOAT）
+    RHI::TexturePtr m_offDepth;      // 深度缓冲（R24G8_TYPELESS）
+    RHI::TexturePtr m_offLDR;        // LDR 最终目标（R8G8B8A8_TYPELESS with sRGB RTV）
+    unsigned int m_offscreenWidth = 0;
+    unsigned int m_offscreenHeight = 0;
 };

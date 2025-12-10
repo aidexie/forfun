@@ -12,6 +12,8 @@
 #include "Engine/Rendering/Skybox.h"
 #include "Engine/Rendering/IBLGenerator.h"
 #include "Core/Exporter/KTXExporter.h"
+#include "RHI/RHIResources.h"
+#include <d3d11.h>
 
 using json = nlohmann::json;
 
@@ -186,7 +188,9 @@ void Panels::DrawHDRExportWindow() {
             s_exportProgress = 0.4f;
             s_exportStatus = "Generating irradiance map...";
 
-            irradianceSRV = tempIBL.GenerateIrradianceMap(tempSkybox.GetEnvironmentMap(), 32);
+            RHI::ITexture* envTexture = tempSkybox.GetEnvironmentTexture();
+            ID3D11ShaderResourceView* envSRV = envTexture ? static_cast<ID3D11ShaderResourceView*>(envTexture->GetSRV()) : nullptr;
+            irradianceSRV = tempIBL.GenerateIrradianceMap(envSRV, 32);
             if (!irradianceSRV) {
                 s_exportStatus = "ERROR: Failed to generate irradiance map";
                 success = false;
@@ -197,7 +201,10 @@ void Panels::DrawHDRExportWindow() {
             s_exportProgress = 0.5f;
             s_exportStatus = "Generating pre-filtered map (this may take a while)...";
 
-            prefilterSRV = tempIBL.GeneratePreFilteredMap(tempSkybox.GetEnvironmentMap(), 128, 7);
+            // Reuse envSRV from above (same texture)
+            RHI::ITexture* envTex = tempSkybox.GetEnvironmentTexture();
+            ID3D11ShaderResourceView* envSrvForPrefilter = envTex ? static_cast<ID3D11ShaderResourceView*>(envTex->GetSRV()) : nullptr;
+            prefilterSRV = tempIBL.GeneratePreFilteredMap(envSrvForPrefilter, 128, 7);
             if (!prefilterSRV) {
                 s_exportStatus = "ERROR: Failed to generate pre-filtered map";
                 success = false;

@@ -1,6 +1,7 @@
 #include "ForwardRenderPipeline.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
 #include "Engine/Scene.h"
@@ -9,12 +10,10 @@
 #include "Engine/Camera.h"
 #include <d3d11.h>
 
-using Microsoft::WRL::ComPtr;
-
 bool CForwardRenderPipeline::Initialize()
 {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!rhiCtx) return false;
 
     // 初始化各个 Pass
     if (!m_shadowPass.Initialize()) {
@@ -43,8 +42,11 @@ void CForwardRenderPipeline::Shutdown()
     m_debugLinePass.Shutdown();
     CGridPass::Instance().Shutdown();
 
-    m_off.Reset();
-    m_offLDR.Reset();
+    m_offHDR.reset();
+    m_offDepth.reset();
+    m_offLDR.reset();
+    m_offscreenWidth = 0;
+    m_offscreenHeight = 0;
 }
 
 void CForwardRenderPipeline::Render(const RenderContext& ctx)
@@ -64,6 +66,12 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 1. Ensure offscreen targets are ready
     // ============================================
     ensureOffscreen(ctx.width, ctx.height);
+
+    // Get RTV/DSV from RHI textures
+    ID3D11RenderTargetView* hdrRTV = static_cast<ID3D11RenderTargetView*>(m_offHDR->GetRTV());
+    ID3D11DepthStencilView* depthDSV = static_cast<ID3D11DepthStencilView*>(m_offDepth->GetDSV());
+    ID3D11ShaderResourceView* hdrSRV = static_cast<ID3D11ShaderResourceView*>(m_offHDR->GetSRV());
+    ID3D11RenderTargetView* ldrRTV = static_cast<ID3D11RenderTargetView*>(m_offLDR->GetRTV());
 
     // ============================================
     // 2. Shadow Pass (if enabled)
@@ -89,12 +97,12 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 3. Clear HDR render target
     // ============================================
-    d3dCtx->OMSetRenderTargets(1, m_off.rtv.GetAddressOf(), m_off.dsv.Get());
+    d3dCtx->OMSetRenderTargets(1, &hdrRTV, depthDSV);
 
     const float clearColor[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
-    d3dCtx->ClearRenderTargetView(m_off.rtv.Get(), clearColor);
-    if (m_off.dsv) {
-        d3dCtx->ClearDepthStencilView(m_off.dsv.Get(),
+    d3dCtx->ClearRenderTargetView(hdrRTV, clearColor);
+    if (depthDSV) {
+        d3dCtx->ClearDepthStencilView(depthDSV,
                                      D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
                                      1.0f, 0);
     }
@@ -105,17 +113,17 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     {
         CScopedDebugEvent evt(d3dCtx, L"Scene Rendering");
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
-                              m_off.rtv.Get(), m_off.dsv.Get(),
+                              m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
                               shadowData);
     }
 
     // ============================================
-    // 5. Post-Processing (HDR → LDR)
+    // 5. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(d3dCtx, L"Post-Processing");
-        m_postProcess.Render(m_off.srv.Get(), m_offLDR.rtv.Get(),
+        m_postProcess.Render(m_offHDR.get(), m_offLDR.get(),
                            ctx.width, ctx.height, 1.0f);
     }
     // Note: If PostProcessing is disabled, we skip this step and use HDR directly
@@ -126,7 +134,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     if (ctx.showFlags.DebugLines) {
         CScopedDebugEvent evt(d3dCtx, L"Debug Lines");
         // Rebind LDR RTV + HDR depth (Debug lines need depth test)
-        d3dCtx->OMSetRenderTargets(1, m_offLDR.rtv.GetAddressOf(), m_off.dsv.Get());
+        d3dCtx->OMSetRenderTargets(1, &ldrRTV, depthDSV);
         m_debugLinePass.Render(ctx.camera.GetViewMatrix(),
                               ctx.camera.GetProjectionMatrix(),
                               ctx.width, ctx.height);
@@ -138,7 +146,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     if (ctx.showFlags.Grid) {
         CScopedDebugEvent evt(d3dCtx, L"Grid");
         // Rebind LDR RTV + HDR depth (Grid needs depth test)
-        d3dCtx->OMSetRenderTargets(1, m_offLDR.rtv.GetAddressOf(), m_off.dsv.Get());
+        d3dCtx->OMSetRenderTargets(1, &ldrRTV, depthDSV);
 
         CGridPass::Instance().Render(ctx.camera.GetViewMatrix(),
                                      ctx.camera.GetProjectionMatrix(),
@@ -150,7 +158,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     if (ctx.finalOutputRTV) {
         // Unbind all render targets before copy operations
-        // D3D11 doesn't allow a texture to be bound as RTV and used as copy source
+        // D3D11 does not allow a texture to be bound as RTV and used as copy source
         ID3D11RenderTargetView* nullRTV = nullptr;
         ID3D11DepthStencilView* nullDSV = nullptr;
         d3dCtx->OMSetRenderTargets(1, &nullRTV, nullDSV);
@@ -158,9 +166,9 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
         // Choose source based on outputFormat
         ID3D11Texture2D* sourceTexture;
         if (ctx.outputFormat == RenderContext::EOutputFormat::HDR) {
-            sourceTexture = m_off.color.Get();      // HDR linear (R16G16B16A16_FLOAT)
+            sourceTexture = static_cast<ID3D11Texture2D*>(m_offHDR->GetNativeHandle());  // HDR linear
         } else {
-            sourceTexture = m_offLDR.color.Get();   // LDR sRGB (R8G8B8A8_UNORM_SRGB)
+            sourceTexture = static_cast<ID3D11Texture2D*>(m_offLDR->GetNativeHandle());  // LDR sRGB
         }
 
         // Get destination resource from RTV
@@ -186,29 +194,25 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
                 d3dCtx->CopyResource(dstResource, sourceTexture);
             } else {
                 // Copy single subresource (e.g., 2D -> Cubemap face)
-                // Assume: src is 2D (array=1, mip=0), dst is array texture (e.g., cubemap face)
-                UINT dstSubresource = 0;  // Will be overridden if dst is array texture
+                UINT dstSubresource = 0;
 
                 // If destination is array texture (like cubemap), we need to get the correct subresource
-                // The RTV descriptor tells us which array slice to write to
                 D3D11_RENDER_TARGET_VIEW_DESC rtvDesc;
                 ctx.finalOutputRTV->GetDesc(&rtvDesc);
 
                 if (rtvDesc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY) {
-                    // Destination is an array texture (e.g., cubemap face)
                     UINT arraySlice = rtvDesc.Texture2DArray.FirstArraySlice;
                     UINT mipSlice = rtvDesc.Texture2DArray.MipSlice;
                     dstSubresource = D3D11CalcSubresource(mipSlice, arraySlice, dstDesc.MipLevels);
                 }
 
-                // Copy entire source to destination subresource
                 d3dCtx->CopySubresourceRegion(
-                    dstResource,       // dst
-                    dstSubresource,    // dst subresource
-                    0, 0, 0,          // dst x, y, z
-                    sourceTexture,     // src
-                    0,                // src subresource (mip 0, array 0)
-                    nullptr           // copy entire src (null = full region)
+                    dstResource,
+                    dstSubresource,
+                    0, 0, 0,
+                    sourceTexture,
+                    0,
+                    nullptr
                 );
             }
 
@@ -219,84 +223,39 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
 
 void CForwardRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
 {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!rhiCtx) return;
 
     if (w == 0 || h == 0) return;
-    if (m_off.color && w == m_off.w && h == m_off.h) return;
+    if (m_offHDR && w == m_offscreenWidth && h == m_offscreenHeight) return;
+
+    m_offscreenWidth = w;
+    m_offscreenHeight = h;
 
     // ============================================
     // HDR Render Target (R16G16B16A16_FLOAT)
     // ============================================
-    m_off.Reset();
-    m_off.w = w; m_off.h = h;
-
-    D3D11_TEXTURE2D_DESC td{};
-    td.Width = w;
-    td.Height = h;
-    td.MipLevels = 1;
-    td.ArraySize = 1;
-    td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;  // HDR linear space
-    td.SampleDesc.Count = 1;
-    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    device->CreateTexture2D(&td, nullptr, m_off.color.GetAddressOf());
-
-    D3D11_RENDER_TARGET_VIEW_DESC rvd{};
-    rvd.Format = td.Format;
-    rvd.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-    device->CreateRenderTargetView(m_off.color.Get(), &rvd, m_off.rtv.GetAddressOf());
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
-    sv.Format = td.Format;
-    sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    sv.Texture2D.MipLevels = 1;
-    device->CreateShaderResourceView(m_off.color.Get(), &sv, m_off.srv.GetAddressOf());
+    {
+        RHI::TextureDesc desc = RHI::TextureDesc::RenderTarget(w, h, RHI::ETextureFormat::R16G16B16A16_FLOAT);
+        desc.debugName = "HDR_RenderTarget";
+        m_offHDR.reset(rhiCtx->CreateTexture(desc, nullptr));
+    }
 
     // ============================================
-    // Depth Buffer (R24G8_TYPELESS)
+    // Depth Buffer (R24G8_TYPELESS with DSV + SRV)
     // ============================================
-    D3D11_TEXTURE2D_DESC dd = td;
-    dd.Format = DXGI_FORMAT_R24G8_TYPELESS;
-    dd.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
-    device->CreateTexture2D(&dd, nullptr, m_off.depth.GetAddressOf());
-
-    D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
-    dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-    dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-    dsvDesc.Texture2D.MipSlice = 0;
-    device->CreateDepthStencilView(m_off.depth.Get(), &dsvDesc, m_off.dsv.GetAddressOf());
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC depthSRVDesc{};
-    depthSRVDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
-    depthSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    depthSRVDesc.Texture2D.MostDetailedMip = 0;
-    depthSRVDesc.Texture2D.MipLevels = 1;
-    device->CreateShaderResourceView(m_off.depth.Get(), &depthSRVDesc, m_off.depthSRV.GetAddressOf());
+    {
+        RHI::TextureDesc desc = RHI::TextureDesc::DepthStencilWithSRV(w, h);
+        desc.debugName = "Depth_Buffer";
+        m_offDepth.reset(rhiCtx->CreateTexture(desc, nullptr));
+    }
 
     // ============================================
-    // LDR sRGB Render Target (R8G8B8A8_TYPELESS)
+    // LDR sRGB Render Target (R8G8B8A8_TYPELESS with sRGB RTV + UNORM SRV)
     // ============================================
-    m_offLDR.Reset();
-    m_offLDR.w = w; m_offLDR.h = h;
-
-    D3D11_TEXTURE2D_DESC ldrDesc{};
-    ldrDesc.Width = w;
-    ldrDesc.Height = h;
-    ldrDesc.MipLevels = 1;
-    ldrDesc.ArraySize = 1;
-    ldrDesc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;  // TYPELESS for different views
-    ldrDesc.SampleDesc.Count = 1;
-    ldrDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    device->CreateTexture2D(&ldrDesc, nullptr, m_offLDR.color.GetAddressOf());
-
-    D3D11_RENDER_TARGET_VIEW_DESC ldrRTVDesc{};
-    ldrRTVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;  // RTV: sRGB (gamma correction on write)
-    ldrRTVDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-    device->CreateRenderTargetView(m_offLDR.color.Get(), &ldrRTVDesc, m_offLDR.rtv.GetAddressOf());
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC ldrSRVDesc{};
-    ldrSRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // SRV: UNORM (no sRGB decode, already gamma-corrected)
-    ldrSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    ldrSRVDesc.Texture2D.MipLevels = 1;
-    device->CreateShaderResourceView(m_offLDR.color.Get(), &ldrSRVDesc, m_offLDR.srv.GetAddressOf());
+    {
+        RHI::TextureDesc desc = RHI::TextureDesc::LDRRenderTarget(w, h);
+        desc.debugName = "LDR_RenderTarget";
+        m_offLDR.reset(rhiCtx->CreateTexture(desc, nullptr));
+    }
 }

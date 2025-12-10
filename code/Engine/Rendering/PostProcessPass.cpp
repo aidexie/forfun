@@ -1,123 +1,113 @@
 #include "PostProcessPass.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/RHIDescriptors.h"
+#include "RHI/ICommandList.h"
+#include "Core/FFLog.h"
 #include <d3dcompiler.h>
+#include <cstring>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-using Microsoft::WRL::ComPtr;
+using namespace RHI;
 
 struct FullscreenVertex {
     float x, y;       // Position (NDC space)
     float u, v;       // UV
 };
 
+struct CB_PostProcess {
+    float exposure;
+    float _pad[3];
+};
+
 bool CPostProcessPass::Initialize() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    if (m_initialized) return true;
 
     createFullscreenQuad();
     createShaders();
+    createPipelineState();
 
     // Create sampler
-    D3D11_SAMPLER_DESC sd{};
-    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    sd.MinLOD = 0;
-    sd.MaxLOD = D3D11_FLOAT32_MAX;
-    device->CreateSamplerState(&sd, m_sampler.GetAddressOf());
+    SamplerDesc samplerDesc;
+    samplerDesc.filter = EFilter::MinMagMipLinear;
+    samplerDesc.addressU = ETextureAddressMode::Clamp;
+    samplerDesc.addressV = ETextureAddressMode::Clamp;
+    samplerDesc.addressW = ETextureAddressMode::Clamp;
 
-    // Create rasterizer state
-    D3D11_RASTERIZER_DESC rd{};
-    rd.FillMode = D3D11_FILL_SOLID;
-    rd.CullMode = D3D11_CULL_NONE;
-    rd.FrontCounterClockwise = FALSE;
-    rd.DepthClipEnable = FALSE;
-    device->CreateRasterizerState(&rd, m_rasterState.GetAddressOf());
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    m_sampler.reset(ctx->CreateSampler(samplerDesc));
 
-    // Create depth stencil state (no depth test)
-    D3D11_DEPTH_STENCIL_DESC dsd{};
-    dsd.DepthEnable = FALSE;
-    dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    device->CreateDepthStencilState(&dsd, m_depthState.GetAddressOf());
+    // Create constant buffer (CPU writable for updating exposure)
+    BufferDesc cbDesc;
+    cbDesc.size = sizeof(CB_PostProcess);
+    cbDesc.usage = EBufferUsage::Constant;
+    cbDesc.cpuAccess = ECPUAccess::Write;
+    m_constantBuffer.reset(ctx->CreateBuffer(cbDesc, nullptr));
 
-    // Create constant buffer for exposure
-    D3D11_BUFFER_DESC cbd{};
-    cbd.ByteWidth = 16;  // Align to 16 bytes (float4)
-    cbd.Usage = D3D11_USAGE_DEFAULT;
-    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    device->CreateBuffer(&cbd, nullptr, m_constantBuffer.GetAddressOf());
-
+    m_initialized = true;
     return true;
 }
 
 void CPostProcessPass::Shutdown() {
-    m_vs.Reset();
-    m_ps.Reset();
-    m_inputLayout.Reset();
-    m_vertexBuffer.Reset();
-    m_sampler.Reset();
-    m_rasterState.Reset();
-    m_depthState.Reset();
+    m_pso.reset();
+    m_vs.reset();
+    m_ps.reset();
+    m_vertexBuffer.reset();
+    m_constantBuffer.reset();
+    m_sampler.reset();
+    m_initialized = false;
 }
 
-void CPostProcessPass::Render(ID3D11ShaderResourceView* hdrInput,
-                             ID3D11RenderTargetView* ldrOutput,
-                             UINT width, UINT height,
-                             float exposure) {
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!context || !hdrInput || !ldrOutput) return;
+void CPostProcessPass::Render(ITexture* hdrInput,
+                              ITexture* ldrOutput,
+                              uint32_t width, uint32_t height,
+                              float exposure) {
+    if (!m_initialized || !hdrInput || !ldrOutput || !m_pso) return;
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ICommandList* cmdList = ctx->GetCommandList();
 
     // Update constant buffer with exposure
-    float cbData[4] = { exposure, 0.0f, 0.0f, 0.0f };  // Align to float4
-    context->UpdateSubresource(m_constantBuffer.Get(), 0, nullptr, cbData, 0, 0);
+    CB_PostProcess cb;
+    cb.exposure = exposure;
+    cb._pad[0] = cb._pad[1] = cb._pad[2] = 0.0f;
 
-    // Set render target
-    context->OMSetRenderTargets(1, &ldrOutput, nullptr);
+    void* mappedData = m_constantBuffer->Map();
+    if (mappedData) {
+        memcpy(mappedData, &cb, sizeof(CB_PostProcess));
+        m_constantBuffer->Unmap();
+    }
+
+    // Set render target (no depth)
+    ITexture* renderTargets[] = { ldrOutput };
+    cmdList->SetRenderTargets(1, renderTargets, nullptr);
 
     // Set viewport
-    D3D11_VIEWPORT vp{};
-    vp.Width = (float)width;
-    vp.Height = (float)height;
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    context->RSSetViewports(1, &vp);
+    cmdList->SetViewport(0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f);
 
-    // Set render states
-    context->RSSetState(m_rasterState.Get());
-    context->OMSetDepthStencilState(m_depthState.Get(), 0);
+    // Set pipeline state (includes rasterizer, depth stencil, blend states)
+    cmdList->SetPipelineState(m_pso.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
 
-    // Set pipeline
-    context->IASetInputLayout(m_inputLayout.Get());
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    // Set vertex buffer
+    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
 
-    UINT stride = sizeof(FullscreenVertex);
-    UINT offset = 0;
-    context->IASetVertexBuffers(0, 1, m_vertexBuffer.GetAddressOf(), &stride, &offset);
-
-    context->VSSetShader(m_vs.Get(), nullptr, 0);
-    context->PSSetShader(m_ps.Get(), nullptr, 0);
-
-    context->PSSetConstantBuffers(0, 1, m_constantBuffer.GetAddressOf());
-    context->PSSetShaderResources(0, 1, &hdrInput);
-    context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
+    // Set constant buffer and resources
+    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_constantBuffer.get());
+    cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
+    cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Draw fullscreen quad
-    context->Draw(4, 0);
-
-    // Unbind ALL resources to prevent hazards
-    ID3D11ShaderResourceView* nullSRVs[8] = { nullptr };
-    context->PSSetShaderResources(0, 8, nullSRVs);
-    context->VSSetShaderResources(0, 8, nullSRVs);
+    cmdList->Draw(4, 0);
 
     // Unbind render target to prevent hazards
-    context->OMSetRenderTargets(0, nullptr, nullptr);
+    cmdList->SetRenderTargets(0, nullptr, nullptr);
 }
 
 void CPostProcessPass::createFullscreenQuad() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
 
     // Fullscreen quad in NDC space (triangle strip)
     FullscreenVertex vertices[] = {
@@ -127,17 +117,17 @@ void CPostProcessPass::createFullscreenQuad() {
         {  1.0f, -1.0f,  1.0f, 1.0f }   // Bottom-right
     };
 
-    D3D11_BUFFER_DESC bd{};
-    bd.ByteWidth = sizeof(vertices);
-    bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    D3D11_SUBRESOURCE_DATA initData{ vertices, 0, 0 };
-    device->CreateBuffer(&bd, &initData, m_vertexBuffer.GetAddressOf());
+    BufferDesc vbDesc;
+    vbDesc.size = sizeof(vertices);
+    vbDesc.usage = EBufferUsage::Vertex;
+    vbDesc.cpuAccess = ECPUAccess::None;
+
+    m_vertexBuffer.reset(ctx->CreateBuffer(vbDesc, vertices));
 }
 
 void CPostProcessPass::createShaders() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
 
     // Vertex shader: Pass-through with UV
     const char* vsCode = R"(
@@ -182,11 +172,6 @@ void CPostProcessPass::createShaders() {
             return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
         }
 
-        // Reinhard Tone Mapping (simple)
-        float3 Reinhard(float3 x) {
-            return x / (x + 1.0);
-        }
-
         float4 main(PSIn input) : SV_Target {
             // Sample HDR input (linear space)
             float3 hdrColor = hdrTexture.Sample(samp, input.uv).rgb;
@@ -196,28 +181,93 @@ void CPostProcessPass::createShaders() {
 
             // Tone mapping: HDR → LDR [0, 1] (still linear space)
             float3 ldrColor = ACESFilm(hdrColor);
-            // Alternative: float3 ldrColor = Reinhard(hdrColor);
 
             // Gamma correction: Linear → sRGB
             // Since output RT is UNORM_SRGB, GPU will do this automatically
-            // If output RT is UNORM, uncomment the line below:
-            // ldrColor = pow(ldrColor, float3(1.0/2.2, 1.0/2.2, 1.0/2.2));
 
             return float4(ldrColor, 1.0);
         }
     )";
 
-    ComPtr<ID3DBlob> vsBlob, psBlob;
-    D3DCompile(vsCode, strlen(vsCode), nullptr, nullptr, nullptr, "main", "vs_5_0", 0, 0, &vsBlob, nullptr);
-    D3DCompile(psCode, strlen(psCode), nullptr, nullptr, nullptr, "main", "ps_5_0", 0, 0, &psBlob, nullptr);
+    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if defined(_DEBUG)
+    compileFlags |= D3DCOMPILE_DEBUG;
+#endif
 
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* psBlob = nullptr;
+    ID3DBlob* err = nullptr;
 
-    // Create input layout
-    D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    // Compile Vertex Shader
+    HRESULT hr = D3DCompile(vsCode, strlen(vsCode), "PostProcess_VS", nullptr, nullptr,
+                           "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            CFFLog::Error("PostProcess VS compilation error: %s", (const char*)err->GetBufferPointer());
+            err->Release();
+        }
+        return;
+    }
+
+    // Compile Pixel Shader
+    hr = D3DCompile(psCode, strlen(psCode), "PostProcess_PS", nullptr, nullptr,
+                   "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
+    if (FAILED(hr)) {
+        if (err) {
+            CFFLog::Error("PostProcess PS compilation error: %s", (const char*)err->GetBufferPointer());
+            err->Release();
+        }
+        vsBlob->Release();
+        return;
+    }
+
+    // Create shader objects using RHI
+    ShaderDesc vsDesc;
+    vsDesc.type = EShaderType::Vertex;
+    vsDesc.bytecode = vsBlob->GetBufferPointer();
+    vsDesc.bytecodeSize = vsBlob->GetBufferSize();
+    m_vs.reset(ctx->CreateShader(vsDesc));
+
+    ShaderDesc psDesc;
+    psDesc.type = EShaderType::Pixel;
+    psDesc.bytecode = psBlob->GetBufferPointer();
+    psDesc.bytecodeSize = psBlob->GetBufferSize();
+    m_ps.reset(ctx->CreateShader(psDesc));
+
+    vsBlob->Release();
+    psBlob->Release();
+}
+
+void CPostProcessPass::createPipelineState() {
+    if (!m_vs || !m_ps) return;
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs.get();
+    psoDesc.pixelShader = m_ps.get();
+
+    // Input layout: POSITION + TEXCOORD
+    psoDesc.inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 0, 8 }
     };
-    device->CreateInputLayout(layout, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
+
+    // Rasterizer state: no culling, no depth clip
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.depthClipEnable = false;
+
+    // Depth stencil state: no depth test
+    psoDesc.depthStencil.depthEnable = false;
+    psoDesc.depthStencil.depthWriteEnable = false;
+
+    // Blend state: no blending
+    psoDesc.blend.blendEnable = false;
+
+    // Primitive topology
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
+
+    m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }

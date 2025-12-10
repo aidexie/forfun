@@ -205,10 +205,12 @@ void bindGlobalResources(
     const CShadowPass::Output* shadowData)
 {
     if (shadowData && shadowData->shadowSampler) {
-        context->PSSetSamplers(1, 1, &shadowData->shadowSampler);
+        ID3D11SamplerState* sampler = static_cast<ID3D11SamplerState*>(shadowData->shadowSampler->GetNativeHandle());
+        context->PSSetSamplers(1, 1, &sampler);
     }
     if (shadowData && shadowData->shadowMapArray) {
-        context->PSSetShaderResources(2, 1, &shadowData->shadowMapArray);
+        ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(shadowData->shadowMapArray->GetSRV());
+        context->PSSetShaderResources(2, 1, &srv);
     }
 
     // t5: BRDF LUT (now from ReflectionProbeManager)

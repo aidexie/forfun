@@ -3,6 +3,7 @@
 #include "Engine/Scene.h"
 #include "Engine/Rendering/Skybox.h"
 #include "RHI/RHIManager.h"
+#include "RHI/RHIResources.h"
 #include "Core/FFLog.h"
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -106,7 +107,8 @@ void Panels::DrawIrradianceDebug() {
             ImGui::Separator();
 
             // Get environment map from Scene's skybox
-            ID3D11ShaderResourceView* envMap = skybox.GetEnvironmentMap();
+            RHI::ITexture* envTexture = skybox.GetEnvironmentTexture();
+            ID3D11ShaderResourceView* envMap = envTexture ? static_cast<ID3D11ShaderResourceView*>(envTexture->GetSRV()) : nullptr;
             if (!envMap) {
                 ImGui::TextColored(ImVec4(1, 0, 0, 1), "No environment map loaded!");
                 ImGui::Text("Load a skybox first.");

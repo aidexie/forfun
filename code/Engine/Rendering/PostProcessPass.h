@@ -1,6 +1,7 @@
 #pragma once
-#include <d3d11.h>
-#include <wrl/client.h>
+#include "RHI/RHIPointers.h"
+#include "RHI/RHIResources.h"
+#include <cstdint>
 
 // CPostProcessPass: Handles tone mapping and gamma correction
 // Converts HDR linear space to LDR sRGB space
@@ -17,22 +18,26 @@ public:
     // hdrInput: HDR linear space texture (R16G16B16A16_FLOAT)
     // ldrOutput: LDR sRGB output render target (R8G8B8A8_UNORM_SRGB)
     // exposure: Exposure adjustment (0.5 = darker, 1.0 = neutral, 2.0 = brighter)
-    void Render(ID3D11ShaderResourceView* hdrInput,
-                ID3D11RenderTargetView* ldrOutput,
-                UINT width, UINT height,
+    void Render(RHI::ITexture* hdrInput,
+                RHI::ITexture* ldrOutput,
+                uint32_t width, uint32_t height,
                 float exposure = 1.0f);
 
 private:
     void createFullscreenQuad();
     void createShaders();
+    void createPipelineState();
 
 private:
-    Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps;
-    Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_vertexBuffer;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_constantBuffer;
-    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
-    Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rasterState;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthState;
+    // Shaders
+    RHI::ShaderPtr m_vs;
+    RHI::ShaderPtr m_ps;
+
+    // Resources
+    RHI::BufferPtr m_vertexBuffer;
+    RHI::BufferPtr m_constantBuffer;
+    RHI::SamplerPtr m_sampler;
+    RHI::PipelineStatePtr m_pso;
+
+    bool m_initialized = false;
 };
