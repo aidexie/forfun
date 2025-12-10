@@ -1,0 +1,33 @@
+#pragma once
+#include "IRenderContext.h"
+#include "RHICommon.h"
+#include <memory>
+
+namespace RHI {
+
+// Singleton manager for global RHI context
+// All rendering passes share the same device/context
+class CRHIManager {
+public:
+    static CRHIManager& Instance();
+
+    // Initialize with backend selection
+    bool Initialize(EBackend backend);
+    void Shutdown();
+
+    // Get the global render context
+    IRenderContext* GetRenderContext() { return m_renderContext.get(); }
+
+    bool IsInitialized() const { return m_initialized; }
+
+private:
+    CRHIManager() = default;
+    ~CRHIManager() = default;
+    CRHIManager(const CRHIManager&) = delete;
+    CRHIManager& operator=(const CRHIManager&) = delete;
+
+    std::unique_ptr<IRenderContext> m_renderContext;
+    bool m_initialized = false;
+};
+
+} // namespace RHI

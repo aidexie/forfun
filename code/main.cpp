@@ -10,6 +10,7 @@
 #include <algorithm>  // For std::transform (fuzzy matching)
 
 #include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
+#include "RHI/RHIManager.h"  // RHI 全局管理器
 #include "Engine/Rendering/ForwardRenderPipeline.h"  // ✅ Forward 渲染流程
 #include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
@@ -314,6 +315,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         goto cleanup;
     }
     dx11Initialized = true;
+    
+    // 3.5) RHI Manager 初始化
+    if (!RHI::CRHIManager::Instance().Initialize(RHI::EBackend::DX11)) {
+        CFFLog::Error("Failed to initialize RHI Manager!");
+        exitCode = -2;
+        goto cleanup;
+    }
+    CFFLog::Info("RHI Manager initialized");
     CFFLog::Info("DX11 context initialized");
 
     // 3) ImGui 初始化（在 main.cpp 内）

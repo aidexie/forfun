@@ -2,7 +2,7 @@
 #include "GridPass.h"
 #include "Core/FFLog.h"
 #include "RHI/RHIDescriptors.h"
-#include "RHI/RHIFactory.h"
+#include "RHI/RHIManager.h"
 #include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
@@ -32,14 +32,6 @@ CGridPass& CGridPass::Instance() {
 void CGridPass::Initialize() {
     if (m_initialized) return;
 
-    // Create RHI context for this pass (Phase 1: each pass owns its own context)
-    // In Phase 2+, this will be passed from the pipeline
-    m_renderContext = RHI::CreateRenderContext(EBackend::DX11);
-    if (!m_renderContext) {
-        CFFLog::Error("Failed to create RHI context for GridPass");
-        return;
-    }
-
     CreateShaders();
     CreateBuffers();
     CreatePipelineState();
@@ -48,21 +40,20 @@ void CGridPass::Initialize() {
 }
 
 void CGridPass::Shutdown() {
-    delete m_pso;
-    delete m_vs;
-    delete m_ps;
-    delete m_cbPerFrame;
-    delete m_renderContext;
-
-    m_pso = nullptr;
-    m_vs = nullptr;
-    m_ps = nullptr;
-    m_cbPerFrame = nullptr;
-    m_renderContext = nullptr;
+    m_pso.reset();
+    m_vs.reset();
+    m_ps.reset();
+    m_cbPerFrame.reset();
     m_initialized = false;
 }
 
 void CGridPass::CreateShaders() {
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) {
+        CFFLog::Error("RHIManager not initialized!");
+        return;
+    }
+
     // Load shader source files
     std::string vsSource = LoadShaderSource("../source/code/Shader/Grid.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/Grid.ps.hlsl");
@@ -111,33 +102,39 @@ void CGridPass::CreateShaders() {
     vsDesc.type = EShaderType::Vertex;
     vsDesc.bytecode = vsBlob->GetBufferPointer();
     vsDesc.bytecodeSize = vsBlob->GetBufferSize();
-    m_vs = m_renderContext->CreateShader(vsDesc);
+    m_vs.reset(renderContext->CreateShader(vsDesc));
 
     ShaderDesc psDesc;
     psDesc.type = EShaderType::Pixel;
     psDesc.bytecode = psBlob->GetBufferPointer();
     psDesc.bytecodeSize = psBlob->GetBufferSize();
-    m_ps = m_renderContext->CreateShader(psDesc);
+    m_ps.reset(renderContext->CreateShader(psDesc));
 
     vsBlob->Release();
     psBlob->Release();
 }
 
 void CGridPass::CreateBuffers() {
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return;
+
     // Create constant buffer
     BufferDesc cbDesc;
     cbDesc.size = sizeof(CBPerFrame);
     cbDesc.usage = EBufferUsage::Constant;
     cbDesc.cpuAccess = ECPUAccess::Write;  // Need write access for Map/Unmap
-    m_cbPerFrame = m_renderContext->CreateBuffer(cbDesc, nullptr);
+    m_cbPerFrame.reset(renderContext->CreateBuffer(cbDesc, nullptr));
 }
 
 void CGridPass::CreatePipelineState() {
     if (!m_vs || !m_ps) return;
 
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return;
+
     PipelineStateDesc psoDesc;
-    psoDesc.vertexShader = m_vs;
-    psoDesc.pixelShader = m_ps;
+    psoDesc.vertexShader = m_vs.get();
+    psoDesc.pixelShader = m_ps.get();
 
     // No input layout (vertex shader generates quad procedurally)
     psoDesc.inputLayout.clear();
@@ -165,11 +162,14 @@ void CGridPass::CreatePipelineState() {
     // Primitive topology
     psoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
 
-    m_pso = m_renderContext->CreatePipelineState(psoDesc);
+    m_pso.reset(renderContext->CreatePipelineState(psoDesc));
 }
 
 void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
-    if (!m_initialized || !m_enabled || !m_pso || !m_renderContext) return;
+    if (!m_initialized || !m_enabled || !m_pso) return;
+
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return;
 
     // Update constant buffer
     XMMATRIX viewProj = view * proj;
@@ -191,15 +191,15 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
     }
 
     // Get command list
-    ICommandList* cmdList = m_renderContext->GetCommandList();
+    ICommandList* cmdList = renderContext->GetCommandList();
 
     // Set pipeline state
-    cmdList->SetPipelineState(m_pso);
+    cmdList->SetPipelineState(m_pso.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
 
     // Bind constant buffer
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbPerFrame);
-    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbPerFrame);
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbPerFrame.get());
+    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbPerFrame.get());
 
     // Draw full-screen quad (4 vertices, triangle strip)
     cmdList->Draw(4, 0);

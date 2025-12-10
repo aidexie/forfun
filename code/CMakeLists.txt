@@ -118,6 +118,9 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/IRenderContext.h
     ${CODE_PATH}/RHI/RHIFactory.cpp
     ${CODE_PATH}/RHI/RHIFactory.h
+    ${CODE_PATH}/RHI/RHIManager.cpp
+    ${CODE_PATH}/RHI/RHIManager.h
+    ${CODE_PATH}/RHI/RHIPointers.h
     # DX11 Backend (implemented in Phase 0.3)
     ${CODE_PATH}/RHI/DX11/DX11CommandList.cpp
     ${CODE_PATH}/RHI/DX11/DX11CommandList.h

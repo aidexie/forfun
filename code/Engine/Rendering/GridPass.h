@@ -1,31 +1,29 @@
 // Engine/Rendering/GridPass.h
 #pragma once
 #include <DirectXMath.h>
-#include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
-#include "RHI/RHIResources.h"
+#include "RHI/RHIPointers.h"
 
 // CGridPass: Renders an infinite procedural grid on the XZ plane at Y=0
 // Uses shader-based rendering (full-screen quad) with depth buffer reconstruction
 // Supports dual-scale grid lines, distance fading, and view angle fading
-// 
-// Phase 1 Migration: Uses RHI internally, but compatible with existing code
+//
+// Phase 2 Migration: Uses global RHI Manager with smart pointers
 class CGridPass {
 public:
     static CGridPass& Instance();
 
-    void Initialize();  // Creates internal RHI context
+    void Initialize();
     void Shutdown();
 
     // Render the grid
-    // Legacy signature for backward compatibility
     void Render(DirectX::XMMATRIX view, DirectX::XMMATRIX proj,
                 DirectX::XMFLOAT3 cameraPos);
 
     // Settings
     void SetEnabled(bool enabled) { m_enabled = enabled; }
     bool IsEnabled() const { return m_enabled; }
-    
+
     void SetGridColor(DirectX::XMFLOAT3 color) { m_gridColor = color; }
     DirectX::XMFLOAT3 GetGridColor() const { return m_gridColor; }
 
@@ -53,11 +51,10 @@ private:
         DirectX::XMFLOAT3 padding;
     };
 
-    RHI::IRenderContext* m_renderContext = nullptr;  // Owned by GridPass for Phase 1
-    RHI::IShader* m_vs = nullptr;
-    RHI::IShader* m_ps = nullptr;
-    RHI::IBuffer* m_cbPerFrame = nullptr;
-    RHI::IPipelineState* m_pso = nullptr;
+    RHI::ShaderPtr m_vs;
+    RHI::ShaderPtr m_ps;
+    RHI::BufferPtr m_cbPerFrame;
+    RHI::PipelineStatePtr m_pso;
 
     bool m_initialized = false;
     bool m_enabled = true;
