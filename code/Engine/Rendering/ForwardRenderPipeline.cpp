@@ -1,6 +1,7 @@
 #include "ForwardRenderPipeline.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
@@ -8,7 +9,6 @@
 #include "Engine/GameObject.h"
 #include "Engine/Components/DirectionalLight.h"
 #include "Engine/Camera.h"
-#include <d3d11.h>
 
 bool CForwardRenderPipeline::Initialize()
 {
@@ -51,27 +51,26 @@ void CForwardRenderPipeline::Shutdown()
 
 void CForwardRenderPipeline::Render(const RenderContext& ctx)
 {
-    ID3D11DeviceContext* d3dCtx = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!d3dCtx) return;
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!rhiCtx) return;
+
+    RHI::ICommandList* cmdList = rhiCtx->GetCommandList();
+    if (!cmdList) return;
+
+    // For debug events, we still need native context
+    void* nativeCtx = rhiCtx->GetNativeContext();
 
     // ============================================
     // 0. Unbind resources to avoid hazards
     // ============================================
-    ID3D11ShaderResourceView* nullSRV[8] = { nullptr };
-    d3dCtx->VSSetShaderResources(0, 8, nullSRV);
-    d3dCtx->PSSetShaderResources(0, 8, nullSRV);
-    d3dCtx->OMSetRenderTargets(0, nullptr, nullptr);
+    cmdList->UnbindShaderResources(RHI::EShaderStage::Vertex, 0, 8);
+    cmdList->UnbindShaderResources(RHI::EShaderStage::Pixel, 0, 8);
+    cmdList->UnbindRenderTargets();
 
     // ============================================
     // 1. Ensure offscreen targets are ready
     // ============================================
     ensureOffscreen(ctx.width, ctx.height);
-
-    // Get RTV/DSV from RHI textures
-    ID3D11RenderTargetView* hdrRTV = static_cast<ID3D11RenderTargetView*>(m_offHDR->GetRTV());
-    ID3D11DepthStencilView* depthDSV = static_cast<ID3D11DepthStencilView*>(m_offDepth->GetDSV());
-    ID3D11ShaderResourceView* hdrSRV = static_cast<ID3D11ShaderResourceView*>(m_offHDR->GetSRV());
-    ID3D11RenderTargetView* ldrRTV = static_cast<ID3D11RenderTargetView*>(m_offLDR->GetRTV());
 
     // ============================================
     // 2. Shadow Pass (if enabled)
@@ -86,7 +85,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
         }
 
         if (dirLight) {
-            CScopedDebugEvent evt(d3dCtx, L"Shadow Pass");
+            CScopedDebugEvent evt(nativeCtx, L"Shadow Pass");
             m_shadowPass.Render(ctx.scene, dirLight,
                               ctx.camera.GetViewMatrix(),
                               ctx.camera.GetProjectionMatrix());
@@ -97,21 +96,18 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 3. Clear HDR render target
     // ============================================
-    d3dCtx->OMSetRenderTargets(1, &hdrRTV, depthDSV);
+    RHI::ITexture* hdrRT = m_offHDR.get();
+    cmdList->SetRenderTargets(1, &hdrRT, m_offDepth.get());
 
     const float clearColor[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
-    d3dCtx->ClearRenderTargetView(hdrRTV, clearColor);
-    if (depthDSV) {
-        d3dCtx->ClearDepthStencilView(depthDSV,
-                                     D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
-                                     1.0f, 0);
-    }
+    cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
+    cmdList->ClearDepthStencil(m_offDepth.get(), true, 1.0f, true, 0);
 
     // ============================================
     // 4. Scene Rendering (Opaque + Transparent + Skybox)
     // ============================================
     {
-        CScopedDebugEvent evt(d3dCtx, L"Scene Rendering");
+        CScopedDebugEvent evt(nativeCtx, L"Scene Rendering");
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
                               m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
@@ -122,7 +118,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 5. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
-        CScopedDebugEvent evt(d3dCtx, L"Post-Processing");
+        CScopedDebugEvent evt(nativeCtx, L"Post-Processing");
         m_postProcess.Render(m_offHDR.get(), m_offLDR.get(),
                            ctx.width, ctx.height, 1.0f);
     }
@@ -132,9 +128,10 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 6. Debug Lines (if enabled)
     // ============================================
     if (ctx.showFlags.DebugLines) {
-        CScopedDebugEvent evt(d3dCtx, L"Debug Lines");
+        CScopedDebugEvent evt(nativeCtx, L"Debug Lines");
         // Rebind LDR RTV + HDR depth (Debug lines need depth test)
-        d3dCtx->OMSetRenderTargets(1, &ldrRTV, depthDSV);
+        RHI::ITexture* ldrRT = m_offLDR.get();
+        cmdList->SetRenderTargets(1, &ldrRT, m_offDepth.get());
         m_debugLinePass.Render(ctx.camera.GetViewMatrix(),
                               ctx.camera.GetProjectionMatrix(),
                               ctx.width, ctx.height);
@@ -144,9 +141,10 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 7. Grid (if enabled)
     // ============================================
     if (ctx.showFlags.Grid) {
-        CScopedDebugEvent evt(d3dCtx, L"Grid");
+        CScopedDebugEvent evt(nativeCtx, L"Grid");
         // Rebind LDR RTV + HDR depth (Grid needs depth test)
-        d3dCtx->OMSetRenderTargets(1, &ldrRTV, depthDSV);
+        RHI::ITexture* ldrRT = m_offLDR.get();
+        cmdList->SetRenderTargets(1, &ldrRT, m_offDepth.get());
 
         CGridPass::Instance().Render(ctx.camera.GetViewMatrix(),
                                      ctx.camera.GetProjectionMatrix(),
@@ -154,70 +152,19 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 8. Copy final result to finalOutputRTV (if provided)
+    // 8. Copy final result to finalOutputTexture (if provided)
     // ============================================
-    if (ctx.finalOutputRTV) {
+    if (ctx.finalOutputTexture) {
         // Unbind all render targets before copy operations
-        // D3D11 does not allow a texture to be bound as RTV and used as copy source
-        ID3D11RenderTargetView* nullRTV = nullptr;
-        ID3D11DepthStencilView* nullDSV = nullptr;
-        d3dCtx->OMSetRenderTargets(1, &nullRTV, nullDSV);
+        cmdList->UnbindRenderTargets();
 
         // Choose source based on outputFormat
-        ID3D11Texture2D* sourceTexture;
-        if (ctx.outputFormat == RenderContext::EOutputFormat::HDR) {
-            sourceTexture = static_cast<ID3D11Texture2D*>(m_offHDR->GetNativeHandle());  // HDR linear
-        } else {
-            sourceTexture = static_cast<ID3D11Texture2D*>(m_offLDR->GetNativeHandle());  // LDR sRGB
-        }
+        RHI::ITexture* sourceTexture = (ctx.outputFormat == RenderContext::EOutputFormat::HDR)
+            ? m_offHDR.get()   // HDR linear
+            : m_offLDR.get();  // LDR sRGB
 
-        // Get destination resource from RTV
-        ID3D11Resource* dstResource = nullptr;
-        ctx.finalOutputRTV->GetResource(&dstResource);
-
-        if (dstResource) {
-            // Get descriptors to check compatibility
-            D3D11_TEXTURE2D_DESC srcDesc, dstDesc;
-            sourceTexture->GetDesc(&srcDesc);
-            ((ID3D11Texture2D*)dstResource)->GetDesc(&dstDesc);
-
-            // Check if we can use CopyResource (requires identical dimensions)
-            bool canUseCopyResource =
-                (srcDesc.Width == dstDesc.Width) &&
-                (srcDesc.Height == dstDesc.Height) &&
-                (srcDesc.ArraySize == dstDesc.ArraySize) &&
-                (srcDesc.MipLevels == dstDesc.MipLevels) &&
-                (srcDesc.Format == dstDesc.Format);
-
-            if (canUseCopyResource) {
-                // Full resource copy (fastest)
-                d3dCtx->CopyResource(dstResource, sourceTexture);
-            } else {
-                // Copy single subresource (e.g., 2D -> Cubemap face)
-                UINT dstSubresource = 0;
-
-                // If destination is array texture (like cubemap), we need to get the correct subresource
-                D3D11_RENDER_TARGET_VIEW_DESC rtvDesc;
-                ctx.finalOutputRTV->GetDesc(&rtvDesc);
-
-                if (rtvDesc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DARRAY) {
-                    UINT arraySlice = rtvDesc.Texture2DArray.FirstArraySlice;
-                    UINT mipSlice = rtvDesc.Texture2DArray.MipSlice;
-                    dstSubresource = D3D11CalcSubresource(mipSlice, arraySlice, dstDesc.MipLevels);
-                }
-
-                d3dCtx->CopySubresourceRegion(
-                    dstResource,
-                    dstSubresource,
-                    0, 0, 0,
-                    sourceTexture,
-                    0,
-                    nullptr
-                );
-            }
-
-            dstResource->Release();
-        }
+        // Copy to destination texture slice
+        cmdList->CopyTextureToSlice(ctx.finalOutputTexture, ctx.finalOutputArraySlice, ctx.finalOutputMipLevel, sourceTexture);
     }
 }
 

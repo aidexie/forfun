@@ -48,6 +48,7 @@ public:
     virtual uint32_t GetWidth() const = 0;
     virtual uint32_t GetHeight() const = 0;
     virtual uint32_t GetDepth() const = 0;
+    virtual uint32_t GetArraySize() const = 0;
     virtual ETextureFormat GetFormat() const = 0;
 
     // Get views (may return nullptr if not applicable)
@@ -55,6 +56,10 @@ public:
     virtual void* GetDSV() = 0;  // ID3D11DepthStencilView*, D3D12_CPU_DESCRIPTOR_HANDLE
     virtual void* GetSRV() = 0;  // ID3D11ShaderResourceView*, D3D12_CPU_DESCRIPTOR_HANDLE
     virtual void* GetUAV() = 0;  // ID3D11UnorderedAccessView*, D3D12_CPU_DESCRIPTOR_HANDLE
+
+    // Get per-slice DSV for texture arrays (for CSM shadow mapping)
+    // Returns nullptr if arrayIndex is out of bounds or texture is not an array
+    virtual void* GetDSVSlice(uint32_t arrayIndex) = 0;
 };
 
 // ============================================

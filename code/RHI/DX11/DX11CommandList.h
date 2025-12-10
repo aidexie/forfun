@@ -13,8 +13,10 @@ public:
 
     // Render Target Operations
     void SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) override;
+    void SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice) override;
     void ClearRenderTarget(ITexture* renderTarget, const float color[4]) override;
     void ClearDepthStencil(ITexture* depthStencil, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) override;
+    void ClearDepthStencilSlice(ITexture* depthStencil, uint32_t arraySlice, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) override;
 
     // Pipeline State
     void SetPipelineState(IPipelineState* pso) override;
@@ -46,6 +48,14 @@ public:
     // Resource Barriers (DX11 no-op)
     void Barrier(IResource* resource, EResourceState stateBefore, EResourceState stateAfter) override;
     void UAVBarrier(IResource* resource) override;
+
+    // Copy Operations
+    void CopyTexture(ITexture* dst, ITexture* src) override;
+    void CopyTextureToSlice(ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel, ITexture* src) override;
+
+    // Unbind Operations
+    void UnbindRenderTargets() override;
+    void UnbindShaderResources(EShaderStage stage, uint32_t startSlot, uint32_t numSlots) override;
 
 private:
     ID3D11DeviceContext* m_context;  // Non-owning

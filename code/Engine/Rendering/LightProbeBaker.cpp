@@ -4,6 +4,7 @@
 #include "RenderPipeline.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/SphericalHarmonics.h"
 #include "Core/RenderDocCapture.h"
@@ -155,14 +156,23 @@ void CLightProbeBaker::renderToCubemap(
     CScene& scene,
     ID3D11Texture2D* outputCubemap)
 {
+    // Wrap the D3D11 texture as RHI texture for CubemapRenderer
+    RHI::TextureDesc wrapDesc;
+    wrapDesc.width = CUBEMAP_RESOLUTION;
+    wrapDesc.height = CUBEMAP_RESOLUTION;
+    wrapDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    wrapDesc.isCubemap = true;
+
+    std::unique_ptr<RHI::ITexture> rhiCubemap(
+        RHI::CRHIManager::Instance().GetRenderContext()->WrapExternalTexture(outputCubemap, wrapDesc));
+
     // 使用共享的 CubemapRenderer
     CCubemapRenderer::RenderToCubemap(
         position,
         CUBEMAP_RESOLUTION,
         scene,
         m_pipeline.get(),
-        outputCubemap,
-        m_depthBuffer.Get());
+        rhiCubemap.get());
 }
 
 // ============================================

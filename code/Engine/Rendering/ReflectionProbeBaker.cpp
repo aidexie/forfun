@@ -5,6 +5,7 @@
 #include "ShowFlags.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include "Core/ReflectionProbeAsset.h"
@@ -204,14 +205,23 @@ void CReflectionProbeBaker::renderToCubemap(
         s_captureFirstBake = false;  // 只捕获一次
     }
 
+    // Wrap the D3D11 texture as RHI texture for CubemapRenderer
+    RHI::TextureDesc wrapDesc;
+    wrapDesc.width = resolution;
+    wrapDesc.height = resolution;
+    wrapDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    wrapDesc.isCubemap = true;
+
+    std::unique_ptr<RHI::ITexture> rhiCubemap(
+        RHI::CRHIManager::Instance().GetRenderContext()->WrapExternalTexture(outputCubemap, wrapDesc));
+
     // 使用共享的 CubemapRenderer
     CCubemapRenderer::RenderToCubemap(
         position,
         resolution,
         scene,
         m_pipeline,
-        outputCubemap,
-        m_depthBuffer.Get());
+        rhiCubemap.get());
 
     // 结束 RenderDoc 捕获
     CRenderDocCapture::EndFrameCapture();

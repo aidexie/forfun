@@ -45,6 +45,29 @@ void CDX11CommandList::ClearDepthStencil(ITexture* depthStencil, bool clearDepth
     }
 }
 
+void CDX11CommandList::SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice) {
+    ID3D11DepthStencilView* dsv = nullptr;
+    if (depthStencil) {
+        if (depthStencil->GetArraySize() > 1) {
+            dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSVSlice(arraySlice));
+        } else {
+            dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSV());
+        }
+    }
+    m_context->OMSetRenderTargets(0, nullptr, dsv);
+}
+
+void CDX11CommandList::ClearDepthStencilSlice(ITexture* depthStencil, uint32_t arraySlice, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) {
+    if (!depthStencil) return;
+    ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSVSlice(arraySlice));
+    if (dsv) {
+        UINT flags = 0;
+        if (clearDepth) flags |= D3D11_CLEAR_DEPTH;
+        if (clearStencil) flags |= D3D11_CLEAR_STENCIL;
+        m_context->ClearDepthStencilView(dsv, flags, depth, stencil);
+    }
+}
+
 void CDX11CommandList::SetPipelineState(IPipelineState* pso) {
     if (!pso) return;
 
@@ -245,6 +268,66 @@ void CDX11CommandList::Barrier(IResource* resource, EResourceState stateBefore, 
 
 void CDX11CommandList::UAVBarrier(IResource* resource) {
     // DX11 handles UAV barriers automatically - no-op
+}
+
+void CDX11CommandList::CopyTexture(ITexture* dst, ITexture* src) {
+    if (!dst || !src) return;
+    ID3D11Resource* dstRes = static_cast<ID3D11Resource*>(dst->GetNativeHandle());
+    ID3D11Resource* srcRes = static_cast<ID3D11Resource*>(src->GetNativeHandle());
+    if (dstRes && srcRes) {
+        m_context->CopyResource(dstRes, srcRes);
+    }
+}
+
+void CDX11CommandList::CopyTextureToSlice(ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel, ITexture* src) {
+    if (!dst || !src) return;
+    ID3D11Resource* dstRes = static_cast<ID3D11Resource*>(dst->GetNativeHandle());
+    ID3D11Resource* srcRes = static_cast<ID3D11Resource*>(src->GetNativeHandle());
+    if (!dstRes || !srcRes) return;
+
+    // Calculate destination subresource
+    UINT dstMipLevels = 1;
+    D3D11_RESOURCE_DIMENSION dim;
+    dstRes->GetType(&dim);
+    if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D) {
+        D3D11_TEXTURE2D_DESC desc;
+        static_cast<ID3D11Texture2D*>(dstRes)->GetDesc(&desc);
+        dstMipLevels = desc.MipLevels;
+    }
+
+    UINT dstSubresource = D3D11CalcSubresource(dstMipLevel, dstArraySlice, dstMipLevels);
+    m_context->CopySubresourceRegion(dstRes, dstSubresource, 0, 0, 0, srcRes, 0, nullptr);
+}
+
+void CDX11CommandList::UnbindRenderTargets() {
+    ID3D11RenderTargetView* nullRTV = nullptr;
+    m_context->OMSetRenderTargets(1, &nullRTV, nullptr);
+}
+
+void CDX11CommandList::UnbindShaderResources(EShaderStage stage, uint32_t startSlot, uint32_t numSlots) {
+    ID3D11ShaderResourceView* nullSRVs[16] = { nullptr };
+    uint32_t count = (numSlots > 16) ? 16 : numSlots;
+
+    switch (stage) {
+        case EShaderStage::Vertex:
+            m_context->VSSetShaderResources(startSlot, count, nullSRVs);
+            break;
+        case EShaderStage::Pixel:
+            m_context->PSSetShaderResources(startSlot, count, nullSRVs);
+            break;
+        case EShaderStage::Compute:
+            m_context->CSSetShaderResources(startSlot, count, nullSRVs);
+            break;
+        case EShaderStage::Geometry:
+            m_context->GSSetShaderResources(startSlot, count, nullSRVs);
+            break;
+        case EShaderStage::Hull:
+            m_context->HSSetShaderResources(startSlot, count, nullSRVs);
+            break;
+        case EShaderStage::Domain:
+            m_context->DSSetShaderResources(startSlot, count, nullSRVs);
+            break;
+    }
 }
 
 } // namespace DX11

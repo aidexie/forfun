@@ -175,7 +175,7 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
         return nullptr;
     }
 
-    auto texture = new CDX11Texture(d3dTexture, desc.width, desc.height, desc.format);
+    auto texture = new CDX11Texture(d3dTexture, desc.width, desc.height, desc.format, desc.arraySize);
 
     // Get actual mip levels after creation (if 0 was specified, D3D calculates it)
     D3D11_TEXTURE2D_DESC createdDesc;
@@ -203,6 +203,7 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     }
 
     if (desc.usage & ETextureUsage::DepthStencil) {
+        // Create full DSV (for entire array)
         ID3D11DepthStencilView* dsv = nullptr;
         D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
         D3D11_DEPTH_STENCIL_VIEW_DESC* pDsvDesc = nullptr;
@@ -210,13 +211,42 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
         // Use override format if specified
         if (desc.dsvFormat != ETextureFormat::Unknown) {
             dsvDesc.Format = ToDXGIFormat(desc.dsvFormat);
-            dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
-            dsvDesc.Texture2D.MipSlice = 0;
+            if (desc.arraySize > 1) {
+                dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+                dsvDesc.Texture2DArray.MipSlice = 0;
+                dsvDesc.Texture2DArray.FirstArraySlice = 0;
+                dsvDesc.Texture2DArray.ArraySize = desc.arraySize;
+            } else {
+                dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+                dsvDesc.Texture2D.MipSlice = 0;
+            }
             pDsvDesc = &dsvDesc;
         }
         hr = ctx.GetDevice()->CreateDepthStencilView(d3dTexture, pDsvDesc, &dsv);
         if (SUCCEEDED(hr)) {
             texture->SetDSV(dsv);
+        }
+
+        // Create per-slice DSVs for array textures (for CSM shadow mapping)
+        if (desc.arraySize > 1) {
+            DXGI_FORMAT dsvFormat = (desc.dsvFormat != ETextureFormat::Unknown)
+                ? ToDXGIFormat(desc.dsvFormat)
+                : texDesc.Format;
+
+            for (uint32_t i = 0; i < desc.arraySize && i < 4; ++i) {
+                D3D11_DEPTH_STENCIL_VIEW_DESC sliceDsvDesc = {};
+                sliceDsvDesc.Format = dsvFormat;
+                sliceDsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+                sliceDsvDesc.Texture2DArray.MipSlice = 0;
+                sliceDsvDesc.Texture2DArray.FirstArraySlice = i;
+                sliceDsvDesc.Texture2DArray.ArraySize = 1;
+
+                ID3D11DepthStencilView* sliceDsv = nullptr;
+                hr = ctx.GetDevice()->CreateDepthStencilView(d3dTexture, &sliceDsvDesc, &sliceDsv);
+                if (SUCCEEDED(hr)) {
+                    texture->SetSliceDSV(i, sliceDsv);
+                }
+            }
         }
     }
 
@@ -282,6 +312,27 @@ ITexture* CDX11RenderContext::WrapNativeTexture(void* nativeTexture, void* nativ
 
     if (nativeSRV) {
         texture->SetSRV(static_cast<ID3D11ShaderResourceView*>(nativeSRV));
+    }
+
+    return texture;
+}
+
+ITexture* CDX11RenderContext::WrapExternalTexture(void* nativeTexture, const TextureDesc& desc) {
+    // Create a non-owning wrapper around an existing texture
+    // This is useful for passing D3D11 textures to RHI copy operations without ownership transfer
+    auto texture = new CDX11Texture(
+        static_cast<ID3D11Texture2D*>(nativeTexture),
+        desc.width,
+        desc.height,
+        desc.format,
+        false  // Non-owning - destructor won't release the texture
+    );
+
+    // Set array size for cubemaps
+    if (desc.isCubemap) {
+        texture->SetArraySize(6);
+    } else if (desc.arraySize > 1) {
+        texture->SetArraySize(desc.arraySize);
     }
 
     return texture;

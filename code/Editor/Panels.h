@@ -4,7 +4,6 @@
 class CScene;
 class CCamera;  // ✅ 改用 CCamera
 struct ImVec2;
-struct ID3D11ShaderResourceView;
 class CForwardRenderPipeline;
 
 namespace Panels {
@@ -14,7 +13,7 @@ namespace Panels {
     void DrawHierarchy(CScene& scene);
     void DrawInspector(CScene& scene);
     void DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
-        ID3D11ShaderResourceView* srv,
+        void* srv,  // ID3D11ShaderResourceView* or equivalent (passed to ImGui)
         size_t srcWidth, size_t srcHeight,
         CForwardRenderPipeline* pipeline = nullptr);
     void DrawIrradianceDebug();  // Uses CScene::Instance() internally

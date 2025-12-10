@@ -6,7 +6,6 @@
 #include "DebugLinePass.h"
 #include "GridPass.h"
 #include "RHI/RHIPointers.h"
-#include <d3d11.h>
 
 // ============================================
 // CForwardRenderPipeline - Forward 渲染流程
@@ -38,11 +37,11 @@ public:
     void Render(const RenderContext& ctx) override;
 
     // 访问离屏纹理（用于 ImGui 显示）
-    ID3D11ShaderResourceView* GetOffscreenSRV() const {
-        return m_offLDR ? static_cast<ID3D11ShaderResourceView*>(m_offLDR->GetSRV()) : nullptr;
+    void* GetOffscreenSRV() const {
+        return m_offLDR ? m_offLDR->GetSRV() : nullptr;
     }
-    ID3D11Texture2D* GetOffscreenTexture() const {
-        return m_offLDR ? static_cast<ID3D11Texture2D*>(m_offLDR->GetNativeHandle()) : nullptr;
+    void* GetOffscreenTexture() const {
+        return m_offLDR ? m_offLDR->GetNativeHandle() : nullptr;
     }
     unsigned int GetOffscreenWidth() const { return m_offscreenWidth; }
     unsigned int GetOffscreenHeight() const { return m_offscreenHeight; }

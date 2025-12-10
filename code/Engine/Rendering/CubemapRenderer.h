@@ -1,8 +1,7 @@
 #pragma once
 
 #include <DirectXMath.h>
-#include <d3d11.h>
-#include <wrl/client.h>
+#include "RHI/RHIResources.h"
 
 class CCamera;
 class CScene;
@@ -23,15 +22,13 @@ public:
         int face,
         const DirectX::XMFLOAT3& position);
 
-    // 渲染场景到 cubemap 的 6 个面
-    // 需要调用者提供 depth buffer（可以共享使用）
+    // 渲染场景到 cubemap 的 6 个面 (RHI version)
     static void RenderToCubemap(
         const DirectX::XMFLOAT3& position,
         int resolution,
         CScene& scene,
         CRenderPipeline* pipeline,
-        ID3D11Texture2D* outputCubemap,
-        ID3D11Texture2D* depthBuffer);
+        RHI::ITexture* outputCubemap);
 
 private:
     // 渲染单个 cubemap face
@@ -41,6 +38,5 @@ private:
         int resolution,
         CScene& scene,
         CRenderPipeline* pipeline,
-        ID3D11RenderTargetView* faceRTV,
-        ID3D11DepthStencilView* dsv);
+        RHI::ITexture* outputCubemap);
 };

@@ -77,6 +77,12 @@ public:
     // The RHI takes ownership of these resources
     virtual ITexture* WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) = 0;
 
+    // Wrap an existing native texture (e.g., cubemap from bakers) without taking ownership
+    // Useful for passing D3D11 textures to RHI copy operations
+    // The caller retains ownership of the native texture
+    // desc: Used to provide metadata about the texture (width, height, format, isCubemap, etc.)
+    virtual ITexture* WrapExternalTexture(void* nativeTexture, const TextureDesc& desc) = 0;
+
     // ============================================
     // Backbuffer Access
     // ============================================

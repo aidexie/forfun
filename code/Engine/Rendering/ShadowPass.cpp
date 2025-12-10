@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <cstring>
 
-using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace RHI;
 
@@ -168,9 +167,6 @@ bool CShadowPass::Initialize()
 void CShadowPass::Shutdown()
 {
     m_shadowMapArray.reset();
-    for (int i = 0; i < 4; ++i) {
-        m_shadowDSVs[i].Reset();
-    }
     m_defaultShadowMap.reset();
     m_shadowSampler.reset();
     m_depthVS.reset();
@@ -182,8 +178,7 @@ void CShadowPass::Shutdown()
 void CShadowPass::ensureShadowMapArray(uint32_t size, int cascadeCount)
 {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ID3D11Device* device = static_cast<ID3D11Device*>(ctx->GetNativeDevice());
-    if (!ctx || !device) return;
+    if (!ctx) return;
 
     if (size == 0) size = 2048;  // Default
     cascadeCount = std::min(std::max(cascadeCount, 1), 4);  // Clamp to [1, 4]
@@ -192,35 +187,16 @@ void CShadowPass::ensureShadowMapArray(uint32_t size, int cascadeCount)
     if (m_shadowMapArray && m_currentSize == size && m_currentCascadeCount == cascadeCount)
         return;
 
-    // Reset all resources
+    // Reset resources
     m_shadowMapArray.reset();
-    for (int i = 0; i < 4; ++i) {
-        m_shadowDSVs[i].Reset();
-    }
     m_currentSize = size;
     m_currentCascadeCount = cascadeCount;
 
     // Create Texture2DArray via RHI (depth texture with array slices and SRV)
+    // RHI now automatically creates per-slice DSVs for array textures
     TextureDesc desc = TextureDesc::DepthStencilArrayWithSRV(size, size, cascadeCount);
     desc.debugName = "ShadowMapArray";
     m_shadowMapArray.reset(ctx->CreateTexture(desc, nullptr));
-
-    // Get native texture handle for creating per-slice DSVs
-    // Note: Per-slice DSV creation is D3D11-specific until Phase 6 RHI extension
-    ID3D11Texture2D* nativeTexture = static_cast<ID3D11Texture2D*>(m_shadowMapArray->GetNativeHandle());
-    if (!nativeTexture) return;
-
-    // Create per-slice DSVs (for rendering to each cascade)
-    for (int i = 0; i < cascadeCount; ++i) {
-        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
-        dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
-        dsvDesc.Texture2DArray.FirstArraySlice = i;
-        dsvDesc.Texture2DArray.ArraySize = 1;
-        dsvDesc.Texture2DArray.MipSlice = 0;
-        device->CreateDepthStencilView(nativeTexture, &dsvDesc,
-                                       m_shadowDSVs[i].GetAddressOf());
-    }
 }
 
 // ===========================
@@ -420,16 +396,15 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
 {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
-    ID3D11DeviceContext* d3dCtx = static_cast<ID3D11DeviceContext*>(ctx->GetNativeContext());
 
-    if (!d3dCtx || !light) return;
+    if (!cmdList || !light) return;
 
     // Get CSM parameters from light
     int cascadeCount = std::min(std::max(light->cascade_count, 1), 4);
     float shadowDistance = light->shadow_distance;
     uint32_t shadowMapSize = (uint32_t)light->GetShadowMapResolution();
 
-    // Unbind render targets to avoid hazards (D3D11-specific until RHI has render target management)
+    // Unbind render targets to avoid hazards
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 
     // Ensure shadow map array resources
@@ -471,12 +446,11 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
             m_cbLightSpace->Unmap();
         }
 
-        // Bind this cascade's DSV (D3D11-specific until Phase 6 RHI per-slice DSV support)
-        ID3D11RenderTargetView* nullRTV = nullptr;
-        d3dCtx->OMSetRenderTargets(0, &nullRTV, m_shadowDSVs[cascadeIndex].Get());
+        // Bind this cascade's DSV via RHI
+        cmdList->SetDepthStencilOnly(m_shadowMapArray.get(), cascadeIndex);
 
-        // Clear depth for this cascade (D3D11-specific until Phase 6 per-slice clear)
-        d3dCtx->ClearDepthStencilView(m_shadowDSVs[cascadeIndex].Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+        // Clear depth for this cascade via RHI
+        cmdList->ClearDepthStencilSlice(m_shadowMapArray.get(), cascadeIndex, true, 1.0f, false, 0);
 
         // Render all objects to this cascade
         for (auto& objPtr : scene.GetWorld().Objects()) {

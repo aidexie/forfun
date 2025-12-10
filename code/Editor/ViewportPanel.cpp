@@ -33,7 +33,7 @@ ImVec2 Panels::GetViewportLastSize() {
 }
 
 void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
-    ID3D11ShaderResourceView* srv,
+    void* srv,
     size_t srcWidth, size_t srcHeight,
     CForwardRenderPipeline* pipeline)
 {

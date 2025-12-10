@@ -113,6 +113,18 @@ struct TextureDesc {
         desc.usage = ETextureUsage::ShaderResource;
         return desc;
     }
+
+    // Cubemap render target (6 faces, HDR format for accurate lighting)
+    static TextureDesc CubemapRenderTarget(uint32_t size, ETextureFormat fmt = ETextureFormat::R16G16B16A16_FLOAT) {
+        TextureDesc desc;
+        desc.width = size;
+        desc.height = size;
+        desc.format = fmt;
+        desc.mipLevels = 1;
+        desc.isCubemap = true;
+        desc.usage = ETextureUsage::RenderTarget | ETextureUsage::ShaderResource;
+        return desc;
+    }
 };
 
 // ============================================

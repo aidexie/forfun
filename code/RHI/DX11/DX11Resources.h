@@ -58,38 +58,61 @@ private:
 // ============================================
 class CDX11Texture : public ITexture {
 public:
-    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format)
-        : m_texture(texture), m_width(width), m_height(height), m_format(format) {}
+    // Owning constructor (takes ownership via ComPtr)
+    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format, uint32_t arraySize = 1)
+        : m_texture(texture), m_rawTexture(nullptr), m_width(width), m_height(height), m_format(format), m_arraySize(arraySize), m_owning(true) {}
+
+    // Non-owning constructor
+    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format, bool owning)
+        : m_rawTexture(owning ? nullptr : texture), m_width(width), m_height(height), m_format(format), m_arraySize(1), m_owning(owning)
+    {
+        if (owning) {
+            m_texture = texture;
+        }
+    }
 
     ~CDX11Texture() override = default;
 
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
     uint32_t GetDepth() const override { return 1; }
+    uint32_t GetArraySize() const override { return m_arraySize; }
     ETextureFormat GetFormat() const override { return m_format; }
 
-    void* GetNativeHandle() override { return m_texture.Get(); }
+    void* GetNativeHandle() override { return m_owning ? m_texture.Get() : m_rawTexture; }
     void* GetRTV() override { return m_rtv.Get(); }
     void* GetDSV() override { return m_dsv.Get(); }
     void* GetSRV() override { return m_srv.Get(); }
     void* GetUAV() override { return m_uav.Get(); }
 
+    // Per-slice DSV for texture arrays (CSM shadow mapping)
+    void* GetDSVSlice(uint32_t arrayIndex) override {
+        if (arrayIndex >= m_arraySize || arrayIndex >= 4) return nullptr;
+        return m_sliceDSVs[arrayIndex].Get();
+    }
+
     void SetRTV(ID3D11RenderTargetView* rtv) { m_rtv = rtv; }
     void SetDSV(ID3D11DepthStencilView* dsv) { m_dsv = dsv; }
     void SetSRV(ID3D11ShaderResourceView* srv) { m_srv = srv; }
     void SetUAV(ID3D11UnorderedAccessView* uav) { m_uav = uav; }
+    void SetSliceDSV(uint32_t index, ID3D11DepthStencilView* dsv) { if (index < 4) m_sliceDSVs[index] = dsv; }
+    void SetArraySize(uint32_t arraySize) { m_arraySize = arraySize; }
 
-    ID3D11Texture2D* GetD3D11Texture() { return m_texture.Get(); }
+    ID3D11Texture2D* GetD3D11Texture() { return m_owning ? m_texture.Get() : m_rawTexture; }
 
 private:
-    ComPtr<ID3D11Texture2D> m_texture;
+    ComPtr<ID3D11Texture2D> m_texture;      // Owning reference
+    ID3D11Texture2D* m_rawTexture;          // Non-owning raw pointer
     ComPtr<ID3D11RenderTargetView> m_rtv;
     ComPtr<ID3D11DepthStencilView> m_dsv;
     ComPtr<ID3D11ShaderResourceView> m_srv;
     ComPtr<ID3D11UnorderedAccessView> m_uav;
+    ComPtr<ID3D11DepthStencilView> m_sliceDSVs[4];  // Per-slice DSVs for array textures (max 4 cascades)
     uint32_t m_width;
     uint32_t m_height;
+    uint32_t m_arraySize;
     ETextureFormat m_format;
+    bool m_owning;  // If true, texture is owned by ComPtr; if false, m_rawTexture is used
 };
 
 // ============================================

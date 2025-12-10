@@ -1,6 +1,6 @@
 #pragma once
 #include "ShowFlags.h"
-#include <d3d11.h>
+#include "RHI/RHIResources.h"
 
 // Forward declarations
 class CCamera;
@@ -51,7 +51,9 @@ public:
         // ============================================
         // 如果非空，Pipeline 会在渲染结束后将结果复制到这里
         // 如果为空，使用 Pipeline 的 GetOffscreenSRV() 获取结果
-        ID3D11RenderTargetView* finalOutputRTV = nullptr;
+        RHI::ITexture* finalOutputTexture = nullptr;
+        uint32_t finalOutputArraySlice = 0;  // For cubemap faces or array textures
+        uint32_t finalOutputMipLevel = 0;    // For mip chain
 
         // 指定需要哪种输出格式
         enum class EOutputFormat

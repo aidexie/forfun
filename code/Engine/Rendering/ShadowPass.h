@@ -1,12 +1,11 @@
 #pragma once
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIResources.h"
-#include <d3d11.h>
-#include <wrl/client.h>
 #include <DirectXMath.h>
 #include <array>
 #include <vector>
 #include <memory>
+#include <cstdint>
 
 // Forward declarations
 class CScene;
@@ -87,8 +86,8 @@ private:
 
 private:
     // Shadow map resources (Texture2DArray for CSM)
+    // Per-slice DSVs are now managed by RHI
     RHI::TexturePtr m_shadowMapArray;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_shadowDSVs[4];  // Per-slice DSV (Phase 6: add to RHI)
     uint32_t m_currentSize = 0;
     int m_currentCascadeCount = 0;
 

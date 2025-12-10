@@ -110,7 +110,7 @@ bool CScreenshot::CaptureFromPipeline(CForwardRenderPipeline* pipeline, const st
         return false;
     }
 
-    ID3D11Texture2D* texture = pipeline->GetOffscreenTexture();
+    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(pipeline->GetOffscreenTexture());
     if (!texture) {
         CFFLog::Error("Screenshot: ForwardRenderPipeline offscreen texture is null");
         return false;

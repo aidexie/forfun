@@ -21,12 +21,19 @@ public:
     // renderTargets: array of render target textures
     // depthStencil: depth stencil texture (can be nullptr)
     virtual void SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) = 0;
+    // Set depth stencil only (for depth-only rendering like shadow maps)
+    // Uses specific array slice for texture arrays (CSM support)
+    virtual void SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice = 0) = 0;
+
 
     // Clear render target
     virtual void ClearRenderTarget(ITexture* renderTarget, const float color[4]) = 0;
 
     // Clear depth stencil
     virtual void ClearDepthStencil(ITexture* depthStencil, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) = 0;
+
+    // Clear depth stencil array slice (for CSM shadow mapping)
+    virtual void ClearDepthStencilSlice(ITexture* depthStencil, uint32_t arraySlice, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) = 0;
 
     // ============================================
     // Pipeline State
@@ -102,6 +109,26 @@ public:
 
     // UAV barrier (ensure all UAV writes complete before next read)
     virtual void UAVBarrier(IResource* resource) = 0;
+
+    // ============================================
+    // Copy Operations
+    // ============================================
+
+    // Copy entire texture
+    virtual void CopyTexture(ITexture* dst, ITexture* src) = 0;
+
+    // Copy texture to specific array slice and mip level of destination
+    virtual void CopyTextureToSlice(ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel, ITexture* src) = 0;
+
+    // ============================================
+    // Unbind Operations (for resource hazard prevention)
+    // ============================================
+
+    // Unbind render targets (set all RT slots to nullptr)
+    virtual void UnbindRenderTargets() = 0;
+
+    // Unbind shader resources for a stage (slots 0-7)
+    virtual void UnbindShaderResources(EShaderStage stage, uint32_t startSlot = 0, uint32_t numSlots = 8) = 0;
 };
 
 } // namespace RHI
