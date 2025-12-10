@@ -1,5 +1,6 @@
 #pragma once
 #include "RHICommon.h"
+#include "RHIDescriptors.h"
 
 // ============================================
 // RHI Resource Interfaces
