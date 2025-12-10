@@ -3,11 +3,9 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ICommandList.h"
+#include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
-#include <d3dcompiler.h>
 #include <cstring>
-
-#pragma comment(lib, "d3dcompiler.lib")
 
 using namespace RHI;
 
@@ -189,53 +187,38 @@ void CPostProcessPass::createShaders() {
         }
     )";
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ID3DBlob* vsBlob = nullptr;
-    ID3DBlob* psBlob = nullptr;
-    ID3DBlob* err = nullptr;
-
     // Compile Vertex Shader
-    HRESULT hr = D3DCompile(vsCode, strlen(vsCode), "PostProcess_VS", nullptr, nullptr,
-                           "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("PostProcess VS compilation error: %s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsCode, "main", "vs_5_0", nullptr, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("PostProcess VS compilation error: %s", vsCompiled.errorMessage.c_str());
         return;
     }
 
     // Compile Pixel Shader
-    hr = D3DCompile(psCode, strlen(psCode), "PostProcess_PS", nullptr, nullptr,
-                   "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("PostProcess PS compilation error: %s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
-        vsBlob->Release();
+    SCompiledShader psCompiled = CompileShaderFromSource(psCode, "main", "ps_5_0", nullptr, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("PostProcess PS compilation error: %s", psCompiled.errorMessage.c_str());
         return;
     }
 
     // Create shader objects using RHI
     ShaderDesc vsDesc;
     vsDesc.type = EShaderType::Vertex;
-    vsDesc.bytecode = vsBlob->GetBufferPointer();
-    vsDesc.bytecodeSize = vsBlob->GetBufferSize();
+    vsDesc.bytecode = vsCompiled.bytecode.data();
+    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
     m_vs.reset(ctx->CreateShader(vsDesc));
 
     ShaderDesc psDesc;
     psDesc.type = EShaderType::Pixel;
-    psDesc.bytecode = psBlob->GetBufferPointer();
-    psDesc.bytecodeSize = psBlob->GetBufferSize();
+    psDesc.bytecode = psCompiled.bytecode.data();
+    psDesc.bytecodeSize = psCompiled.bytecode.size();
     m_ps.reset(ctx->CreateShader(psDesc));
-
-    vsBlob->Release();
-    psBlob->Release();
 }
 
 void CPostProcessPass::createPipelineState() {

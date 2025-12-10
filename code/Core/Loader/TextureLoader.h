@@ -1,8 +1,8 @@
-
 #pragma once
-#include <wrl/client.h>
-#include <d3d11.h>
 #include <string>
 
-bool LoadTextureWIC(ID3D11Device* device, const std::wstring& path,
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& outSRV, bool srgb=false);
+// Load texture using WIC (Windows Imaging Component)
+// device: void* to ID3D11Device
+// outSRV: void** to receive ID3D11ShaderResourceView*
+// Returns true on success
+bool LoadTextureWIC(void* device, const std::wstring& path, void** outSRV, bool srgb = false);

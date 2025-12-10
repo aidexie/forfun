@@ -1,14 +1,12 @@
 #pragma once
 #include <DirectXMath.h>
-#include <d3d11.h>
+#include <d3d11.h>  // Required for ComPtr<ID3D11*> members
 #include <wrl/client.h>
 #include <vector>
 #include <array>
 #include <string>
 #include <cmath>
 #include <algorithm>
-
-// Forward declarations
 class CScene;
 class CPathTraceBaker;
 struct SPathTraceConfig;
@@ -231,10 +229,10 @@ public:
     void UploadToGPU();
 
     // 绑定到 Shader（每帧调用）
-    void Bind(ID3D11DeviceContext* context);
+    void Bind(void* context);
 
     // 解绑
-    void Unbind(ID3D11DeviceContext* context);
+    void Unbind(void* context);
 
     // ============================================
     // 序列化

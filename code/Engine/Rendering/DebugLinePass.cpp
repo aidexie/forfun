@@ -4,12 +4,10 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
-#include <d3dcompiler.h>
 #include <fstream>
 #include <sstream>
-
-#pragma comment(lib, "d3dcompiler.lib")
 
 using namespace DirectX;
 using namespace RHI;
@@ -65,68 +63,45 @@ void CDebugLinePass::CreateShaders() {
         return;
     }
 
-    unsigned int compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ID3DBlob* vsBlob = nullptr;
-    ID3DBlob* gsBlob = nullptr;
-    ID3DBlob* psBlob = nullptr;
-    ID3DBlob* err = nullptr;
-
     // Compile Vertex Shader
-    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "DebugLine.vs.hlsl",
-                           nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== DEBUGLINE VERTEX SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource, "main", "vs_5_0", nullptr, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("=== DEBUGLINE VERTEX SHADER COMPILATION ERROR ===");
+        CFFLog::Error("%s", vsCompiled.errorMessage.c_str());
         return;
     }
 
     // Compile Geometry Shader
-    hr = D3DCompile(gsSource.c_str(), gsSource.size(), "DebugLine.gs.hlsl",
-                   nullptr, nullptr, "main", "gs_5_0", compileFlags, 0, &gsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== DEBUGLINE GEOMETRY SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
-        vsBlob->Release();
+    SCompiledShader gsCompiled = CompileShaderFromSource(gsSource, "main", "gs_5_0", nullptr, debugShaders);
+    if (!gsCompiled.success) {
+        CFFLog::Error("=== DEBUGLINE GEOMETRY SHADER COMPILATION ERROR ===");
+        CFFLog::Error("%s", gsCompiled.errorMessage.c_str());
         return;
     }
 
     // Compile Pixel Shader
-    hr = D3DCompile(psSource.c_str(), psSource.size(), "DebugLine.ps.hlsl",
-                   nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== DEBUGLINE PIXEL SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
-        vsBlob->Release();
-        gsBlob->Release();
+    SCompiledShader psCompiled = CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("=== DEBUGLINE PIXEL SHADER COMPILATION ERROR ===");
+        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
         return;
     }
 
     // Create shader objects using RHI
-    ShaderDesc vsDesc(EShaderType::Vertex, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize());
+    ShaderDesc vsDesc(EShaderType::Vertex, vsCompiled.bytecode.data(), vsCompiled.bytecode.size());
     m_vs.reset(renderContext->CreateShader(vsDesc));
 
-    ShaderDesc gsDesc(EShaderType::Geometry, gsBlob->GetBufferPointer(), gsBlob->GetBufferSize());
+    ShaderDesc gsDesc(EShaderType::Geometry, gsCompiled.bytecode.data(), gsCompiled.bytecode.size());
     m_gs.reset(renderContext->CreateShader(gsDesc));
 
-    ShaderDesc psDesc(EShaderType::Pixel, psBlob->GetBufferPointer(), psBlob->GetBufferSize());
+    ShaderDesc psDesc(EShaderType::Pixel, psCompiled.bytecode.data(), psCompiled.bytecode.size());
     m_ps.reset(renderContext->CreateShader(psDesc));
-
-    vsBlob->Release();
-    gsBlob->Release();
-    psBlob->Release();
 }
 
 void CDebugLinePass::CreateBuffers() {

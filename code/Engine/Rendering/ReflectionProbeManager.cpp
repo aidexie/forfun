@@ -136,8 +136,9 @@ void CReflectionProbeManager::LoadLocalProbesFromScene(CScene& scene)
     CFFLog::Info("[ReflectionProbeManager] Total probes loaded: %d", m_probeCount);
 }
 
-void CReflectionProbeManager::Bind(ID3D11DeviceContext* context)
+void CReflectionProbeManager::Bind(void* context)
 {
+    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
     if (!m_initialized) return;
 
     // t3: IrradianceArray
@@ -146,10 +147,10 @@ void CReflectionProbeManager::Bind(ID3D11DeviceContext* context)
         m_irradianceArraySRV.Get(),
         m_prefilteredArraySRV.Get()
     };
-    context->PSSetShaderResources(3, 2, srvs);
+    d3dContext->PSSetShaderResources(3, 2, srvs);
 
     // b4: CB_Probes
-    context->PSSetConstantBuffers(4, 1, m_cbProbes.GetAddressOf());
+    d3dContext->PSSetConstantBuffers(4, 1, m_cbProbes.GetAddressOf());
 }
 
 int CReflectionProbeManager::SelectProbeForPosition(const DirectX::XMFLOAT3& worldPos) const

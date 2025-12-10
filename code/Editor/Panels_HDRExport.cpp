@@ -229,7 +229,7 @@ void Panels::DrawHDRExportWindow() {
             s_exportStatus = "Exporting irradiance map...";
 
             irrPath = s_outputDir + "\\" + s_assetName + "_irr.ktx2";
-            if (!CKTXExporter::ExportCubemapToKTX2(tempIBL.GetIrradianceTexture(), irrPath, 1)) {
+            if (!CKTXExporter::ExportCubemapToKTX2Native(tempIBL.GetIrradianceTexture(), irrPath, 1)) {
                 s_exportStatus = "ERROR: Failed to export irradiance map";
                 success = false;
             }
@@ -240,7 +240,7 @@ void Panels::DrawHDRExportWindow() {
             s_exportStatus = "Exporting pre-filtered map...";
 
             prefilterPath = s_outputDir + "\\" + s_assetName + "_prefilter.ktx2";
-            if (!CKTXExporter::ExportCubemapToKTX2(tempIBL.GetPreFilteredTexture(), prefilterPath, 7)) {
+            if (!CKTXExporter::ExportCubemapToKTX2Native(tempIBL.GetPreFilteredTexture(), prefilterPath, 7)) {
                 s_exportStatus = "ERROR: Failed to export pre-filtered map";
                 success = false;
             }

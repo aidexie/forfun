@@ -92,21 +92,6 @@ timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test TestXXX
 3. 读取 `E:/forfun/debug/{TestName}/runtime.log` - 错误日志（如需要）
 4. 生成测试分析报告
 
-### 关键经验教训（2025-11-28）
-
-**⚠️ 使用 Sphere 测试光照**
-- ❌ Cube：只有6个面，光从上方来时只有顶面被照亮 → 侧面看起来是黑的 → 误报失败
-- ✅ Sphere：表面法线各个方向均匀分布 → 任何角度都能正确显示光照效果
-
-**⚠️ 显式设置材质**
-- 必须使用 `.ffasset` 文件：`meshRenderer->materialPath = "materials/default_white.ffasset"`
-- 无法通过代码直接设置 albedo/metallic/roughness
-
-**⚠️ Spot Light 需要更高强度**
-- 推荐强度：500-1000（因为 cone attenuation 会减弱亮度）
-- Point Light 通常只需 50-300
-
----
 
 ## Project Overview
 

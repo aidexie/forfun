@@ -1,8 +1,18 @@
 #pragma once
-#include <d3d11_1.h>
 #include <DirectXMath.h>
 #include <wrl/client.h>
 #include <vector>
+#include <cstdint>
+
+// Forward declarations - D3D11 types hidden from public interface
+struct ID3D11Device;
+struct ID3D11DeviceContext;
+struct ID3D11Buffer;
+struct ID3D11ShaderResourceView;
+struct ID3D11UnorderedAccessView;
+struct ID3D11ComputeShader;
+struct ID3D11VertexShader;
+struct ID3D11PixelShader;
 
 class CScene;
 
@@ -62,24 +72,25 @@ public:
     CClusteredLightingPass();
     ~CClusteredLightingPass();
 
-    void Initialize(ID3D11Device* device);
+    // Public interface uses void* to avoid D3D11 header dependency
+    void Initialize(void* device);
     void Resize(uint32_t width, uint32_t height);
 
     // Build cluster grid (view-space AABBs for all clusters)
     // Call once per frame when camera changes
-    void BuildClusterGrid(ID3D11DeviceContext* context,
+    void BuildClusterGrid(void* context,
                           const DirectX::XMMATRIX& projection,
                           float nearZ, float farZ);
 
     // Cull lights into clusters
     // Call once per frame after gathering point lights from scene
-    void CullLights(ID3D11DeviceContext* context,
+    void CullLights(void* context,
                     CScene* scene,
                     const DirectX::XMMATRIX& view);
 
     // Bind cluster data to MainPass pixel shader
     // Binds: g_ClusterData (t10), g_CompactLightList (t11), g_PointLights (t12)
-    void BindToMainPass(ID3D11DeviceContext* context);
+    void BindToMainPass(void* context);
 
     // Debug visualization
     enum class EDebugMode {
@@ -88,7 +99,7 @@ public:
         ClusterAABB          // Show cluster bounding boxes
     };
     void SetDebugMode(EDebugMode mode) { m_debugMode = mode; }
-    void RenderDebug(ID3D11DeviceContext* context);
+    void RenderDebug(void* context);
 
     // Get current cluster grid dimensions
     uint32_t GetNumClustersX() const { return m_numClustersX; }

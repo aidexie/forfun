@@ -4,7 +4,9 @@
 #include "ReflectionProbeManager.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
-#include "RHI/RHIResources.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
+#include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
 #include "Core/DebugEvent.h"
 #include "Core/GpuMeshResource.h"
@@ -20,10 +22,9 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
-#include <d3dcompiler.h>
 
-using Microsoft::WRL::ComPtr;
 using namespace DirectX;
+using namespace RHI;
 
 // ============================================
 // 辅助结构和函数（文件作用域）
@@ -59,40 +60,6 @@ std::string LoadShaderSource(const std::string& filepath) {
     buffer << file.rdbuf();
     return buffer.str();
 }
-
-// Custom include handler for D3DCompile
-class CShaderIncludeHandler : public ID3DInclude {
-public:
-    HRESULT __stdcall Open(D3D_INCLUDE_TYPE IncludeType, LPCSTR pFileName,
-                          LPCVOID pParentData, LPCVOID* ppData, UINT* pBytes) override {
-        // Build full path relative to Shader directory
-        std::string fullPath = std::string("../source/code/Shader/") + pFileName;
-
-        std::ifstream file(fullPath, std::ios::binary);
-        if (!file.is_open()) {
-            CFFLog::Error("Failed to open include file: %s (tried path: %s)", pFileName, fullPath.c_str());
-            return E_FAIL;
-        }
-
-        // Read file content
-        file.seekg(0, std::ios::end);
-        size_t size = file.tellg();
-        file.seekg(0, std::ios::beg);
-
-        char* buffer = new char[size];
-        file.read(buffer, size);
-
-        *ppData = buffer;
-        *pBytes = static_cast<UINT>(size);
-
-        return S_OK;
-    }
-
-    HRESULT __stdcall Close(LPCVOID pData) override {
-        delete[] static_cast<const char*>(pData);
-        return S_OK;
-    }
-};
 
 // Constant Buffer 结构
 struct alignas(16) CB_Frame {
@@ -135,10 +102,9 @@ struct alignas(16) CB_ClusteredParams {
     uint32_t _pad[3];
 };
 
-// 更新帧常量
+// 更新帧常量 via RHI Map/Unmap
 void updateFrameConstants(
-    ID3D11DeviceContext* context,
-    ID3D11Buffer* cbFrame,
+    IBuffer* cbFrame,
     const XMMATRIX& view,
     const XMMATRIX& proj,
     const XMFLOAT3& camPos,
@@ -195,33 +161,17 @@ void updateFrameConstants(
 
     cf.camPosWS = camPos;
     cf.diffuseGIMode = diffuseGIMode;
-    context->UpdateSubresource(cbFrame, 0, nullptr, &cf, 0, 0);
+
+    void* mapped = cbFrame->Map();
+    if (mapped) {
+        memcpy(mapped, &cf, sizeof(CB_Frame));
+        cbFrame->Unmap();
+    }
 }
 
-// 绑定全局资源（Shadow, BRDF LUT）
-// Note: IBL binding moved to ReflectionProbeManager::Bind() (t3, t4, b4)
-void bindGlobalResources(
-    ID3D11DeviceContext* context,
-    const CShadowPass::Output* shadowData)
-{
-    if (shadowData && shadowData->shadowSampler) {
-        ID3D11SamplerState* sampler = static_cast<ID3D11SamplerState*>(shadowData->shadowSampler->GetNativeHandle());
-        context->PSSetSamplers(1, 1, &sampler);
-    }
-    if (shadowData && shadowData->shadowMapArray) {
-        ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(shadowData->shadowMapArray->GetSRV());
-        context->PSSetShaderResources(2, 1, &srv);
-    }
-
-    // t5: BRDF LUT (now from ReflectionProbeManager)
-    ID3D11ShaderResourceView* brdfLutSRV = CScene::Instance().GetProbeManager().GetBrdfLutSRV();
-    context->PSSetShaderResources(5, 1, &brdfLutSRV);
-}
-
-// 更新物体常量
+// 更新物体常量 via RHI Map/Unmap
 void updateObjectConstants(
-    ID3D11DeviceContext* context,
-    ID3D11Buffer* cbObj,
+    IBuffer* cbObj,
     const RenderItem& item)
 {
     CB_Object co{};
@@ -235,12 +185,16 @@ void updateObjectConstants(
     co.hasEmissiveMap = item.hasRealEmissiveMap ? 1 : 0;
     co.alphaMode = static_cast<int>(item.material->alphaMode);
     co.alphaCutoff = item.material->alphaCutoff;
-    co.probeIndex = item.probeIndex;  // Per-object probe selection
-    context->UpdateSubresource(cbObj, 0, nullptr, &co, 0, 0);
+    co.probeIndex = item.probeIndex;
+
+    void* mapped = cbObj->Map();
+    if (mapped) {
+        memcpy(mapped, &co, sizeof(CB_Object));
+        cbObj->Unmap();
+    }
 }
 
 // 收集并分类渲染项
-// Per-object probe selection via CReflectionProbeManager::SelectProbeForPosition()
 void collectRenderItems(
     CScene& scene,
     XMVECTOR eye,
@@ -281,8 +235,8 @@ void collectRenderItems(
         XMVECTOR delta = XMVectorSubtract(objPos, eye);
         float distance = XMVectorGetX(XMVector3Length(delta));
 
-        // Per-object probe selection (using object center position)
-        int probeIndex = 0;  // Default: global IBL
+        // Per-object probe selection
+        int probeIndex = 0;
         if (probeManager) {
             XMFLOAT3 objPosF;
             XMStoreFloat3(&objPosF, objPos);
@@ -324,110 +278,27 @@ void collectRenderItems(
     }
 }
 
-// 渲染不透明Pass
-// Note: Reflection Probe binding is now via ReflectionProbeManager::Bind() (once per frame)
-void renderOpaquePass(
-    ID3D11DeviceContext* context,
-    const std::vector<RenderItem>& opaqueItems,
-    ID3D11InputLayout* inputLayout,
-    ID3D11VertexShader* vs,
-    ID3D11PixelShader* ps,
-    ID3D11RasterizerState* rasterState,
-    ID3D11DepthStencilState* depthState,
-    ID3D11Buffer* cbFrame,
-    ID3D11Buffer* cbObj,
-    ID3D11SamplerState* sampler)
+// 渲染物体列表 (统一处理 opaque 和 transparent)
+void renderItems(
+    ICommandList* cmdList,
+    const std::vector<RenderItem>& items,
+    IBuffer* cbObj)
 {
-    if (opaqueItems.empty()) return;
+    for (auto& item : items) {
+        updateObjectConstants(cbObj, item);
 
-    context->IASetInputLayout(inputLayout);
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->VSSetShader(vs, nullptr, 0);
-    context->PSSetShader(ps, nullptr, 0);
-    context->RSSetState(rasterState);
-    context->OMSetDepthStencilState(depthState, 0);
-    context->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+        // Bind vertex/index buffers
+        cmdList->SetVertexBuffer(0, item.gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
+        cmdList->SetIndexBuffer(item.gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
 
-    context->VSSetConstantBuffers(0, 1, &cbFrame);
-    context->VSSetConstantBuffers(1, 1, &cbObj);
-    context->PSSetConstantBuffers(0, 1, &cbFrame);
-    context->PSSetConstantBuffers(1, 1, &cbObj);
-    context->PSSetSamplers(0, 1, &sampler);
+        // Bind textures (t0=albedo, t1=normal, t6=metallicRoughness, t7=emissive)
+        cmdList->SetShaderResource(EShaderStage::Pixel, 0, item.albedoTex);
+        cmdList->SetShaderResource(EShaderStage::Pixel, 1, item.normalTex);
+        cmdList->SetShaderResource(EShaderStage::Pixel, 6, item.metallicRoughnessTex);
+        cmdList->SetShaderResource(EShaderStage::Pixel, 7, item.emissiveTex);
 
-    for (auto& item : opaqueItems) {
-        updateObjectConstants(context, cbObj, item);
-
-        UINT stride = sizeof(SVertexPNT), offset = 0;
-        ID3D11Buffer* vbo = static_cast<ID3D11Buffer*>(item.gpuMesh->vbo->GetNativeHandle());
-        context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-        context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(item.gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
-
-        ID3D11ShaderResourceView* albedoSRV = static_cast<ID3D11ShaderResourceView*>(item.albedoTex->GetSRV());
-        ID3D11ShaderResourceView* normalSRV = static_cast<ID3D11ShaderResourceView*>(item.normalTex->GetSRV());
-        ID3D11ShaderResourceView* metallicRoughnessSRV = static_cast<ID3D11ShaderResourceView*>(item.metallicRoughnessTex->GetSRV());
-        ID3D11ShaderResourceView* emissiveSRV = static_cast<ID3D11ShaderResourceView*>(item.emissiveTex->GetSRV());
-
-        ID3D11ShaderResourceView* srvs[2] = { albedoSRV, normalSRV };
-        context->PSSetShaderResources(0, 2, srvs);
-        context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
-        context->PSSetShaderResources(7, 1, &emissiveSRV);
-
-        context->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
-    }
-}
-
-// 渲染透明Pass
-// Note: Reflection Probe binding is now via ReflectionProbeManager::Bind() (once per frame)
-void renderTransparentPass(
-    ID3D11DeviceContext* context,
-    const std::vector<RenderItem>& transparentItems,
-    ID3D11InputLayout* inputLayout,
-    ID3D11VertexShader* vs,
-    ID3D11PixelShader* ps,
-    ID3D11RasterizerState* rasterState,
-    ID3D11DepthStencilState* depthStateTransparent,
-    ID3D11BlendState* blendStateTransparent,
-    ID3D11Buffer* cbFrame,
-    ID3D11Buffer* cbObj,
-    ID3D11SamplerState* sampler)
-{
-    if (transparentItems.empty()) return;
-
-    context->IASetInputLayout(inputLayout);
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context->VSSetShader(vs, nullptr, 0);
-    context->PSSetShader(ps, nullptr, 0);
-    context->RSSetState(rasterState);
-    context->OMSetDepthStencilState(depthStateTransparent, 0);
-
-    float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-    context->OMSetBlendState(blendStateTransparent, blendFactor, 0xFFFFFFFF);
-
-    context->VSSetConstantBuffers(0, 1, &cbFrame);
-    context->VSSetConstantBuffers(1, 1, &cbObj);
-    context->PSSetConstantBuffers(0, 1, &cbFrame);
-    context->PSSetConstantBuffers(1, 1, &cbObj);
-    context->PSSetSamplers(0, 1, &sampler);
-
-    for (auto& item : transparentItems) {
-        updateObjectConstants(context, cbObj, item);
-
-        UINT stride = sizeof(SVertexPNT), offset = 0;
-        ID3D11Buffer* vbo = static_cast<ID3D11Buffer*>(item.gpuMesh->vbo->GetNativeHandle());
-        context->IASetVertexBuffers(0, 1, &vbo, &stride, &offset);
-        context->IASetIndexBuffer(static_cast<ID3D11Buffer*>(item.gpuMesh->ibo->GetNativeHandle()), DXGI_FORMAT_R32_UINT, 0);
-
-        ID3D11ShaderResourceView* albedoSRV = static_cast<ID3D11ShaderResourceView*>(item.albedoTex->GetSRV());
-        ID3D11ShaderResourceView* normalSRV = static_cast<ID3D11ShaderResourceView*>(item.normalTex->GetSRV());
-        ID3D11ShaderResourceView* metallicRoughnessSRV = static_cast<ID3D11ShaderResourceView*>(item.metallicRoughnessTex->GetSRV());
-        ID3D11ShaderResourceView* emissiveSRV = static_cast<ID3D11ShaderResourceView*>(item.emissiveTex->GetSRV());
-
-        ID3D11ShaderResourceView* srvs[2] = { albedoSRV, normalSRV };
-        context->PSSetShaderResources(0, 2, srvs);
-        context->PSSetShaderResources(6, 1, &metallicRoughnessSRV);
-        context->PSSetShaderResources(7, 1, &emissiveSRV);
-
-        context->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
+        // Draw
+        cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }
 }
 
@@ -439,31 +310,26 @@ void renderTransparentPass(
 
 bool CSceneRenderer::Initialize()
 {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return false;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return false;
 
     createPipeline();
-    createRasterStates();
 
-    m_clusteredLighting.Initialize(device);
+    m_clusteredLighting.Initialize(ctx->GetNativeDevice());
 
     return true;
 }
 
 void CSceneRenderer::Shutdown()
 {
-    m_cbFrame.Reset();
-    m_cbObj.Reset();
-    m_cbClusteredParams.Reset();
-    m_inputLayout.Reset();
-    m_vs.Reset();
-    m_ps.Reset();
-    m_sampler.Reset();
-    m_rsSolid.Reset();
-    m_rsWire.Reset();
-    m_depthStateDefault.Reset();
-    m_depthStateTransparent.Reset();
-    m_blendStateTransparent.Reset();
+    m_cbFrame.reset();
+    m_cbObj.reset();
+    m_cbClusteredParams.reset();
+    m_vs.reset();
+    m_ps.reset();
+    m_psoOpaque.reset();
+    m_psoTransparent.reset();
+    m_sampler.reset();
 }
 
 void CSceneRenderer::Render(
@@ -475,23 +341,16 @@ void CSceneRenderer::Render(
     float dt,
     const CShadowPass::Output* shadowData)
 {
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!context) return;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ICommandList* cmdList = ctx->GetCommandList();
+    if (!cmdList) return;
 
-    // Get D3D11 views from RHI textures
-    ID3D11RenderTargetView* hdrRTV = hdrRT ? static_cast<ID3D11RenderTargetView*>(hdrRT->GetRTV()) : nullptr;
-    ID3D11DepthStencilView* dsv = depthRT ? static_cast<ID3D11DepthStencilView*>(depthRT->GetDSV()) : nullptr;
+    // Set render targets via RHI
+    ITexture* rts[] = { hdrRT };
+    cmdList->SetRenderTargets(1, rts, depthRT);
 
-    // Bind render targets
-    context->OMSetRenderTargets(1, &hdrRTV, dsv);
-
-    // Setup viewport
-    D3D11_VIEWPORT vp{};
-    vp.Width = (FLOAT)w;
-    vp.Height = (FLOAT)h;
-    vp.MinDepth = 0.0f;
-    vp.MaxDepth = 1.0f;
-    context->RSSetViewports(1, &vp);
+    // Setup viewport via RHI
+    cmdList->SetViewport(0.0f, 0.0f, (float)w, (float)h, 0.0f, 1.0f);
 
     // Camera matrices
     XMMATRIX view = camera.GetViewMatrix();
@@ -505,74 +364,94 @@ void CSceneRenderer::Render(
         if (dirLight) break;
     }
 
-    // Update frame constants (includes diffuseGIMode from scene settings)
+    // Update frame constants
     int diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
-    updateFrameConstants(context, m_cbFrame.Get(), view, proj, camera.position, dirLight, shadowData, diffuseGIMode);
-    bindGlobalResources(context, shadowData);
+    updateFrameConstants(m_cbFrame.get(), view, proj, camera.position, dirLight, shadowData, diffuseGIMode);
+
+    // Bind frame constant buffer (b0)
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
+    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbFrame.get());
+
+    // Bind object constant buffer (b1)
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 1, m_cbObj.get());
+    cmdList->SetConstantBuffer(EShaderStage::Pixel, 1, m_cbObj.get());
+
+    // Bind shadow resources (t2=shadowMap, s1=shadowSampler)
+    if (shadowData && shadowData->shadowMapArray) {
+        cmdList->SetShaderResource(EShaderStage::Pixel, 2, shadowData->shadowMapArray);
+    }
+    if (shadowData && shadowData->shadowSampler) {
+        cmdList->SetSampler(EShaderStage::Pixel, 1, shadowData->shadowSampler);
+    }
+
+    // Bind BRDF LUT (t5) - modules use void* interface
+    auto& probeManager = scene.GetProbeManager();
+    void* nativeCtx = ctx->GetNativeContext();
+    probeManager.Bind(nativeCtx);
+
+    // Bind Light Probes (t15, b5)
+    auto& lightProbeManager = scene.GetLightProbeManager();
+    lightProbeManager.Bind(nativeCtx);
+
+    // Bind Volumetric Lightmap (t20-t24, b6)
+    auto& volumetricLightmap = scene.GetVolumetricLightmap();
+    volumetricLightmap.Bind(nativeCtx);
+
+    // Bind sampler (s0)
+    cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Clustered lighting setup
     m_clusteredLighting.Resize(w, h);
-    m_clusteredLighting.BuildClusterGrid(context, proj, camera.nearZ, camera.farZ);
-    m_clusteredLighting.CullLights(context, &scene, view);
+    m_clusteredLighting.BuildClusterGrid(nativeCtx, proj, camera.nearZ, camera.farZ);
+    m_clusteredLighting.CullLights(nativeCtx, &scene, view);
 
+    // Update clustered params constant buffer (b3)
     CB_ClusteredParams clusteredParams{};
     clusteredParams.nearZ = camera.nearZ;
     clusteredParams.farZ = camera.farZ;
     clusteredParams.numClustersX = m_clusteredLighting.GetNumClustersX();
     clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
     clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
-    context->UpdateSubresource(m_cbClusteredParams.Get(), 0, nullptr, &clusteredParams, 0, 0);
-    context->PSSetConstantBuffers(3, 1, m_cbClusteredParams.GetAddressOf());
-    m_clusteredLighting.BindToMainPass(context);
 
-    // Bind Reflection Probe TextureCubeArray (t3, t4, b4)
-    // ProbeManager is initialized and loaded in CScene::Initialize()
-    auto& probeManager = scene.GetProbeManager();
-    probeManager.Bind(context);
+    void* mappedCluster = m_cbClusteredParams->Map();
+    if (mappedCluster) {
+        memcpy(mappedCluster, &clusteredParams, sizeof(CB_ClusteredParams));
+        m_cbClusteredParams->Unmap();
+    }
+    cmdList->SetConstantBuffer(EShaderStage::Pixel, 3, m_cbClusteredParams.get());
+    m_clusteredLighting.BindToMainPass(nativeCtx);
 
-    // Bind Light Probe StructuredBuffer (t15, b5)
-    // LightProbeManager provides SH coefficients for diffuse IBL
-    auto& lightProbeManager = scene.GetLightProbeManager();
-    lightProbeManager.Bind(context);
-
-    // Bind Volumetric Lightmap (t20-t24, b6)
-    // VolumetricLightmap provides per-pixel SH sampling (highest quality GI)
-    auto& volumetricLightmap = scene.GetVolumetricLightmap();
-    volumetricLightmap.Bind(context);
-
-    // Collect render items (with per-object probe selection)
+    // Collect render items
     std::vector<RenderItem> opaqueItems;
     std::vector<RenderItem> transparentItems;
     collectRenderItems(scene, eye, opaqueItems, transparentItems, &probeManager);
 
     // Render Opaque
-    { CScopedDebugEvent evt(context, L"Opaque Pass");
-    renderOpaquePass(context, opaqueItems,
-                     m_inputLayout.Get(), m_vs.Get(), m_ps.Get(),
-                     m_rsSolid.Get(), m_depthStateDefault.Get(),
-                     m_cbFrame.Get(), m_cbObj.Get(), m_sampler.Get());
+    { CScopedDebugEvent evt(ctx->GetNativeContext(), L"Opaque Pass");
+    cmdList->SetPipelineState(m_psoOpaque.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+    renderItems(cmdList, opaqueItems, m_cbObj.get());
     }
 
     // Render Skybox
-    { CScopedDebugEvent evt(context, L"Skybox");
+    { CScopedDebugEvent evt(ctx->GetNativeContext(), L"Skybox");
     CScene::Instance().GetSkybox().Render(view, proj);
     }
 
     // Render Transparent
-    { CScopedDebugEvent evt(context, L"Transparent Pass");
-    renderTransparentPass(context, transparentItems,
-                          m_inputLayout.Get(), m_vs.Get(), m_ps.Get(),
-                          m_rsSolid.Get(), m_depthStateTransparent.Get(),
-                          m_blendStateTransparent.Get(),
-                          m_cbFrame.Get(), m_cbObj.Get(), m_sampler.Get());
+    { CScopedDebugEvent evt(ctx->GetNativeContext(), L"Transparent Pass");
+    cmdList->SetPipelineState(m_psoTransparent.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+    renderItems(cmdList, transparentItems, m_cbObj.get());
     }
 }
 
 void CSceneRenderer::createPipeline()
 {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
 
+    // Load and compile shaders using RHI ShaderCompiler
     std::string vsSource = LoadShaderSource("../source/code/Shader/MainPass.vs.hlsl");
     std::string psSource = LoadShaderSource("../source/code/Shader/MainPass.ps.hlsl");
 
@@ -581,99 +460,127 @@ void CSceneRenderer::createPipeline()
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+    CDefaultShaderIncludeHandler includeHandler("../source/code/Shader/");
+
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ComPtr<ID3DBlob> vsBlob, psBlob, err;
-    CShaderIncludeHandler includeHandler;
-
-    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "MainPass.vs.hlsl", nullptr,
-                           &includeHandler, "main", "vs_5_0",
-                           compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) CFFLog::Error("VS Error: %s", (const char*)err->GetBufferPointer());
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource, "main", "vs_5_0", &includeHandler, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("VS Error: %s", vsCompiled.errorMessage.c_str());
         return;
     }
 
-    hr = D3DCompile(psSource.c_str(), psSource.size(), "MainPass.ps.hlsl", nullptr,
-                   &includeHandler, "main", "ps_5_0",
-                   compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) CFFLog::Error("PS Error: %s", (const char*)err->GetBufferPointer());
+    SCompiledShader psCompiled = CompileShaderFromSource(psSource, "main", "ps_5_0", &includeHandler, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("PS Error: %s", psCompiled.errorMessage.c_str());
         return;
     }
 
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
+    // Create shaders via RHI
+    ShaderDesc vsDesc;
+    vsDesc.type = EShaderType::Vertex;
+    vsDesc.bytecode = vsCompiled.bytecode.data();
+    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
+    m_vs.reset(ctx->CreateShader(vsDesc));
 
-    D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,     0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,     0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,        0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "TANGENT",  0, DXGI_FORMAT_R32G32B32A32_FLOAT,  0, 32, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT,  0, 48, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    ShaderDesc psDesc;
+    psDesc.type = EShaderType::Pixel;
+    psDesc.bytecode = psCompiled.bytecode.data();
+    psDesc.bytecodeSize = psCompiled.bytecode.size();
+    m_ps.reset(ctx->CreateShader(psDesc));
+
+    // Input layout (matches SVertexPNT)
+    std::vector<VertexElement> inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 },
+        { EVertexSemantic::Normal,   0, EVertexFormat::Float3, 12, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 24, 0 },
+        { EVertexSemantic::Tangent,  0, EVertexFormat::Float4, 32, 0 },
+        { EVertexSemantic::Color,    0, EVertexFormat::Float4, 48, 0 }
     };
-    device->CreateInputLayout(layout, 5, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
 
-    D3D11_BUFFER_DESC cb{};
-    cb.ByteWidth = sizeof(CB_Frame);
-    cb.Usage = D3D11_USAGE_DEFAULT;
-    cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    device->CreateBuffer(&cb, nullptr, m_cbFrame.GetAddressOf());
-    cb.ByteWidth = sizeof(CB_Object);
-    device->CreateBuffer(&cb, nullptr, m_cbObj.GetAddressOf());
-    cb.ByteWidth = sizeof(CB_ClusteredParams);
-    device->CreateBuffer(&cb, nullptr, m_cbClusteredParams.GetAddressOf());
+    // ============================================
+    // Opaque Pipeline State
+    // ============================================
+    PipelineStateDesc psoOpaque;
+    psoOpaque.vertexShader = m_vs.get();
+    psoOpaque.pixelShader = m_ps.get();
+    psoOpaque.inputLayout = inputLayout;
 
-    D3D11_SAMPLER_DESC sd{};
-    sd.Filter = D3D11_FILTER_ANISOTROPIC; sd.MaxAnisotropy = 8;
-    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-    sd.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
-    sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
-    device->CreateSamplerState(&sd, m_sampler.GetAddressOf());
-}
+    // Rasterizer state
+    psoOpaque.rasterizer.fillMode = EFillMode::Solid;
+    psoOpaque.rasterizer.cullMode = ECullMode::Back;
+    psoOpaque.rasterizer.frontCounterClockwise = false;
+    psoOpaque.rasterizer.depthClipEnable = true;
 
-void CSceneRenderer::createRasterStates()
-{
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    // Depth stencil state (depth test + write)
+    psoOpaque.depthStencil.depthEnable = true;
+    psoOpaque.depthStencil.depthWriteEnable = true;
+    psoOpaque.depthStencil.depthFunc = EComparisonFunc::Less;
 
-    D3D11_RASTERIZER_DESC rd{};
-    rd.FillMode = D3D11_FILL_SOLID;
-    rd.CullMode = D3D11_CULL_BACK;
-    rd.FrontCounterClockwise = FALSE;
-    rd.DepthClipEnable = TRUE;
-    device->CreateRasterizerState(&rd, m_rsSolid.GetAddressOf());
+    // No blending
+    psoOpaque.blend.blendEnable = false;
 
-    rd.FillMode = D3D11_FILL_WIREFRAME;
-    device->CreateRasterizerState(&rd, m_rsWire.GetAddressOf());
+    psoOpaque.primitiveTopology = EPrimitiveTopology::TriangleList;
+    psoOpaque.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+    psoOpaque.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
 
-    D3D11_DEPTH_STENCIL_DESC dsd{};
-    dsd.DepthEnable = TRUE;
-    dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
-    dsd.DepthFunc = D3D11_COMPARISON_LESS;
-    dsd.StencilEnable = FALSE;
-    device->CreateDepthStencilState(&dsd, m_depthStateDefault.GetAddressOf());
+    m_psoOpaque.reset(ctx->CreatePipelineState(psoOpaque));
 
-    D3D11_DEPTH_STENCIL_DESC dsdTransparent{};
-    dsdTransparent.DepthEnable = TRUE;
-    dsdTransparent.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    dsdTransparent.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-    dsdTransparent.StencilEnable = FALSE;
-    device->CreateDepthStencilState(&dsdTransparent, m_depthStateTransparent.GetAddressOf());
+    // ============================================
+    // Transparent Pipeline State
+    // ============================================
+    PipelineStateDesc psoTransparent = psoOpaque;  // Copy opaque settings
 
-    D3D11_BLEND_DESC blendDesc{};
-    blendDesc.AlphaToCoverageEnable = FALSE;
-    blendDesc.IndependentBlendEnable = FALSE;
-    blendDesc.RenderTarget[0].BlendEnable = TRUE;
-    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    device->CreateBlendState(&blendDesc, m_blendStateTransparent.GetAddressOf());
+    // Depth: read-only (no write) with LessEqual
+    psoTransparent.depthStencil.depthWriteEnable = false;
+    psoTransparent.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+
+    // Alpha blending
+    psoTransparent.blend.blendEnable = true;
+    psoTransparent.blend.srcBlend = EBlendFactor::SrcAlpha;
+    psoTransparent.blend.dstBlend = EBlendFactor::InvSrcAlpha;
+    psoTransparent.blend.blendOp = EBlendOp::Add;
+    psoTransparent.blend.srcBlendAlpha = EBlendFactor::One;
+    psoTransparent.blend.dstBlendAlpha = EBlendFactor::Zero;
+    psoTransparent.blend.blendOpAlpha = EBlendOp::Add;
+
+    m_psoTransparent.reset(ctx->CreatePipelineState(psoTransparent));
+
+    // ============================================
+    // Constant Buffers (CPU-writable for Map/Unmap)
+    // ============================================
+    BufferDesc cbFrameDesc;
+    cbFrameDesc.size = sizeof(CB_Frame);
+    cbFrameDesc.usage = EBufferUsage::Constant;
+    cbFrameDesc.cpuAccess = ECPUAccess::Write;
+    m_cbFrame.reset(ctx->CreateBuffer(cbFrameDesc, nullptr));
+
+    BufferDesc cbObjDesc;
+    cbObjDesc.size = sizeof(CB_Object);
+    cbObjDesc.usage = EBufferUsage::Constant;
+    cbObjDesc.cpuAccess = ECPUAccess::Write;
+    m_cbObj.reset(ctx->CreateBuffer(cbObjDesc, nullptr));
+
+    BufferDesc cbClusteredDesc;
+    cbClusteredDesc.size = sizeof(CB_ClusteredParams);
+    cbClusteredDesc.usage = EBufferUsage::Constant;
+    cbClusteredDesc.cpuAccess = ECPUAccess::Write;
+    m_cbClusteredParams.reset(ctx->CreateBuffer(cbClusteredDesc, nullptr));
+
+    // ============================================
+    // Sampler
+    // ============================================
+    SamplerDesc samplerDesc;
+    samplerDesc.filter = EFilter::Anisotropic;
+    samplerDesc.maxAnisotropy = 8;
+    samplerDesc.addressU = ETextureAddressMode::Wrap;
+    samplerDesc.addressV = ETextureAddressMode::Wrap;
+    samplerDesc.addressW = ETextureAddressMode::Wrap;
+    samplerDesc.minLOD = 0.0f;
+    samplerDesc.maxLOD = 3.402823466e+38f;  // FLT_MAX
+    m_sampler.reset(ctx->CreateSampler(samplerDesc));
 }

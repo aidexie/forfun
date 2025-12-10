@@ -12,12 +12,13 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
-bool CScreenshot::Capture(ID3D11Texture2D* texture, const std::string& path) {
-    if (!texture) {
+bool CScreenshot::Capture(void* texturePtr, const std::string& path) {
+    if (!texturePtr) {
         CFFLog::Error("Screenshot: Null texture");
         return false;
     }
 
+    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(texturePtr);
     RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
     auto* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
     auto* context = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());

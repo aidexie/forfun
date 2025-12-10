@@ -1,11 +1,12 @@
 #pragma once
 #include <DirectXMath.h>
-#include <d3d11.h>
 #include <wrl/client.h>
 #include <string>
 #include <vector>
 
-// Forward declarations
+// Forward declarations - D3D11 types hidden from public interface
+struct ID3D11Buffer;
+struct ID3D11ShaderResourceView;
 class CScene;
 
 // ============================================
@@ -79,7 +80,7 @@ public:
     // 绑定资源到 Shader（每帧调用一次）
     // slot 15: LightProbeBuffer (StructuredBuffer)
     // slot 5 (CB): CB_LightProbeParams
-    void Bind(ID3D11DeviceContext* context);
+    void Bind(void* context);
 
     // 获取 Probe 数量（用于调试）
     int GetProbeCount() const { return m_probeCount; }

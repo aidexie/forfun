@@ -1,50 +1,18 @@
 #include "KTXExporter.h"
 #include "Core/FFLog.h"
 #include "RHI/RHIManager.h"
+#include <d3d11.h>
+#include <ktx.h>
 #include <iostream>
 #include <vector>
 #include <DirectXPackedVector.h>
 #include <filesystem>
 
 // ============================================
-// RHI Interface Implementations
-// ============================================
-
-bool CKTXExporter::ExportCubemapToKTX2(
-    RHI::ITexture* texture,
-    const std::string& filepath,
-    int numMipLevels)
-{
-    if (!texture) {
-        CFFLog::Error("KTXExporter: Null RHI texture");
-        return false;
-    }
-
-    // Extract native D3D11 texture and delegate to D3D11 implementation
-    ID3D11Texture2D* d3dTexture = static_cast<ID3D11Texture2D*>(texture->GetNativeHandle());
-    return ExportCubemapToKTX2(d3dTexture, filepath, numMipLevels);
-}
-
-bool CKTXExporter::Export2DTextureToKTX2(
-    RHI::ITexture* texture,
-    const std::string& filepath,
-    int numMipLevels)
-{
-    if (!texture) {
-        CFFLog::Error("KTXExporter: Null RHI texture");
-        return false;
-    }
-
-    // Extract native D3D11 texture and delegate to D3D11 implementation
-    ID3D11Texture2D* d3dTexture = static_cast<ID3D11Texture2D*>(texture->GetNativeHandle());
-    return Export2DTextureToKTX2(d3dTexture, filepath, numMipLevels);
-}
-
-// ============================================
 // D3D11 Implementation (Internal)
 // ============================================
 
-uint32_t CKTXExporter::DXGIFormatToVkFormat(DXGI_FORMAT format) {
+static uint32_t DXGIFormatToVkFormat(DXGI_FORMAT format) {
     switch (format) {
         case DXGI_FORMAT_R16G16B16A16_FLOAT:
             return 97;  // VK_FORMAT_R16G16B16A16_SFLOAT
@@ -62,7 +30,7 @@ uint32_t CKTXExporter::DXGIFormatToVkFormat(DXGI_FORMAT format) {
     }
 }
 
-bool CKTXExporter::ExportCubemapToKTX2(
+static bool ExportCubemapToKTX2_D3D11(
     ID3D11Texture2D* texture,
     const std::string& filepath,
     int numMipLevels)
@@ -220,7 +188,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
     return true;
 }
 
-bool CKTXExporter::Export2DTextureToKTX2(
+static bool Export2DTextureToKTX2_D3D11(
     ID3D11Texture2D* texture,
     const std::string& filepath,
     int numMipLevels)
@@ -464,4 +432,50 @@ bool CKTXExporter::ExportCubemapFromCPUData(
     ktxTexture2_Destroy(ktxTex);
     CFFLog::Info("[KTXExporter] Successfully exported CPU cubemap to %s", filepath.c_str());
     return true;
+}
+
+// ============================================
+// RHI Interface Implementations
+// ============================================
+
+bool CKTXExporter::ExportCubemapToKTX2(
+    RHI::ITexture* texture,
+    const std::string& filepath,
+    int numMipLevels)
+{
+    if (!texture) {
+        CFFLog::Error("KTXExporter: Null RHI texture");
+        return false;
+    }
+    ID3D11Texture2D* d3dTexture = static_cast<ID3D11Texture2D*>(texture->GetNativeHandle());
+    return ExportCubemapToKTX2_D3D11(d3dTexture, filepath, numMipLevels);
+}
+
+bool CKTXExporter::Export2DTextureToKTX2(
+    RHI::ITexture* texture,
+    const std::string& filepath,
+    int numMipLevels)
+{
+    if (!texture) {
+        CFFLog::Error("KTXExporter: Null RHI texture");
+        return false;
+    }
+    ID3D11Texture2D* d3dTexture = static_cast<ID3D11Texture2D*>(texture->GetNativeHandle());
+    return Export2DTextureToKTX2_D3D11(d3dTexture, filepath, numMipLevels);
+}
+
+bool CKTXExporter::ExportCubemapToKTX2Native(
+    void* nativeTexture,
+    const std::string& filepath,
+    int numMipLevels)
+{
+    return ExportCubemapToKTX2_D3D11(static_cast<ID3D11Texture2D*>(nativeTexture), filepath, numMipLevels);
+}
+
+bool CKTXExporter::Export2DTextureToKTX2Native(
+    void* nativeTexture,
+    const std::string& filepath,
+    int numMipLevels)
+{
+    return Export2DTextureToKTX2_D3D11(static_cast<ID3D11Texture2D*>(nativeTexture), filepath, numMipLevels);
 }

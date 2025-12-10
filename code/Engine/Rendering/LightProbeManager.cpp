@@ -104,16 +104,18 @@ void CLightProbeManager::LoadProbesFromScene(CScene& scene)
     CFFLog::Info("[LightProbeManager] Total light probes loaded: %d", m_probeCount);
 }
 
-void CLightProbeManager::Bind(ID3D11DeviceContext* context)
+void CLightProbeManager::Bind(void* context)
 {
     if (!m_initialized) return;
 
+    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
+
     // t15: LightProbeBuffer (StructuredBuffer)
     ID3D11ShaderResourceView* srv = m_probeBufferSRV.Get();
-    context->PSSetShaderResources(15, 1, &srv);
+    d3dContext->PSSetShaderResources(15, 1, &srv);
 
     // b5: CB_LightProbeParams
-    context->PSSetConstantBuffers(5, 1, m_cbParams.GetAddressOf());
+    d3dContext->PSSetConstantBuffers(5, 1, m_cbParams.GetAddressOf());
 }
 
 void CLightProbeManager::BlendProbesForPosition(

@@ -1,5 +1,6 @@
-
 #include "TextureLoader.h"
+#include <d3d11.h>
+#include <wrl/client.h>
 #include <wincodec.h>
 #include <vector>
 #include <assert.h>
@@ -8,13 +9,16 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 
+using Microsoft::WRL::ComPtr;
+
 static DXGI_FORMAT ToDXGIFormat(bool srgb){
     return srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
-bool LoadTextureWIC(ID3D11Device* device, const std::wstring& path,
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& outSRV, bool srgb)
+bool LoadTextureWIC(void* devicePtr, const std::wstring& path, void** outSRV, bool srgb)
 {
+    ID3D11Device* device = static_cast<ID3D11Device*>(devicePtr);
+    if (!device || !outSRV) return false;
     HRESULT hr = S_OK;
     Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
     Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
@@ -67,11 +71,14 @@ bool LoadTextureWIC(ID3D11Device* device, const std::wstring& path,
     sd.Format=td.Format;
     sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
     sd.Texture2D.MipLevels=-1;  // -1 = all mipmap levels
-    hr = device->CreateShaderResourceView(tex.Get(), &sd, outSRV.GetAddressOf());
+    ComPtr<ID3D11ShaderResourceView> srv;
+    hr = device->CreateShaderResourceView(tex.Get(), &sd, srv.GetAddressOf());
     if (FAILED(hr)) return false;
 
     // Generate mipmaps automatically (box filter)
-    context->GenerateMips(outSRV.Get());
+    context->GenerateMips(srv.Get());
 
+    // Return SRV via void** (caller takes ownership)
+    *outSRV = srv.Detach();
     return true;
 }

@@ -293,9 +293,9 @@ bool CReflectionProbeBaker::saveCubemapAsKTX2(
     D3D11_TEXTURE2D_DESC desc;
     cubemap->GetDesc(&desc);
 
-    // Export using CKTXExporter
+    // Export using CKTXExporter (Native version for D3D11 texture)
     // 0 = export all mip levels (or just 1 if texture has no mipmaps)
-    bool success = CKTXExporter::ExportCubemapToKTX2(cubemap, outputPath, desc.MipLevels);
+    bool success = CKTXExporter::ExportCubemapToKTX2Native(cubemap, outputPath, desc.MipLevels);
 
     if (success) {
         CFFLog::Info("Saved cubemap to KTX2: %s (resolution: %dx%d, mips: %d)",

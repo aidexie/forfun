@@ -1,9 +1,10 @@
 #include "IBLGenerator.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ShaderCompiler.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
-#include <d3dcompiler.h>
+#include <d3d11.h>  // Still needed for D3D11 API calls in this file
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -145,37 +146,30 @@ void CIBLGenerator::createIrradianceShader() {
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ComPtr<ID3DBlob> vsBlob, psBlob, err;
-
     // Compile VS
-    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "IrradianceConvolution.vs.hlsl",
-                            nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== IRRADIANCE VS COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
+    RHI::SCompiledShader vsCompiled = RHI::CompileShaderFromSource(vsSource, "main", "vs_5_0", nullptr, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("=== IRRADIANCE VS COMPILATION ERROR ===");
+        CFFLog::Error("%s", vsCompiled.errorMessage.c_str());
         return;
     }
 
     // Compile PS
-    hr = D3DCompile(psSource.c_str(), psSource.size(), "IrradianceConvolution.ps.hlsl",
-                    nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== IRRADIANCE PS COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
+    RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("=== IRRADIANCE PS COMPILATION ERROR ===");
+        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
         return;
     }
 
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_fullscreenVS.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_irradiancePS.GetAddressOf());
+    device->CreateVertexShader(vsCompiled.bytecode.data(), vsCompiled.bytecode.size(), nullptr, m_fullscreenVS.GetAddressOf());
+    device->CreatePixelShader(psCompiled.bytecode.data(), psCompiled.bytecode.size(), nullptr, m_irradiancePS.GetAddressOf());
 }
 
 void CIBLGenerator::createPreFilterShader() {
@@ -189,25 +183,21 @@ void CIBLGenerator::createPreFilterShader() {
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ComPtr<ID3DBlob> psBlob, err;
-
     // Compile PS (VS already compiled in createIrradianceShader)
-    HRESULT hr = D3DCompile(psSource.c_str(), psSource.size(), "PreFilterEnvironmentMap.ps.hlsl",
-                            nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== PREFILTER PS COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
+    RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("=== PREFILTER PS COMPILATION ERROR ===");
+        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
         return;
     }
 
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_prefilterPS.GetAddressOf());
+    device->CreatePixelShader(psCompiled.bytecode.data(), psCompiled.bytecode.size(), nullptr, m_prefilterPS.GetAddressOf());
 }
 
 ID3D11ShaderResourceView* CIBLGenerator::GenerateIrradianceMap(
@@ -764,25 +754,21 @@ void CIBLGenerator::createBrdfLutShader() {
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ComPtr<ID3DBlob> psBlob, err;
-
     // Compile PS (VS already compiled in createIrradianceShader, can reuse m_fullscreenVS)
-    HRESULT hr = D3DCompile(psSource.c_str(), psSource.size(), "BrdfLut.ps.hlsl",
-                            nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== BRDF LUT PS COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
+    RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("=== BRDF LUT PS COMPILATION ERROR ===");
+        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
         return;
     }
 
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_brdfLutPS.GetAddressOf());
+    device->CreatePixelShader(psCompiled.bytecode.data(), psCompiled.bytecode.size(), nullptr, m_brdfLutPS.GetAddressOf());
 }
 
 ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {

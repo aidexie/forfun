@@ -1,11 +1,17 @@
 #pragma once
 #include "RHI/RHIResources.h"
 #include <DirectXMath.h>
-#include <d3d11.h>
 #include <wrl/client.h>
 #include <string>
 #include <vector>
 #include <memory>
+
+// Forward declarations - D3D11 types hidden from public interface
+struct ID3D11DeviceContext;
+struct ID3D11Device;
+struct ID3D11Texture2D;
+struct ID3D11ShaderResourceView;
+struct ID3D11Buffer;
 
 // Forward declarations
 class CScene;
@@ -76,7 +82,7 @@ public:
     // slot 3: IrradianceArray
     // slot 4: PrefilteredArray
     // slot 4 (CB): CB_Probes
-    void Bind(ID3D11DeviceContext* context);
+    void Bind(void* context);
 
     // 加载/重载全局 Probe（index 0）
     bool LoadGlobalProbe(const std::string& irrPath, const std::string& prefPath);

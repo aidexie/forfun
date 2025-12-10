@@ -144,7 +144,7 @@ RHI::ITexture* CTextureManager::LoadTextureFromFile(const std::string& fullPath,
         return nullptr;
     }
 
-    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
+    void* device = rhiCtx->GetNativeDevice();
     if (!device) {
         return nullptr;
     }
@@ -153,17 +153,18 @@ RHI::ITexture* CTextureManager::LoadTextureFromFile(const std::string& fullPath,
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
     std::wstring wpath = converter.from_bytes(fullPath);
 
-    // Use existing WIC loader - returns SRV
-    ComPtr<ID3D11ShaderResourceView> srv;
-    if (!LoadTextureWIC(device, wpath, srv, srgb)) {
+    // Use existing WIC loader - returns SRV via void**
+    void* srvPtr = nullptr;
+    if (!LoadTextureWIC(device, wpath, &srvPtr, srgb)) {
         return nullptr;
     }
 
     // Get texture info from SRV
-    ComPtr<ID3D11Resource> resource;
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(srvPtr);
+    Microsoft::WRL::ComPtr<ID3D11Resource> resource;
     srv->GetResource(resource.GetAddressOf());
 
-    ComPtr<ID3D11Texture2D> texture;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
     resource.As(&texture);
 
     D3D11_TEXTURE2D_DESC texDesc;
@@ -173,6 +174,5 @@ RHI::ITexture* CTextureManager::LoadTextureFromFile(const std::string& fullPath,
 
     // Wrap into RHI texture - transfer ownership
     ID3D11Texture2D* rawTex = texture.Detach();
-    ID3D11ShaderResourceView* rawSRV = srv.Detach();
-    return rhiCtx->WrapNativeTexture(rawTex, rawSRV, texDesc.Width, texDesc.Height, rhiFmt);
+    return rhiCtx->WrapNativeTexture(rawTex, srv, texDesc.Width, texDesc.Height, rhiFmt);
 }

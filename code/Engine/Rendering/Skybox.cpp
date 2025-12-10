@@ -3,18 +3,16 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/ShaderCompiler.h"
 #include "Core/Loader/HdrLoader.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
-#include <d3dcompiler.h>
-#include <d3d11.h>
+#include <d3d11.h>  // Still needed for legacy convertEquirectToCubemapLegacy
 #include <wrl/client.h>
 #include <vector>
 #include <fstream>
 #include <sstream>
 #include <cstring>
-
-#pragma comment(lib, "d3dcompiler.lib")
 
 using namespace DirectX;
 using namespace RHI;
@@ -211,55 +209,40 @@ void CSkybox::createShaders() {
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ID3DBlob* vsBlob = nullptr;
-    ID3DBlob* psBlob = nullptr;
-    ID3DBlob* err = nullptr;
-
     // Compile Vertex Shader
-    HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "Skybox.vs.hlsl", nullptr, nullptr,
-                           "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource, "main", "vs_5_0", nullptr, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("=== SKYBOX VERTEX SHADER COMPILATION ERROR ===");
+        CFFLog::Error("%s", vsCompiled.errorMessage.c_str());
         return;
     }
 
     // Compile Pixel Shader
-    hr = D3DCompile(psSource.c_str(), psSource.size(), "Skybox.ps.hlsl", nullptr, nullptr,
-                   "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-            err->Release();
-        }
-        vsBlob->Release();
+    SCompiledShader psCompiled = CompileShaderFromSource(psSource, "main", "ps_5_0", nullptr, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("=== SKYBOX PIXEL SHADER COMPILATION ERROR ===");
+        CFFLog::Error("%s", psCompiled.errorMessage.c_str());
         return;
     }
 
     // Create shader objects using RHI
     ShaderDesc vsDesc;
     vsDesc.type = EShaderType::Vertex;
-    vsDesc.bytecode = vsBlob->GetBufferPointer();
-    vsDesc.bytecodeSize = vsBlob->GetBufferSize();
+    vsDesc.bytecode = vsCompiled.bytecode.data();
+    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
     m_vs.reset(ctx->CreateShader(vsDesc));
 
     ShaderDesc psDesc;
     psDesc.type = EShaderType::Pixel;
-    psDesc.bytecode = psBlob->GetBufferPointer();
-    psDesc.bytecodeSize = psBlob->GetBufferSize();
+    psDesc.bytecode = psCompiled.bytecode.data();
+    psDesc.bytecodeSize = psCompiled.bytecode.size();
     m_ps.reset(ctx->CreateShader(psDesc));
-
-    vsBlob->Release();
-    psBlob->Release();
 }
 
 void CSkybox::createPipelineState() {
@@ -403,39 +386,32 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugConvShaders = true;
+#else
+    bool debugConvShaders = false;
 #endif
 
-    ComPtr<ID3DBlob> vsBlob, psBlob, err;
-
     // Compile conversion vertex shader
-    HRESULT hr = D3DCompile(convVsSource.c_str(), convVsSource.size(), "EquirectToCubemap.vs.hlsl",
-                           nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== EQUIRECT CONVERSION VS COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
+    SCompiledShader convVsCompiled = CompileShaderFromSource(convVsSource, "main", "vs_5_0", nullptr, debugConvShaders);
+    if (!convVsCompiled.success) {
+        CFFLog::Error("=== EQUIRECT CONVERSION VS COMPILATION ERROR ===");
+        CFFLog::Error("%s", convVsCompiled.errorMessage.c_str());
         return;
     }
 
     // Compile conversion pixel shader
-    hr = D3DCompile(convPsSource.c_str(), convPsSource.size(), "EquirectToCubemap.ps.hlsl",
-                   nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &err);
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("=== EQUIRECT CONVERSION PS COMPILATION ERROR ===");
-            CFFLog::Error("%s", (const char*)err->GetBufferPointer());
-        }
+    SCompiledShader convPsCompiled = CompileShaderFromSource(convPsSource, "main", "ps_5_0", nullptr, debugConvShaders);
+    if (!convPsCompiled.success) {
+        CFFLog::Error("=== EQUIRECT CONVERSION PS COMPILATION ERROR ===");
+        CFFLog::Error("%s", convPsCompiled.errorMessage.c_str());
         return;
     }
 
     ComPtr<ID3D11VertexShader> convVS;
     ComPtr<ID3D11PixelShader> convPS;
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, convVS.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, convPS.GetAddressOf());
+    device->CreateVertexShader(convVsCompiled.bytecode.data(), convVsCompiled.bytecode.size(), nullptr, convVS.GetAddressOf());
+    device->CreatePixelShader(convPsCompiled.bytecode.data(), convPsCompiled.bytecode.size(), nullptr, convPS.GetAddressOf());
 
     // Create sampler for conversion
     D3D11_SAMPLER_DESC sd{};
@@ -492,7 +468,7 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 }
     };
     ComPtr<ID3D11InputLayout> tempLayout;
-    device->CreateInputLayout(layout, 1, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), tempLayout.GetAddressOf());
+    device->CreateInputLayout(layout, 1, convVsCompiled.bytecode.data(), convVsCompiled.bytecode.size(), tempLayout.GetAddressOf());
 
     ComPtr<ID3D11Buffer> tempCB;
     D3D11_BUFFER_DESC cbDesc{};

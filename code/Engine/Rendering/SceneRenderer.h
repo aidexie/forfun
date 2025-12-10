@@ -1,7 +1,6 @@
 #pragma once
-#include <d3d11.h>
-#include <wrl/client.h>
 #include <DirectXMath.h>
+#include <memory>
 #include "ClusteredLightingPass.h"
 #include "ShadowPass.h"
 #include "RHI/RHIResources.h"
@@ -72,34 +71,25 @@ private:
 
     // Pipeline creation
     void createPipeline();
-    void createRasterStates();
 
     // ============================================
-    // Rendering Resources
+    // Rendering Resources (RHI)
     // ============================================
     // Shaders
-    Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps;
-    Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
+    std::unique_ptr<RHI::IShader> m_vs;
+    std::unique_ptr<RHI::IShader> m_ps;
+
+    // Pipeline states
+    std::unique_ptr<RHI::IPipelineState> m_psoOpaque;
+    std::unique_ptr<RHI::IPipelineState> m_psoTransparent;
 
     // Constant buffers
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbFrame;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbObj;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbClusteredParams;
+    std::unique_ptr<RHI::IBuffer> m_cbFrame;
+    std::unique_ptr<RHI::IBuffer> m_cbObj;
+    std::unique_ptr<RHI::IBuffer> m_cbClusteredParams;
 
     // Samplers
-    Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
-
-    // Rasterizer states
-    Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsSolid;
-    Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rsWire;
-
-    // Depth stencil states
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateDefault;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthStateTransparent;
-
-    // Blend states
-    Microsoft::WRL::ComPtr<ID3D11BlendState> m_blendStateTransparent;
+    std::unique_ptr<RHI::ISampler> m_sampler;
 
     // Clustered lighting
     CClusteredLightingPass m_clusteredLighting;

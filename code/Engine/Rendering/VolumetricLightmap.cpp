@@ -1057,20 +1057,22 @@ void CVolumetricLightmap::UploadToGPU()
     // 这个函数保留用于将来的动态更新
 }
 
-void CVolumetricLightmap::Bind(ID3D11DeviceContext* context)
+void CVolumetricLightmap::Bind(void* context)
 {
+    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
+
     // 如果未启用或未烘焙，不绑定任何资源
     if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
         // 绑定空资源，避免残留
         ID3D11ShaderResourceView* nullSRVs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-        context->PSSetShaderResources(20, 5, nullSRVs);
+        d3dContext->PSSetShaderResources(20, 5, nullSRVs);
         return;
     }
 
     // 更新 Constant Buffer
     if (m_constantBuffer) {
         D3D11_MAPPED_SUBRESOURCE mapped;
-        HRESULT hr = context->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+        HRESULT hr = d3dContext->Map(m_constantBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
         if (SUCCEEDED(hr)) {
             CB_VolumetricLightmap* cb = (CB_VolumetricLightmap*)mapped.pData;
 
@@ -1094,12 +1096,12 @@ void CVolumetricLightmap::Bind(ID3D11DeviceContext* context)
             cb->enabled = 1;
             cb->brickCount = (int)m_bricks.size();
 
-            context->Unmap(m_constantBuffer.Get(), 0);
+            d3dContext->Unmap(m_constantBuffer.Get(), 0);
         }
     }
 
     // 绑定 CB 到 b6
-    context->PSSetConstantBuffers(6, 1, m_constantBuffer.GetAddressOf());
+    d3dContext->PSSetConstantBuffers(6, 1, m_constantBuffer.GetAddressOf());
 
     // 绑定纹理资源
     ID3D11ShaderResourceView* srvs[] = {
@@ -1109,19 +1111,21 @@ void CVolumetricLightmap::Bind(ID3D11DeviceContext* context)
         m_brickAtlasSRV[2].Get(),
         m_brickInfoSRV.Get()
     };
-    context->PSSetShaderResources(20, 5, srvs);
+    d3dContext->PSSetShaderResources(20, 5, srvs);
 
     // 绑定采样器到 s3
-    context->PSSetSamplers(3, 1, m_sampler.GetAddressOf());
+    d3dContext->PSSetSamplers(3, 1, m_sampler.GetAddressOf());
 }
 
-void CVolumetricLightmap::Unbind(ID3D11DeviceContext* context)
+void CVolumetricLightmap::Unbind(void* context)
 {
+    ID3D11DeviceContext* d3dContext = static_cast<ID3D11DeviceContext*>(context);
+
     ID3D11ShaderResourceView* nullSRVs[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
-    context->PSSetShaderResources(20, 5, nullSRVs);
+    d3dContext->PSSetShaderResources(20, 5, nullSRVs);
 
     ID3D11Buffer* nullCB = nullptr;
-    context->PSSetConstantBuffers(6, 1, &nullCB);
+    d3dContext->PSSetConstantBuffers(6, 1, &nullCB);
 }
 
 // ============================================

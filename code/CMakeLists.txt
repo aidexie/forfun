@@ -125,7 +125,9 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.cpp
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.h
     ${CODE_PATH}/RHI/DX11/DX11Resources.h
+    ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h
+    ${CODE_PATH}/RHI/ShaderCompiler.h
     # DX12 Backend (planned for Phase 3)
     # ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
     # ${CODE_PATH}/RHI/DX12/DX12RenderContext.h

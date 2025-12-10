@@ -11,10 +11,6 @@
 #include "PickingUtils.h"
 #include "Core/FFLog.h"
 #include <DirectXMath.h>
-#include <d3dcompiler.h>
-#include <wrl.h>
-
-using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
 // ViewportPanel.cpp  —— file-scope statics

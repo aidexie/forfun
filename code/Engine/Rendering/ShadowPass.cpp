@@ -3,6 +3,7 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
@@ -11,14 +12,11 @@
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
 #include "Components/DirectionalLight.h"
-#include <d3dcompiler.h>
 #include <algorithm>
 #include <cstring>
 
 using namespace DirectX;
 using namespace RHI;
-
-#pragma comment(lib, "d3dcompiler.lib")
 
 struct alignas(16) CB_LightSpace {
     DirectX::XMMATRIX lightSpaceVP;
@@ -55,29 +53,23 @@ bool CShadowPass::Initialize()
         }
     )";
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
-    compileFlags |= D3DCOMPILE_DEBUG;
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
 #endif
 
-    ID3DBlob* vsBlob = nullptr;
-    ID3DBlob* err = nullptr;
-    HRESULT hr = D3DCompile(kDepthVS, strlen(kDepthVS), nullptr, nullptr, nullptr,
-        "main", "vs_5_0", compileFlags, 0, &vsBlob, &err);
-
-    if (FAILED(hr)) {
-        if (err) {
-            CFFLog::Error("Shadow depth VS compilation error: %s", (char*)err->GetBufferPointer());
-            err->Release();
-        }
+    SCompiledShader vsCompiled = CompileShaderFromSource(kDepthVS, "main", "vs_5_0", nullptr, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("Shadow depth VS compilation error: %s", vsCompiled.errorMessage.c_str());
         return false;
     }
 
     // Create vertex shader using RHI
     ShaderDesc vsDesc;
     vsDesc.type = EShaderType::Vertex;
-    vsDesc.bytecode = vsBlob->GetBufferPointer();
-    vsDesc.bytecodeSize = vsBlob->GetBufferSize();
+    vsDesc.bytecode = vsCompiled.bytecode.data();
+    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
     m_depthVS.reset(ctx->CreateShader(vsDesc));
 
     // Create pipeline state
@@ -109,8 +101,6 @@ bool CShadowPass::Initialize()
     psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
-
-    vsBlob->Release();
 
     // Constant buffers (CPU-writable for Map/Unmap pattern)
     BufferDesc cbLightDesc;
