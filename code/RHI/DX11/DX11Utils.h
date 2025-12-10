@@ -18,12 +18,17 @@ inline DXGI_FORMAT ToDXGIFormat(ETextureFormat format) {
         case ETextureFormat::R8_UNORM: return DXGI_FORMAT_R8_UNORM;
         case ETextureFormat::R8G8B8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
         case ETextureFormat::R8G8B8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        case ETextureFormat::R8G8B8A8_TYPELESS: return DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        case ETextureFormat::R16G16_FLOAT: return DXGI_FORMAT_R16G16_FLOAT;
         case ETextureFormat::R16G16B16A16_FLOAT: return DXGI_FORMAT_R16G16B16A16_FLOAT;
         case ETextureFormat::R32G32B32A32_FLOAT: return DXGI_FORMAT_R32G32B32A32_FLOAT;
         case ETextureFormat::B8G8R8A8_UNORM: return DXGI_FORMAT_B8G8R8A8_UNORM;
         case ETextureFormat::B8G8R8A8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
         case ETextureFormat::D24_UNORM_S8_UINT: return DXGI_FORMAT_D24_UNORM_S8_UINT;
         case ETextureFormat::D32_FLOAT: return DXGI_FORMAT_D32_FLOAT;
+        case ETextureFormat::R24G8_TYPELESS: return DXGI_FORMAT_R24G8_TYPELESS;
+        case ETextureFormat::R32_TYPELESS: return DXGI_FORMAT_R32_TYPELESS;
+        case ETextureFormat::R24_UNORM_X8_TYPELESS: return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
         case ETextureFormat::BC1_UNORM: return DXGI_FORMAT_BC1_UNORM;
         case ETextureFormat::BC1_UNORM_SRGB: return DXGI_FORMAT_BC1_UNORM_SRGB;
         case ETextureFormat::BC3_UNORM: return DXGI_FORMAT_BC3_UNORM;

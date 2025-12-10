@@ -860,96 +860,72 @@ ID3D11ShaderResourceView* CIBLGenerator::GenerateBrdfLut(int resolution) {
 }
 
 bool CIBLGenerator::LoadIrradianceFromKTX2(const std::string& ktx2Path) {
-    ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
-    if (!texture) {
+    RHI::ITexture* rhiTexture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!rhiTexture) {
         CFFLog::Error("IBLGenerator: Failed to load irradiance map from %s", ktx2Path.c_str());
         return false;
     }
 
-    m_irradianceTexture.Attach(texture);
+    // Store RHI texture to keep it alive
+    m_rhiIrradianceTexture.reset(rhiTexture);
 
-    // Create SRV
-    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
-    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
-    D3D11_TEXTURE2D_DESC texDesc;
-    m_irradianceTexture->GetDesc(&texDesc);
+    // Get native D3D11 resources from RHI texture
+    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
-    srvDesc.TextureCube.MostDetailedMip = 0;
+    // Store raw pointers for rendering (borrowed from RHI texture)
+    m_irradianceTexture = texture;  // Note: ComPtr will AddRef
+    m_irradianceSRV = srv;
 
-    HRESULT hr = device->CreateShaderResourceView(m_irradianceTexture.Get(), &srvDesc, &m_irradianceSRV);
-    if (FAILED(hr)) {
-        CFFLog::Error("IBLGenerator: Failed to create irradiance SRV");
-        return false;
-    }
-
-    CFFLog::Info("IBLGenerator: Loaded irradiance map from KTX2 (%dx%d)", texDesc.Width, texDesc.Height);
+    CFFLog::Info("IBLGenerator: Loaded irradiance map from KTX2 (%dx%d)", rhiTexture->GetWidth(), rhiTexture->GetHeight());
     return true;
 }
 
 bool CIBLGenerator::LoadPreFilteredFromKTX2(const std::string& ktx2Path) {
-    ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
-    if (!texture) {
+    RHI::ITexture* rhiTexture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!rhiTexture) {
         CFFLog::Error("IBLGenerator: Failed to load pre-filtered map from %s", ktx2Path.c_str());
         return false;
     }
 
-    m_preFilteredTexture.Attach(texture);
+    // Store RHI texture to keep it alive
+    m_rhiPreFilteredTexture.reset(rhiTexture);
 
-    // Create SRV
-    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
-    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
+    // Get native D3D11 resources from RHI texture
+    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
+
+    // Store raw pointers for rendering (borrowed from RHI texture)
+    m_preFilteredTexture = texture;
+    m_preFilteredSRV = srv;
+
+    // Get mip levels from texture descriptor
     D3D11_TEXTURE2D_DESC texDesc;
-    m_preFilteredTexture->GetDesc(&texDesc);
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
-    srvDesc.TextureCube.MostDetailedMip = 0;
-
-    HRESULT hr = device->CreateShaderResourceView(m_preFilteredTexture.Get(), &srvDesc, &m_preFilteredSRV);
-    if (FAILED(hr)) {
-        CFFLog::Error("IBLGenerator: Failed to create pre-filtered SRV");
-        return false;
-    }
-
+    texture->GetDesc(&texDesc);
     m_preFilteredMipLevels = texDesc.MipLevels;
 
-    CFFLog::Info("IBLGenerator: Loaded pre-filtered map from KTX2 (%dx%d, %d mips)", texDesc.Width, texDesc.Height, m_preFilteredMipLevels);
+    CFFLog::Info("IBLGenerator: Loaded pre-filtered map from KTX2 (%dx%d, %d mips)", rhiTexture->GetWidth(), rhiTexture->GetHeight(), m_preFilteredMipLevels);
     return true;
 }
 
 bool CIBLGenerator::LoadBrdfLutFromKTX2(const std::string& ktx2Path) {
-    ID3D11Texture2D* texture = CKTXLoader::Load2DTextureFromKTX2(ktx2Path);
-    if (!texture) {
+    RHI::ITexture* rhiTexture = CKTXLoader::Load2DTextureFromKTX2(ktx2Path);
+    if (!rhiTexture) {
         CFFLog::Error("IBLGenerator: Failed to load BRDF LUT from %s", ktx2Path.c_str());
         return false;
     }
 
-    m_brdfLutTexture.Attach(texture);
+    // Store RHI texture to keep it alive
+    m_rhiBrdfLutTexture.reset(rhiTexture);
 
-    // Create SRV
-    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
-    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
-    D3D11_TEXTURE2D_DESC texDesc;
-    m_brdfLutTexture->GetDesc(&texDesc);
+    // Get native D3D11 resources from RHI texture
+    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = texDesc.MipLevels;
-    srvDesc.Texture2D.MostDetailedMip = 0;
+    // Store raw pointers for rendering (borrowed from RHI texture)
+    m_brdfLutTexture = texture;
+    m_brdfLutSRV = srv;
 
-    HRESULT hr = device->CreateShaderResourceView(m_brdfLutTexture.Get(), &srvDesc, &m_brdfLutSRV);
-    if (FAILED(hr)) {
-        CFFLog::Error("IBLGenerator: Failed to create BRDF LUT SRV");
-        return false;
-    }
-
-    CFFLog::Info("IBLGenerator: Loaded BRDF LUT from KTX2 (%dx%d)", texDesc.Width, texDesc.Height);
+    CFFLog::Info("IBLGenerator: Loaded BRDF LUT from KTX2 (%dx%d)", rhiTexture->GetWidth(), rhiTexture->GetHeight());
     return true;
 }

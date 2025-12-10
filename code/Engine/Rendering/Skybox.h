@@ -1,8 +1,10 @@
 #pragma once
+#include "RHI/RHIResources.h"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <DirectXMath.h>
 #include <string>
+#include <memory>
 
 // Skybox renderer using HDR cubemap
 class CSkybox {
@@ -22,8 +24,8 @@ public:
     void Render(const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& proj);
 
     // Get cubemap for IBL (future use)
-    ID3D11ShaderResourceView* GetEnvironmentMap() const { return m_envCubemap.Get(); }
-    ID3D11Texture2D* GetEnvironmentTexture() const { return m_envTexture.Get(); }
+    ID3D11ShaderResourceView* GetEnvironmentMap() const { return m_envCubemap; }
+    ID3D11Texture2D* GetEnvironmentTexture() const { return m_envTexture; }
 
 private:
     void convertEquirectToCubemap(const std::string& hdrPath, int size);
@@ -31,9 +33,16 @@ private:
     void createShaders();
 
 private:
-    // Cubemap resources
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_envTexture;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_envCubemap;
+    // RHI texture (owns the D3D11 resources when loaded from KTX2)
+    std::unique_ptr<RHI::ITexture> m_rhiEnvTexture;
+
+    // Cubemap resources (raw pointers - owned by m_rhiEnvTexture or ComPtr below)
+    ID3D11Texture2D* m_envTexture = nullptr;
+    ID3D11ShaderResourceView* m_envCubemap = nullptr;
+
+    // For HDR path (Initialize), we still use ComPtr since we create the texture ourselves
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_ownedEnvTexture;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_ownedEnvCubemap;
 
     // Rendering resources
     Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;

@@ -219,13 +219,18 @@ bool CReflectionProbeManager::LoadBrdfLut(const std::string& brdfLutPath)
     }
 
     // Load BRDF LUT using KTXLoader
-    m_brdfLutSRV.Reset();
-    m_brdfLutSRV = CKTXLoader::Load2DTextureSRVFromKTX2(brdfLutPath);
-
-    if (!m_brdfLutSRV) {
+    RHI::ITexture* rhiTexture = CKTXLoader::Load2DTextureFromKTX2(brdfLutPath);
+    if (!rhiTexture) {
         CFFLog::Error("[ReflectionProbeManager] Failed to load BRDF LUT: %s", brdfLutPath.c_str());
         return false;
     }
+
+    // Store RHI texture to keep it alive
+    m_rhiBrdfLutTexture.reset(rhiTexture);
+
+    // Get native SRV from RHI texture
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
+    m_brdfLutSRV = srv;
 
     CFFLog::Info("[ReflectionProbeManager] Loaded BRDF LUT: %s", brdfLutPath.c_str());
     return true;
@@ -380,11 +385,14 @@ bool CReflectionProbeManager::loadAndCopyToArray(
     bool isIrradiance)
 {
     // 加载 KTX2 Cubemap
-    ID3D11Texture2D* cubemap = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
-    if (!cubemap) {
+    std::unique_ptr<RHI::ITexture> rhiTexture(CKTXLoader::LoadCubemapFromKTX2(ktx2Path));
+    if (!rhiTexture) {
         CFFLog::Error("[ReflectionProbeManager] Failed to load: %s", ktx2Path.c_str());
         return false;
     }
+
+    // Get native D3D11 texture from RHI
+    ID3D11Texture2D* cubemap = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
 
     // 拷贝到 Array
     bool success = false;
@@ -394,7 +402,7 @@ bool CReflectionProbeManager::loadAndCopyToArray(
         success = copyCubemapToArray(cubemap, m_prefilteredArray.Get(), sliceIndex, PREFILTERED_SIZE, PREFILTERED_MIP_COUNT);
     }
 
-    cubemap->Release();
+    // rhiTexture unique_ptr will automatically release the D3D11 resources
     return success;
 }
 

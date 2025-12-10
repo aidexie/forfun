@@ -35,7 +35,15 @@ struct TextureDesc {
     ETextureFormat format = ETextureFormat::Unknown;
     ETextureUsage usage = ETextureUsage::ShaderResource;
     uint32_t sampleCount = 1;  // For MSAA
+    bool isCubemap = false;    // If true, arraySize is treated as cube count (6 faces per cube)
     const char* debugName = nullptr;
+
+    // View format overrides (for TYPELESS textures)
+    // If Unknown, use the main format for view creation
+    ETextureFormat rtvFormat = ETextureFormat::Unknown;  // RenderTargetView format
+    ETextureFormat dsvFormat = ETextureFormat::Unknown;  // DepthStencilView format
+    ETextureFormat srvFormat = ETextureFormat::Unknown;  // ShaderResourceView format
+    ETextureFormat uavFormat = ETextureFormat::Unknown;  // UnorderedAccessView format
 
     TextureDesc() = default;
 
@@ -54,6 +62,56 @@ struct TextureDesc {
 
     static TextureDesc DepthStencil(uint32_t w, uint32_t h) {
         return Texture2D(w, h, ETextureFormat::D24_UNORM_S8_UINT, ETextureUsage::DepthStencil);
+    }
+
+    // LDR render target with TYPELESS texture for sRGB RTV + UNORM SRV
+    // This enables proper gamma correction: GPU writes sRGB via RTV, shader reads linear via SRV
+    static TextureDesc LDRRenderTarget(uint32_t w, uint32_t h) {
+        TextureDesc desc;
+        desc.width = w;
+        desc.height = h;
+        desc.format = ETextureFormat::R8G8B8A8_TYPELESS;
+        desc.usage = ETextureUsage::RenderTarget | ETextureUsage::ShaderResource;
+        desc.rtvFormat = ETextureFormat::R8G8B8A8_UNORM_SRGB;  // sRGB for gamma-correct writes
+        desc.srvFormat = ETextureFormat::R8G8B8A8_UNORM;       // Linear for shader sampling
+        return desc;
+    }
+
+    // Depth stencil with SRV access (for shadow mapping, etc.)
+    static TextureDesc DepthStencilWithSRV(uint32_t w, uint32_t h) {
+        TextureDesc desc;
+        desc.width = w;
+        desc.height = h;
+        desc.format = ETextureFormat::R24G8_TYPELESS;
+        desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
+        desc.dsvFormat = ETextureFormat::D24_UNORM_S8_UINT;
+        desc.srvFormat = ETextureFormat::R24_UNORM_X8_TYPELESS;  // Read depth from R24G8
+        return desc;
+    }
+
+    // Depth stencil array with SRV access (for cascaded shadow mapping)
+    static TextureDesc DepthStencilArrayWithSRV(uint32_t w, uint32_t h, uint32_t arrayCount) {
+        TextureDesc desc;
+        desc.width = w;
+        desc.height = h;
+        desc.arraySize = arrayCount;
+        desc.format = ETextureFormat::R24G8_TYPELESS;
+        desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
+        desc.dsvFormat = ETextureFormat::D24_UNORM_S8_UINT;
+        desc.srvFormat = ETextureFormat::R24_UNORM_X8_TYPELESS;  // Read depth from R24G8
+        return desc;
+    }
+
+    // Cubemap texture (6 faces)
+    static TextureDesc Cubemap(uint32_t size, ETextureFormat fmt, uint32_t mipLevels = 1) {
+        TextureDesc desc;
+        desc.width = size;
+        desc.height = size;
+        desc.format = fmt;
+        desc.mipLevels = mipLevels;
+        desc.isCubemap = true;
+        desc.usage = ETextureUsage::ShaderResource;
+        return desc;
     }
 };
 

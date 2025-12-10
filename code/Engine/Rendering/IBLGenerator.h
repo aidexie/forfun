@@ -1,8 +1,10 @@
 #pragma once
+#include "RHI/RHIResources.h"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <DirectXMath.h>
 #include <string>
+#include <memory>
 
 // IBL (Image-Based Lighting) Generator
 // Generates diffuse irradiance map and specular prefiltered environment map
@@ -100,4 +102,9 @@ private:
     // Debug: Individual face SRVs
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_debugFaceSRVs[6];
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_debugPreFilteredFaceSRVs[6 * 10];  // 6 faces × max 5 mip levels
+
+    // RHI textures (own resources when loaded from KTX2)
+    std::unique_ptr<RHI::ITexture> m_rhiIrradianceTexture;
+    std::unique_ptr<RHI::ITexture> m_rhiPreFilteredTexture;
+    std::unique_ptr<RHI::ITexture> m_rhiBrdfLutTexture;
 };

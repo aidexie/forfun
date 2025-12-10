@@ -1,20 +1,16 @@
 #pragma once
-#include <d3d11.h>
+#include "RHI/RHIResources.h"
 #include <string>
 #include <vector>
 #include <DirectXMath.h>
 
 class CKTXLoader {
 public:
-    // Load KTX2 cubemap texture
-    static ID3D11Texture2D* LoadCubemapFromKTX2(const std::string& filepath);
+    // Load KTX2 cubemap texture (returns RHI texture with SRV)
+    static RHI::ITexture* LoadCubemapFromKTX2(const std::string& filepath);
 
-    // Load KTX2 2D texture
-    static ID3D11Texture2D* Load2DTextureFromKTX2(const std::string& filepath);
-
-    // Load KTX2 and create SRV
-    static ID3D11ShaderResourceView* LoadCubemapSRVFromKTX2(const std::string& filepath);
-    static ID3D11ShaderResourceView* Load2DTextureSRVFromKTX2(const std::string& filepath);
+    // Load KTX2 2D texture (returns RHI texture with SRV)
+    static RHI::ITexture* Load2DTextureFromKTX2(const std::string& filepath);
 
     // ============================================
     // CPU-side loading (for path tracing)

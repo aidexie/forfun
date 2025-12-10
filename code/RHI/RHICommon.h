@@ -86,6 +86,8 @@ enum class ETextureFormat {
     R8_UNORM,
     R8G8B8A8_UNORM,
     R8G8B8A8_UNORM_SRGB,
+    R8G8B8A8_TYPELESS,      // For creating views with different formats
+    R16G16_FLOAT,           // For BRDF LUT
     R16G16B16A16_FLOAT,
     R32G32B32A32_FLOAT,
     B8G8R8A8_UNORM,
@@ -93,6 +95,9 @@ enum class ETextureFormat {
     // Depth formats
     D24_UNORM_S8_UINT,
     D32_FLOAT,
+    R24G8_TYPELESS,         // For depth with SRV access
+    R32_TYPELESS,           // For depth with SRV access
+    R24_UNORM_X8_TYPELESS,  // For reading depth from R24G8
     // Compressed formats
     BC1_UNORM,
     BC1_UNORM_SRGB,

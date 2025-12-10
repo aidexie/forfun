@@ -1,6 +1,7 @@
 #pragma once
+#include "RHI/RHIResources.h"
 #include <string>
-#include <d3d11.h>
+#include <memory>
 
 // ============================================
 // CReflectionProbeAsset - Reflection Probe Asset
@@ -54,19 +55,19 @@ public:
     bool LoadFromFile(const std::string& path);
 
     // ============================================
-    // Texture Loading
+    // Texture Loading (RHI Interface)
     // ============================================
 
-    // 加载 Environment Cubemap SRV
+    // 加载 Environment Cubemap
     // assetPath: .ffasset 的完整路径
-    // 返回: SRV 指针（调用者负责 Release）
-    ID3D11ShaderResourceView* LoadEnvironmentSRV(const std::string& assetPath);
+    // 返回: RHI 纹理指针（调用者负责管理生命周期）
+    RHI::ITexture* LoadEnvironmentTexture(const std::string& assetPath);
 
-    // 加载 Irradiance Cubemap SRV
-    ID3D11ShaderResourceView* LoadIrradianceSRV(const std::string& assetPath);
+    // 加载 Irradiance Cubemap
+    RHI::ITexture* LoadIrradianceTexture(const std::string& assetPath);
 
-    // 加载 Pre-filtered Cubemap SRV
-    ID3D11ShaderResourceView* LoadPrefilteredSRV(const std::string& assetPath);
+    // 加载 Pre-filtered Cubemap
+    RHI::ITexture* LoadPrefilteredTexture(const std::string& assetPath);
 
 private:
     // 辅助函数：从 .ffasset 路径构建纹理的完整路径

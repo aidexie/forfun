@@ -1,9 +1,11 @@
 #pragma once
+#include "RHI/RHIResources.h"
 #include <DirectXMath.h>
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <string>
 #include <vector>
+#include <memory>
 
 // Forward declarations
 class CScene;
@@ -136,6 +138,7 @@ private:
 
     // BRDF LUT (2D texture, shared across all probes)
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_brdfLutSRV;
+    std::unique_ptr<RHI::ITexture> m_rhiBrdfLutTexture;  // Owns the D3D11 resources
 
     // 常量缓冲区
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbProbes;

@@ -86,30 +86,24 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return false;
 
-    // Load cubemap from KTX2
-    ID3D11Texture2D* texture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
-    if (!texture) {
+    // Load cubemap from KTX2 (returns RHI texture with SRV)
+    RHI::ITexture* rhiTexture = CKTXLoader::LoadCubemapFromKTX2(ktx2Path);
+    if (!rhiTexture) {
         CFFLog::Error("Skybox: Failed to load KTX2 cubemap from %s", ktx2Path.c_str());
         return false;
     }
 
-    m_envTexture.Attach(texture);
+    // Get native D3D11 resources from RHI texture
+    // Note: The RHI texture owns these resources, we just borrow the pointers
+    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(rhiTexture->GetNativeHandle());
+    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(rhiTexture->GetSRV());
 
-    // Create SRV
-    D3D11_TEXTURE2D_DESC texDesc;
-    m_envTexture->GetDesc(&texDesc);
+    // Store the RHI texture to keep it alive
+    m_rhiEnvTexture.reset(rhiTexture);
 
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = texDesc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
-    srvDesc.TextureCube.MostDetailedMip = 0;
-
-    HRESULT hr = device->CreateShaderResourceView(m_envTexture.Get(), &srvDesc, &m_envCubemap);
-    if (FAILED(hr)) {
-        CFFLog::Error("Skybox: Failed to create SRV");
-        return false;
-    }
+    // Store the native pointers for rendering
+    m_envTexture = texture;
+    m_envCubemap = srv;
 
     // Create cube mesh
     createCubeMesh();
@@ -122,7 +116,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     cbd.ByteWidth = sizeof(CB_SkyboxTransform);
     cbd.Usage = D3D11_USAGE_DEFAULT;
     cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    hr = device->CreateBuffer(&cbd, nullptr, &m_cbTransform);
+    HRESULT hr = device->CreateBuffer(&cbd, nullptr, m_cbTransform.GetAddressOf());
     if (FAILED(hr)) {
         CFFLog::Error("Skybox: Failed to create constant buffer");
         return false;
@@ -135,7 +129,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
     samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
     samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-    hr = device->CreateSamplerState(&samplerDesc, &m_sampler);
+    hr = device->CreateSamplerState(&samplerDesc, m_sampler.GetAddressOf());
     if (FAILED(hr)) {
         CFFLog::Error("Skybox: Failed to create sampler");
         return false;
@@ -145,7 +139,7 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     D3D11_RASTERIZER_DESC rasterDesc{};
     rasterDesc.FillMode = D3D11_FILL_SOLID;
     rasterDesc.CullMode = D3D11_CULL_NONE;
-    hr = device->CreateRasterizerState(&rasterDesc, &m_rasterState);
+    hr = device->CreateRasterizerState(&rasterDesc, m_rasterState.GetAddressOf());
     if (FAILED(hr)) {
         CFFLog::Error("Skybox: Failed to create rasterizer state");
         return false;
@@ -156,20 +150,28 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     depthDesc.DepthEnable = TRUE;
     depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
     depthDesc.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
-    hr = device->CreateDepthStencilState(&depthDesc, &m_depthState);
+    hr = device->CreateDepthStencilState(&depthDesc, m_depthState.GetAddressOf());
     if (FAILED(hr)) {
         CFFLog::Error("Skybox: Failed to create depth stencil state");
         return false;
     }
 
-    CFFLog::Info("Skybox: Initialized from KTX2 (%dx%d, %d mips)", texDesc.Width, texDesc.Height, texDesc.MipLevels);
+    CFFLog::Info("Skybox: Initialized from KTX2 (%dx%d)", m_rhiEnvTexture->GetWidth(), m_rhiEnvTexture->GetHeight());
 
     return true;
 }
 
 void CSkybox::Shutdown() {
-    m_envTexture.Reset();
-    m_envCubemap.Reset();
+    // Release RHI texture (which owns the D3D11 resources if loaded from KTX2)
+    m_rhiEnvTexture.reset();
+    m_envTexture = nullptr;
+    m_envCubemap = nullptr;
+
+    // Release owned resources (HDR path)
+    m_ownedEnvTexture.Reset();
+    m_ownedEnvCubemap.Reset();
+
+    // Release rendering resources
     m_vs.Reset();
     m_ps.Reset();
     m_inputLayout.Reset();
@@ -211,7 +213,7 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     context->PSSetShader(m_ps.Get(), nullptr, 0);
     context->VSSetConstantBuffers(0, 1, m_cbTransform.GetAddressOf());
 
-    context->PSSetShaderResources(0, 1, m_envCubemap.GetAddressOf());
+    context->PSSetShaderResources(0, 1, &m_envCubemap);
     context->PSSetSamplers(0, 1, m_sampler.GetAddressOf());
 
     // Draw
@@ -278,14 +280,18 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
     cubeDesc.Usage = D3D11_USAGE_DEFAULT;
     cubeDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     cubeDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE | D3D11_RESOURCE_MISC_GENERATE_MIPS;  // Enable mipmap generation
-    device->CreateTexture2D(&cubeDesc, nullptr, m_envTexture.GetAddressOf());
+    device->CreateTexture2D(&cubeDesc, nullptr, m_ownedEnvTexture.GetAddressOf());
 
     // Create SRV for cubemap (all mip levels)
     D3D11_SHADER_RESOURCE_VIEW_DESC cubeSRVDesc{};
     cubeSRVDesc.Format = cubeDesc.Format;
     cubeSRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
     cubeSRVDesc.TextureCube.MipLevels = -1;  // -1 = all mip levels
-    device->CreateShaderResourceView(m_envTexture.Get(), &cubeSRVDesc, m_envCubemap.GetAddressOf());
+    device->CreateShaderResourceView(m_ownedEnvTexture.Get(), &cubeSRVDesc, m_ownedEnvCubemap.GetAddressOf());
+
+    // Set raw pointers for rendering
+    m_envTexture = m_ownedEnvTexture.Get();
+    m_envCubemap = m_ownedEnvCubemap.Get();
 
     // Load conversion shaders from files
     std::string convVsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.vs.hlsl");
@@ -395,7 +401,7 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
         rtvDesc.Texture2DArray.ArraySize = 1;
 
         ComPtr<ID3D11RenderTargetView> rtv;
-        device->CreateRenderTargetView(m_envTexture.Get(), &rtvDesc, rtv.GetAddressOf());
+        device->CreateRenderTargetView(m_ownedEnvTexture.Get(), &rtvDesc, rtv.GetAddressOf());
 
         // Set render target
         context->OMSetRenderTargets(1, rtv.GetAddressOf(), nullptr);
@@ -440,13 +446,13 @@ void CSkybox::convertEquirectToCubemap(const std::string& hdrPath, int size) {
 
     // Calculate mip level count before generation
     D3D11_TEXTURE2D_DESC finalDesc;
-    m_envTexture->GetDesc(&finalDesc);
+    m_ownedEnvTexture->GetDesc(&finalDesc);
     int mipCount = finalDesc.MipLevels;
 
     CFFLog::Info("Skybox: Generating mipmaps for %dx%d cubemap (%d levels)...", size, size, mipCount);
 
     // Generate mipmaps for the cubemap
-    context->GenerateMips(m_envCubemap.Get());
+    context->GenerateMips(m_ownedEnvCubemap.Get());
 
     CFFLog::Info("Skybox: Environment cubemap ready (%dx%d, %d mip levels)", size, size, mipCount);
 }

@@ -1,6 +1,6 @@
 #include "ReflectionProbeAsset.h"
 #include "FFLog.h"
-#include "TextureManager.h"
+#include "Loader/KTXLoader.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
@@ -91,30 +91,20 @@ std::string CReflectionProbeAsset::buildTexturePath(const std::string& assetPath
     return fullPath.string();
 }
 
-ID3D11ShaderResourceView* CReflectionProbeAsset::LoadEnvironmentSRV(const std::string& assetPath)
+RHI::ITexture* CReflectionProbeAsset::LoadEnvironmentTexture(const std::string& assetPath)
 {
     std::string fullPath = buildTexturePath(assetPath, m_environmentMap);
-
-    // 使用 TextureManager 加载 KTX2 纹理
-    // 注意：TextureManager::LoadKTX2 返回的路径需要相对于 assets 目录
-    // 这里假设 assetPath 是完整路径，需要转换为相对路径
-
-    // TODO: 需要根据实际的 TextureManager API 调整
-    // 临时方案：直接调用底层 KTX loader
-    CFFLog::Warning("LoadEnvironmentSRV not fully implemented: %s", fullPath.c_str());
-    return nullptr;
+    return CKTXLoader::LoadCubemapFromKTX2(fullPath);
 }
 
-ID3D11ShaderResourceView* CReflectionProbeAsset::LoadIrradianceSRV(const std::string& assetPath)
+RHI::ITexture* CReflectionProbeAsset::LoadIrradianceTexture(const std::string& assetPath)
 {
     std::string fullPath = buildTexturePath(assetPath, m_irradianceMap);
-    CFFLog::Warning("LoadIrradianceSRV not fully implemented: %s", fullPath.c_str());
-    return nullptr;
+    return CKTXLoader::LoadCubemapFromKTX2(fullPath);
 }
 
-ID3D11ShaderResourceView* CReflectionProbeAsset::LoadPrefilteredSRV(const std::string& assetPath)
+RHI::ITexture* CReflectionProbeAsset::LoadPrefilteredTexture(const std::string& assetPath)
 {
     std::string fullPath = buildTexturePath(assetPath, m_prefilteredMap);
-    CFFLog::Warning("LoadPrefilteredSRV not fully implemented: %s", fullPath.c_str());
-    return nullptr;
+    return CKTXLoader::LoadCubemapFromKTX2(fullPath);
 }

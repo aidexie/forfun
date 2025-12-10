@@ -6,6 +6,44 @@
 #include <DirectXPackedVector.h>
 #include <filesystem>
 
+// ============================================
+// RHI Interface Implementations
+// ============================================
+
+bool CKTXExporter::ExportCubemapToKTX2(
+    RHI::ITexture* texture,
+    const std::string& filepath,
+    int numMipLevels)
+{
+    if (!texture) {
+        CFFLog::Error("KTXExporter: Null RHI texture");
+        return false;
+    }
+
+    // Extract native D3D11 texture and delegate to D3D11 implementation
+    ID3D11Texture2D* d3dTexture = static_cast<ID3D11Texture2D*>(texture->GetNativeHandle());
+    return ExportCubemapToKTX2(d3dTexture, filepath, numMipLevels);
+}
+
+bool CKTXExporter::Export2DTextureToKTX2(
+    RHI::ITexture* texture,
+    const std::string& filepath,
+    int numMipLevels)
+{
+    if (!texture) {
+        CFFLog::Error("KTXExporter: Null RHI texture");
+        return false;
+    }
+
+    // Extract native D3D11 texture and delegate to D3D11 implementation
+    ID3D11Texture2D* d3dTexture = static_cast<ID3D11Texture2D*>(texture->GetNativeHandle());
+    return Export2DTextureToKTX2(d3dTexture, filepath, numMipLevels);
+}
+
+// ============================================
+// D3D11 Implementation (Internal)
+// ============================================
+
 uint32_t CKTXExporter::DXGIFormatToVkFormat(DXGI_FORMAT format) {
     switch (format) {
         case DXGI_FORMAT_R16G16B16A16_FLOAT:

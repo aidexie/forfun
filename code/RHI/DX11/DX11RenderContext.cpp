@@ -142,7 +142,7 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     texDesc.Width = desc.width;
     texDesc.Height = desc.height;
     texDesc.MipLevels = desc.mipLevels;
-    texDesc.ArraySize = desc.arraySize;
+    texDesc.ArraySize = desc.isCubemap ? 6 * desc.arraySize : desc.arraySize;
     texDesc.Format = ToDXGIFormat(desc.format);
     texDesc.SampleDesc.Count = desc.sampleCount;
     texDesc.SampleDesc.Quality = 0;
@@ -152,7 +152,7 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     texDesc.MiscFlags = 0;
 
     // Check for cubemap usage
-    if (desc.arraySize == 6) {
+    if (desc.isCubemap) {
         texDesc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
     }
 
@@ -228,7 +228,7 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
             ? ToDXGIFormat(desc.srvFormat)
             : texDesc.Format;
 
-        if (desc.arraySize == 6) {
+        if (desc.isCubemap) {
             // Cubemap
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
             srvDesc.TextureCube.MipLevels = actualMipLevels;
