@@ -1,6 +1,6 @@
 #include "KTXLoader.h"
 #include "Core/FFLog.h"
-#include "DX11Context.h"
+#include "RHI/RHIManager.h"
 #include <ktx.h>
 #include <iostream>
 #include <vector>
@@ -95,9 +95,9 @@ ID3D11Texture2D* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
     }
 
     // Create texture
-    auto& ctx = CDX11Context::Instance();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     ID3D11Texture2D* texture = nullptr;
-    HRESULT hr = ctx.GetDevice()->CreateTexture2D(&desc, initData.data(), &texture);
+    HRESULT hr = device->CreateTexture2D(&desc, initData.data(), &texture);
 
     ktxTexture2_Destroy(ktxTex);
 
@@ -171,9 +171,9 @@ ID3D11Texture2D* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) 
     }
 
     // Create texture
-    auto& ctx = CDX11Context::Instance();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     ID3D11Texture2D* texture = nullptr;
-    HRESULT hr = ctx.GetDevice()->CreateTexture2D(&desc, initData.data(), &texture);
+    HRESULT hr = device->CreateTexture2D(&desc, initData.data(), &texture);
 
     ktxTexture2_Destroy(ktxTex);
 
@@ -190,7 +190,7 @@ ID3D11ShaderResourceView* CKTXLoader::LoadCubemapSRVFromKTX2(const std::string& 
     ID3D11Texture2D* texture = LoadCubemapFromKTX2(filepath);
     if (!texture) return nullptr;
 
-    auto& ctx = CDX11Context::Instance();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     D3D11_TEXTURE2D_DESC texDesc;
     texture->GetDesc(&texDesc);
@@ -202,7 +202,7 @@ ID3D11ShaderResourceView* CKTXLoader::LoadCubemapSRVFromKTX2(const std::string& 
     srvDesc.TextureCube.MostDetailedMip = 0;
 
     ID3D11ShaderResourceView* srv = nullptr;
-    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(texture, &srvDesc, &srv);
+    HRESULT hr = device->CreateShaderResourceView(texture, &srvDesc, &srv);
     texture->Release();
 
     if (FAILED(hr)) {
@@ -217,7 +217,7 @@ ID3D11ShaderResourceView* CKTXLoader::Load2DTextureSRVFromKTX2(const std::string
     ID3D11Texture2D* texture = Load2DTextureFromKTX2(filepath);
     if (!texture) return nullptr;
 
-    auto& ctx = CDX11Context::Instance();
+    auto* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
 
     D3D11_TEXTURE2D_DESC texDesc;
     texture->GetDesc(&texDesc);
@@ -229,7 +229,7 @@ ID3D11ShaderResourceView* CKTXLoader::Load2DTextureSRVFromKTX2(const std::string
     srvDesc.Texture2D.MostDetailedMip = 0;
 
     ID3D11ShaderResourceView* srv = nullptr;
-    HRESULT hr = ctx.GetDevice()->CreateShaderResourceView(texture, &srvDesc, &srv);
+    HRESULT hr = device->CreateShaderResourceView(texture, &srvDesc, &srv);
     texture->Release();
 
     if (FAILED(hr)) {

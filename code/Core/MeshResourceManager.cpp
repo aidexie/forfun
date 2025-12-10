@@ -1,5 +1,5 @@
 #include "MeshResourceManager.h"
-#include "DX11Context.h"
+#include "RHI/RHIManager.h"
 #include "Mesh.h"
 #include "Loader/ObjLoader.h"
 #include "Loader/GltfLoader.h"
@@ -20,7 +20,7 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
         return {};
     }
 
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) {
         return {};
     }
@@ -100,7 +100,7 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
 std::shared_ptr<GpuMeshResource> CMeshResourceManager::UploadMesh(
     const SMeshCPU_PNT& cpu
 ) {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) {
         return nullptr;
     }

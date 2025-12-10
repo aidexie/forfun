@@ -11,8 +11,8 @@ class CRHIManager {
 public:
     static CRHIManager& Instance();
 
-    // Initialize with backend selection
-    bool Initialize(EBackend backend);
+    // Initialize with backend selection and window parameters
+    bool Initialize(EBackend backend, void* nativeWindowHandle, uint32_t width, uint32_t height);
     void Shutdown();
 
     // Get the global render context

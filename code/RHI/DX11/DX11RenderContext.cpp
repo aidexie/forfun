@@ -177,10 +177,26 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
 
     auto texture = new CDX11Texture(d3dTexture, desc.width, desc.height, desc.format);
 
+    // Get actual mip levels after creation (if 0 was specified, D3D calculates it)
+    D3D11_TEXTURE2D_DESC createdDesc;
+    d3dTexture->GetDesc(&createdDesc);
+    UINT actualMipLevels = createdDesc.MipLevels;
+
     // Create views based on usage flags
+    // Use view format overrides if specified (for TYPELESS textures)
     if (desc.usage & ETextureUsage::RenderTarget) {
         ID3D11RenderTargetView* rtv = nullptr;
-        hr = ctx.GetDevice()->CreateRenderTargetView(d3dTexture, nullptr, &rtv);
+        D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+        D3D11_RENDER_TARGET_VIEW_DESC* pRtvDesc = nullptr;
+
+        // Use override format if specified
+        if (desc.rtvFormat != ETextureFormat::Unknown) {
+            rtvDesc.Format = ToDXGIFormat(desc.rtvFormat);
+            rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+            rtvDesc.Texture2D.MipSlice = 0;
+            pRtvDesc = &rtvDesc;
+        }
+        hr = ctx.GetDevice()->CreateRenderTargetView(d3dTexture, pRtvDesc, &rtv);
         if (SUCCEEDED(hr)) {
             texture->SetRTV(rtv);
         }
@@ -188,7 +204,17 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
 
     if (desc.usage & ETextureUsage::DepthStencil) {
         ID3D11DepthStencilView* dsv = nullptr;
-        hr = ctx.GetDevice()->CreateDepthStencilView(d3dTexture, nullptr, &dsv);
+        D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        D3D11_DEPTH_STENCIL_VIEW_DESC* pDsvDesc = nullptr;
+
+        // Use override format if specified
+        if (desc.dsvFormat != ETextureFormat::Unknown) {
+            dsvDesc.Format = ToDXGIFormat(desc.dsvFormat);
+            dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+            dsvDesc.Texture2D.MipSlice = 0;
+            pDsvDesc = &dsvDesc;
+        }
+        hr = ctx.GetDevice()->CreateDepthStencilView(d3dTexture, pDsvDesc, &dsv);
         if (SUCCEEDED(hr)) {
             texture->SetDSV(dsv);
         }
@@ -197,22 +223,25 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     if (desc.usage & ETextureUsage::ShaderResource) {
         ID3D11ShaderResourceView* srv = nullptr;
         D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = texDesc.Format;
+        // Use override format if specified, otherwise use texture format
+        srvDesc.Format = (desc.srvFormat != ETextureFormat::Unknown)
+            ? ToDXGIFormat(desc.srvFormat)
+            : texDesc.Format;
 
         if (desc.arraySize == 6) {
             // Cubemap
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-            srvDesc.TextureCube.MipLevels = texDesc.MipLevels;
+            srvDesc.TextureCube.MipLevels = actualMipLevels;
             srvDesc.TextureCube.MostDetailedMip = 0;
         } else if (desc.arraySize > 1) {
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-            srvDesc.Texture2DArray.MipLevels = texDesc.MipLevels;
+            srvDesc.Texture2DArray.MipLevels = actualMipLevels;
             srvDesc.Texture2DArray.MostDetailedMip = 0;
             srvDesc.Texture2DArray.ArraySize = desc.arraySize;
             srvDesc.Texture2DArray.FirstArraySlice = 0;
         } else {
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MipLevels = texDesc.MipLevels;
+            srvDesc.Texture2D.MipLevels = actualMipLevels;
             srvDesc.Texture2D.MostDetailedMip = 0;
         }
 
@@ -224,7 +253,17 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
 
     if (desc.usage & ETextureUsage::UnorderedAccess) {
         ID3D11UnorderedAccessView* uav = nullptr;
-        hr = ctx.GetDevice()->CreateUnorderedAccessView(d3dTexture, nullptr, &uav);
+        D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        D3D11_UNORDERED_ACCESS_VIEW_DESC* pUavDesc = nullptr;
+
+        // Use override format if specified
+        if (desc.uavFormat != ETextureFormat::Unknown) {
+            uavDesc.Format = ToDXGIFormat(desc.uavFormat);
+            uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+            uavDesc.Texture2D.MipSlice = 0;
+            pUavDesc = &uavDesc;
+        }
+        hr = ctx.GetDevice()->CreateUnorderedAccessView(d3dTexture, pUavDesc, &uav);
         if (SUCCEEDED(hr)) {
             texture->SetUAV(uav);
         }

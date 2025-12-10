@@ -55,8 +55,6 @@ set(CORE_SRC
     ${CODE_PATH}/Core/DebugEvent.cpp
     ${CODE_PATH}/Core/DebugEvent.h
     ${CODE_PATH}/Core/DebugPaths.h
-    ${CODE_PATH}/Core/DX11Context.cpp
-    ${CODE_PATH}/Core/DX11Context.h
     ${CODE_PATH}/Core/FFLog.cpp
     ${CODE_PATH}/Core/FFLog.h
     ${CODE_PATH}/Core/GpuMeshResource.h
@@ -124,6 +122,8 @@ set(RHI_SRC
     # DX11 Backend (implemented in Phase 0.3)
     ${CODE_PATH}/RHI/DX11/DX11CommandList.cpp
     ${CODE_PATH}/RHI/DX11/DX11CommandList.h
+    ${CODE_PATH}/RHI/DX11/DX11Context.cpp
+    ${CODE_PATH}/RHI/DX11/DX11Context.h
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.cpp
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.h
     ${CODE_PATH}/RHI/DX11/DX11Resources.h

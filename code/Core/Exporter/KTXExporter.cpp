@@ -1,6 +1,6 @@
 #include "KTXExporter.h"
 #include "Core/FFLog.h"
-#include "DX11Context.h"
+#include "RHI/RHIManager.h"
 #include <iostream>
 #include <vector>
 #include <DirectXPackedVector.h>
@@ -70,8 +70,9 @@ bool CKTXExporter::ExportCubemapToKTX2(
     }
 
     // Read texture data from GPU
-    auto& ctx = CDX11Context::Instance();
-    ID3D11DeviceContext* deviceContext = ctx.GetContext();
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
+    ID3D11DeviceContext* deviceContext = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());
 
     // Create staging texture
     D3D11_TEXTURE2D_DESC stagingDesc = desc;
@@ -81,7 +82,7 @@ bool CKTXExporter::ExportCubemapToKTX2(
     stagingDesc.MiscFlags = 0;
 
     ID3D11Texture2D* stagingTexture = nullptr;
-    HRESULT hr = ctx.GetDevice()->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
+    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
     if (FAILED(hr)) {
         CFFLog::Error("KTXExporter: Failed to create staging texture");
         ktxTexture2_Destroy(ktxTex);
@@ -219,8 +220,9 @@ bool CKTXExporter::Export2DTextureToKTX2(
     }
 
     // Read texture data from GPU (similar to cubemap export)
-    auto& ctx = CDX11Context::Instance();
-    ID3D11DeviceContext* deviceContext = ctx.GetContext();
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    ID3D11Device* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
+    ID3D11DeviceContext* deviceContext = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());
 
     // Create staging texture
     D3D11_TEXTURE2D_DESC stagingDesc = desc;
@@ -230,7 +232,7 @@ bool CKTXExporter::Export2DTextureToKTX2(
     stagingDesc.MiscFlags = 0;
 
     ID3D11Texture2D* stagingTexture = nullptr;
-    HRESULT hr = ctx.GetDevice()->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
+    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
     if (FAILED(hr)) {
         CFFLog::Error("KTXExporter: Failed to create staging texture");
         ktxTexture2_Destroy(ktxTex);

@@ -1,5 +1,5 @@
 #include "TextureManager.h"
-#include "DX11Context.h"
+#include "RHI/RHIManager.h"
 #include "FFLog.h"
 #include "DebugPaths.h"
 #include "PathManager.h"
@@ -76,7 +76,7 @@ void CTextureManager::Clear() {
 }
 
 void CTextureManager::CreateDefaultTextures() {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) {
         CFFLog::Error("Failed to create default textures: D3D11 device not available");
         return;
@@ -105,7 +105,7 @@ std::string CTextureManager::ResolveFullPath(const std::string& relativePath) co
 }
 
 bool CTextureManager::LoadTextureFromFile(const std::string& fullPath, bool srgb, ComPtr<ID3D11ShaderResourceView>& outSRV) {
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) {
         return false;
     }

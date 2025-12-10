@@ -8,7 +8,7 @@ CRHIManager& CRHIManager::Instance() {
     return instance;
 }
 
-bool CRHIManager::Initialize(EBackend backend) {
+bool CRHIManager::Initialize(EBackend backend, void* nativeWindowHandle, uint32_t width, uint32_t height) {
     if (m_initialized) {
         return true;
     }
@@ -18,11 +18,19 @@ bool CRHIManager::Initialize(EBackend backend) {
         return false;
     }
 
+    if (!m_renderContext->Initialize(nativeWindowHandle, width, height)) {
+        m_renderContext.reset();
+        return false;
+    }
+
     m_initialized = true;
     return true;
 }
 
 void CRHIManager::Shutdown() {
+    if (m_renderContext) {
+        m_renderContext->Shutdown();
+    }
     m_renderContext.reset();
     m_initialized = false;
 }

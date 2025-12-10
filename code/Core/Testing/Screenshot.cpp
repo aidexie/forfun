@@ -1,5 +1,5 @@
 #include "Screenshot.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
 #include "Core/FFLog.h"
 #include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "TestCase.h"
@@ -18,8 +18,9 @@ bool CScreenshot::Capture(ID3D11Texture2D* texture, const std::string& path) {
         return false;
     }
 
-    auto* device = CDX11Context::Instance().GetDevice();
-    auto* context = CDX11Context::Instance().GetContext();
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
+    auto* context = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());
 
     if (!device || !context) {
         CFFLog::Error("Screenshot: D3D11 context not initialized");

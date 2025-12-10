@@ -2,7 +2,7 @@
 #include "imgui.h"
 #include "Engine/Scene.h"
 #include "Engine/Rendering/Skybox.h"
-#include "Core/DX11Context.h"
+#include "RHI/RHIManager.h"
 #include "Core/FFLog.h"
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -59,7 +59,7 @@ static ID3D11ShaderResourceView* GetEnvironmentFaceSRV(
     }
 
     // Create new SRV for this face and mip level
-    ID3D11Device* device = CDX11Context::Instance().GetDevice();
+    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
     if (!device) return nullptr;
 
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};

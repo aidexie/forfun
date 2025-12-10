@@ -9,7 +9,6 @@
 #include <filesystem>
 #include <algorithm>  // For std::transform (fuzzy matching)
 
-#include "DX11Context.h"  // 单例：仅负责 DX11(设备/上下文/交换链/RTV/DSV)
 #include "RHI/RHIManager.h"  // RHI 全局管理器
 #include "Engine/Rendering/ForwardRenderPipeline.h"  // ✅ Forward 渲染流程
 #include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
@@ -68,8 +67,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         g_minimized = false;
         const UINT newW = LOWORD(lParam);
         const UINT newH = HIWORD(lParam);
-        if (CDX11Context::Instance().GetSwapChain()) {
-            CDX11Context::Instance().OnResize(newW, newH);
+        RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+        if (rhiCtx && rhiCtx->GetWidth() > 0) {
+            rhiCtx->OnResize(newW, newH);
         }
         return 0;
     }
@@ -308,34 +308,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 2) FFPath initialization
     FFPath::Initialize("E:/forfun");
 
-    // 3) DX11 初始化（仅DX）
-    if (!CDX11Context::Instance().Initialize(hwnd, initW, initH)) {
-        CFFLog::Error("Failed to initialize DX11 context!");
-        exitCode = -2;
-        goto cleanup;
-    }
-    dx11Initialized = true;
-    
-    // 3.5) RHI Manager 初始化
-    if (!RHI::CRHIManager::Instance().Initialize(RHI::EBackend::DX11)) {
+    // 3) RHI Manager 初始化 (包含 DX11 Context)
+    if (!RHI::CRHIManager::Instance().Initialize(RHI::EBackend::DX11, hwnd, initW, initH)) {
         CFFLog::Error("Failed to initialize RHI Manager!");
         exitCode = -2;
         goto cleanup;
     }
-    CFFLog::Info("RHI Manager initialized");
-    CFFLog::Info("DX11 context initialized");
+    dx11Initialized = true;
+    CFFLog::Info("RHI Manager initialized (DX11 backend)");
 
-    // 3) ImGui 初始化（在 main.cpp 内）
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    // 4) ImGui 初始化（在 main.cpp 内）
+    {
+        RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
 
-    ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX11_Init(
-        CDX11Context::Instance().GetDevice(),
-        CDX11Context::Instance().GetContext()
-    );
-    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable; // 如不需要可去掉
+        ImGui_ImplWin32_Init(hwnd);
+        ImGui_ImplDX11_Init(
+            static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice()),
+            static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext())
+        );
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    }
     imguiInitialized = true;
     CFFLog::Info("ImGui initialized");
 
@@ -416,14 +411,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         ImGuizmo::BeginFrame();
 
         // 5.2 绑定 backbuffer + 清屏
-        auto& ctx = CDX11Context::Instance();
+        RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+        ID3D11DeviceContext* d3dCtx = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());
 
         // 深度清除交给 Renderer::Render 内部处理（避免与 UI 冲突）
 
         // 5.3 渲染 3D 场景
         ImVec2 vpSize = Panels::GetViewportLastSize();
-        UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : CDX11Context::Instance().GetWidth();
-        UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : CDX11Context::Instance().GetHeight();
+        UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : rhiCtx->GetWidth();
+        UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : rhiCtx->GetHeight();
 
         // ✅ 更新相机（aspect ratio + WASD 移动）
         CCamera& editorCamera = CScene::Instance().GetEditorCamera();
@@ -438,7 +434,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
 
         // Forward Rendering Pipeline
-        {CScopedDebugEvent evtScene(ctx.GetContext(), L"forward pipeline");
+        {CScopedDebugEvent evtScene(d3dCtx, L"forward pipeline");
         // Setup RenderContext for editor viewport
         CRenderPipeline::RenderContext renderCtx{
             editorCamera,               // camera
@@ -453,13 +449,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         g_pipeline.Render(renderCtx);
         }
 
-        ID3D11RenderTargetView* rtv = ctx.GetBackbufferRTV();
-        ID3D11DepthStencilView* dsv = ctx.GetDSV();
-        ctx.BindRenderTargets(rtv, dsv);
-        ctx.SetViewport(0, 0, (float)ctx.GetWidth(), (float)ctx.GetHeight());
+        // Bind backbuffer for UI rendering
+        ID3D11RenderTargetView* rtv = static_cast<ID3D11RenderTargetView*>(rhiCtx->GetBackbuffer()->GetRTV());
+        ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(rhiCtx->GetDepthStencil()->GetDSV());
+        d3dCtx->OMSetRenderTargets(1, &rtv, dsv);
+
+        D3D11_VIEWPORT vp{};
+        vp.Width = (float)rhiCtx->GetWidth();
+        vp.Height = (float)rhiCtx->GetHeight();
+        vp.MinDepth = 0.0f;
+        vp.MaxDepth = 1.0f;
+        d3dCtx->RSSetViewports(1, &vp);
 
         const float clearCol[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
-        ctx.ClearRTV(rtv, clearCol);
+        d3dCtx->ClearRenderTargetView(rtv, clearCol);
         // main.cpp  —— 每帧渲染里，渲染完 3D 场景之后，提交 ImGui 之前
         {
             bool dockOpen = true;
@@ -479,13 +482,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // 5.5 提交 ImGui
-        {CScopedDebugEvent evtScene(ctx.GetContext(), L"imgui pass");
+        {CScopedDebugEvent evtScene(d3dCtx, L"imgui pass");
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         }
 
         // 5.6 Present
-        ctx.Present(1, 0);
+        rhiCtx->Present(true);  // vsync = true
     }
 
     // Main loop finished normally
@@ -513,8 +516,8 @@ cleanup:
     }
 
     if (dx11Initialized) {
-        CFFLog::Info("Shutting down DX11...");
-        CDX11Context::Instance().Shutdown();
+        CFFLog::Info("Shutting down RHI...");
+        RHI::CRHIManager::Instance().Shutdown();
     }
 
     CFFLog::Info("Shutdown complete.");
