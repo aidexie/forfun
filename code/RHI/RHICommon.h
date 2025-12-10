@@ -255,6 +255,16 @@ struct VertexElement {
         , inputSlot(0)
         , instanceData(false)
     {}
+
+    VertexElement(EVertexSemantic sem, uint32_t semIdx, EVertexFormat fmt,
+                  uint32_t off, uint32_t slot, bool instanced = false)
+        : semantic(sem)
+        , semanticIndex(semIdx)
+        , format(fmt)
+        , offset(off)
+        , inputSlot(slot)
+        , instanceData(instanced)
+    {}
 };
 
 } // namespace RHI

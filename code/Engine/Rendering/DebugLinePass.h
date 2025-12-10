@@ -1,9 +1,8 @@
 // Engine/Rendering/DebugLinePass.h
 #pragma once
-#include <d3d11.h>
 #include <DirectXMath.h>
-#include <wrl/client.h>
 #include <vector>
+#include "RHI/RHIPointers.h"
 
 class CDebugLinePass {
 public:
@@ -20,7 +19,7 @@ public:
 
     // Render all accumulated lines
     void Render(DirectX::XMMATRIX view, DirectX::XMMATRIX proj,
-                UINT viewportWidth, UINT viewportHeight);
+                unsigned int viewportWidth, unsigned int viewportHeight);
 
     // Settings
     void SetLineThickness(float thickness) { m_lineThickness = thickness; }
@@ -44,18 +43,21 @@ private:
 
     void CreateShaders();
     void CreateBuffers();
+    void CreatePipelineState();
     void UpdateVertexBuffer();
 
     std::vector<LineVertex> m_dynamicLines;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_vertexBuffer;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbPerFrameVS;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> m_cbPerFrameGS;
-    Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vs;
-    Microsoft::WRL::ComPtr<ID3D11GeometryShader> m_gs;
-    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_ps;
-    Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
 
-    UINT m_maxVertices = 10000;  // Max vertices per frame
+    // RHI resources
+    RHI::BufferPtr m_vertexBuffer;
+    RHI::BufferPtr m_cbPerFrameVS;
+    RHI::BufferPtr m_cbPerFrameGS;
+    RHI::ShaderPtr m_vs;
+    RHI::ShaderPtr m_gs;
+    RHI::ShaderPtr m_ps;
+    RHI::PipelineStatePtr m_pso;
+
+    unsigned int m_maxVertices = 10000;  // Max vertices per frame
     float m_lineThickness = 2.0f;
     bool m_initialized = false;
 };

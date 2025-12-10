@@ -2,6 +2,8 @@
 #include "DebugLinePass.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
+#include "RHI/ICommandList.h"
+#include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
 #include <d3dcompiler.h>
 #include <fstream>
@@ -9,8 +11,8 @@
 
 #pragma comment(lib, "d3dcompiler.lib")
 
-using Microsoft::WRL::ComPtr;
 using namespace DirectX;
+using namespace RHI;
 
 // Helper function to load shader source from file
 static std::string LoadShaderSource(const std::string& filepath) {
@@ -29,25 +31,29 @@ void CDebugLinePass::Initialize() {
 
     CreateShaders();
     CreateBuffers();
+    CreatePipelineState();
 
     m_initialized = true;
 }
 
 void CDebugLinePass::Shutdown() {
-    m_vertexBuffer.Reset();
-    m_cbPerFrameVS.Reset();
-    m_cbPerFrameGS.Reset();
-    m_vs.Reset();
-    m_gs.Reset();
-    m_ps.Reset();
-    m_inputLayout.Reset();
+    m_pso.reset();
+    m_vertexBuffer.reset();
+    m_cbPerFrameVS.reset();
+    m_cbPerFrameGS.reset();
+    m_vs.reset();
+    m_gs.reset();
+    m_ps.reset();
     m_dynamicLines.clear();
     m_initialized = false;
 }
 
 void CDebugLinePass::CreateShaders() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) {
+        CFFLog::Error("RHIManager not initialized!");
+        return;
+    }
 
     // Load shader source files
     std::string vsSource = LoadShaderSource("../source/code/Shader/DebugLine.vs.hlsl");
@@ -59,12 +65,15 @@ void CDebugLinePass::CreateShaders() {
         return;
     }
 
-    UINT compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+    unsigned int compileFlags = D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
     compileFlags |= D3DCOMPILE_DEBUG;
 #endif
 
-    ComPtr<ID3DBlob> vsBlob, gsBlob, psBlob, err;
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* gsBlob = nullptr;
+    ID3DBlob* psBlob = nullptr;
+    ID3DBlob* err = nullptr;
 
     // Compile Vertex Shader
     HRESULT hr = D3DCompile(vsSource.c_str(), vsSource.size(), "DebugLine.vs.hlsl",
@@ -73,6 +82,7 @@ void CDebugLinePass::CreateShaders() {
         if (err) {
             CFFLog::Error("=== DEBUGLINE VERTEX SHADER COMPILATION ERROR ===");
             CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
         }
         return;
     }
@@ -84,7 +94,9 @@ void CDebugLinePass::CreateShaders() {
         if (err) {
             CFFLog::Error("=== DEBUGLINE GEOMETRY SHADER COMPILATION ERROR ===");
             CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
         }
+        vsBlob->Release();
         return;
     }
 
@@ -95,45 +107,92 @@ void CDebugLinePass::CreateShaders() {
         if (err) {
             CFFLog::Error("=== DEBUGLINE PIXEL SHADER COMPILATION ERROR ===");
             CFFLog::Error("%s", (const char*)err->GetBufferPointer());
+            err->Release();
         }
+        vsBlob->Release();
+        gsBlob->Release();
         return;
     }
 
-    // Create shader objects
-    device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_vs.GetAddressOf());
-    device->CreateGeometryShader(gsBlob->GetBufferPointer(), gsBlob->GetBufferSize(), nullptr, m_gs.GetAddressOf());
-    device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_ps.GetAddressOf());
+    // Create shader objects using RHI
+    ShaderDesc vsDesc(EShaderType::Vertex, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize());
+    m_vs.reset(renderContext->CreateShader(vsDesc));
 
-    // Create Input Layout
-    D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    };
-    device->CreateInputLayout(layout, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_inputLayout.GetAddressOf());
+    ShaderDesc gsDesc(EShaderType::Geometry, gsBlob->GetBufferPointer(), gsBlob->GetBufferSize());
+    m_gs.reset(renderContext->CreateShader(gsDesc));
+
+    ShaderDesc psDesc(EShaderType::Pixel, psBlob->GetBufferPointer(), psBlob->GetBufferSize());
+    m_ps.reset(renderContext->CreateShader(psDesc));
+
+    vsBlob->Release();
+    gsBlob->Release();
+    psBlob->Release();
 }
 
 void CDebugLinePass::CreateBuffers() {
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return;
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return;
 
     // Create dynamic vertex buffer
-    D3D11_BUFFER_DESC vbDesc{};
-    vbDesc.ByteWidth = sizeof(LineVertex) * m_maxVertices;
-    vbDesc.Usage = D3D11_USAGE_DYNAMIC;
-    vbDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-    vbDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    device->CreateBuffer(&vbDesc, nullptr, m_vertexBuffer.GetAddressOf());
+    BufferDesc vbDesc;
+    vbDesc.size = sizeof(LineVertex) * m_maxVertices;
+    vbDesc.usage = EBufferUsage::Vertex;
+    vbDesc.cpuAccess = ECPUAccess::Write;
+    m_vertexBuffer.reset(renderContext->CreateBuffer(vbDesc, nullptr));
 
     // Create constant buffers
-    D3D11_BUFFER_DESC cbDesc{};
-    cbDesc.Usage = D3D11_USAGE_DEFAULT;
-    cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    BufferDesc cbDescVS;
+    cbDescVS.size = sizeof(CBPerFrameVS);
+    cbDescVS.usage = EBufferUsage::Constant;
+    cbDescVS.cpuAccess = ECPUAccess::Write;
+    m_cbPerFrameVS.reset(renderContext->CreateBuffer(cbDescVS, nullptr));
 
-    cbDesc.ByteWidth = sizeof(CBPerFrameVS);
-    device->CreateBuffer(&cbDesc, nullptr, m_cbPerFrameVS.GetAddressOf());
+    BufferDesc cbDescGS;
+    cbDescGS.size = sizeof(CBPerFrameGS);
+    cbDescGS.usage = EBufferUsage::Constant;
+    cbDescGS.cpuAccess = ECPUAccess::Write;
+    m_cbPerFrameGS.reset(renderContext->CreateBuffer(cbDescGS, nullptr));
+}
 
-    cbDesc.ByteWidth = sizeof(CBPerFrameGS);
-    device->CreateBuffer(&cbDesc, nullptr, m_cbPerFrameGS.GetAddressOf());
+void CDebugLinePass::CreatePipelineState() {
+    if (!m_vs || !m_gs || !m_ps) return;
+
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return;
+
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs.get();
+    psoDesc.geometryShader = m_gs.get();
+    psoDesc.pixelShader = m_ps.get();
+
+    // Input layout
+    psoDesc.inputLayout = {
+        VertexElement(EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0, false),
+        VertexElement(EVertexSemantic::Color, 0, EVertexFormat::Float4, 12, 0, false)
+    };
+
+    // Rasterizer state
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+
+    // Depth stencil state: test but no write
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+
+    // Blend state: alpha blending
+    psoDesc.blend.blendEnable = true;
+    psoDesc.blend.srcBlend = EBlendFactor::SrcAlpha;
+    psoDesc.blend.dstBlend = EBlendFactor::InvSrcAlpha;
+    psoDesc.blend.blendOp = EBlendOp::Add;
+    psoDesc.blend.srcBlendAlpha = EBlendFactor::One;
+    psoDesc.blend.dstBlendAlpha = EBlendFactor::Zero;
+    psoDesc.blend.blendOpAlpha = EBlendOp::Add;
+
+    // Primitive topology
+    psoDesc.primitiveTopology = EPrimitiveTopology::LineList;
+
+    m_pso.reset(renderContext->CreatePipelineState(psoDesc));
 }
 
 void CDebugLinePass::BeginFrame() {
@@ -145,26 +204,23 @@ void CDebugLinePass::AddLine(XMFLOAT3 from, XMFLOAT3 to, XMFLOAT4 color) {
         CFFLog::Warning("DebugLinePass vertex buffer overflow!");
         return;
     }
-
     m_dynamicLines.push_back({ from, color });
     m_dynamicLines.push_back({ to, color });
 }
 
 void CDebugLinePass::AddAABB(XMFLOAT3 localMin, XMFLOAT3 localMax,
                              XMMATRIX worldMatrix, XMFLOAT4 color) {
-    // 8 corners of local AABB
     XMFLOAT3 corners[8] = {
-        XMFLOAT3(localMin.x, localMin.y, localMin.z), // 0: left-bottom-front
-        XMFLOAT3(localMax.x, localMin.y, localMin.z), // 1: right-bottom-front
-        XMFLOAT3(localMax.x, localMax.y, localMin.z), // 2: right-top-front
-        XMFLOAT3(localMin.x, localMax.y, localMin.z), // 3: left-top-front
-        XMFLOAT3(localMin.x, localMin.y, localMax.z), // 4: left-bottom-back
-        XMFLOAT3(localMax.x, localMin.y, localMax.z), // 5: right-bottom-back
-        XMFLOAT3(localMax.x, localMax.y, localMax.z), // 6: right-top-back
-        XMFLOAT3(localMin.x, localMax.y, localMax.z), // 7: left-top-back
+        XMFLOAT3(localMin.x, localMin.y, localMin.z),
+        XMFLOAT3(localMax.x, localMin.y, localMin.z),
+        XMFLOAT3(localMax.x, localMax.y, localMin.z),
+        XMFLOAT3(localMin.x, localMax.y, localMin.z),
+        XMFLOAT3(localMin.x, localMin.y, localMax.z),
+        XMFLOAT3(localMax.x, localMin.y, localMax.z),
+        XMFLOAT3(localMax.x, localMax.y, localMax.z),
+        XMFLOAT3(localMin.x, localMax.y, localMax.z),
     };
 
-    // Transform corners to world space
     XMFLOAT3 worldCorners[8];
     for (int i = 0; i < 8; i++) {
         XMVECTOR localCorner = XMLoadFloat3(&corners[i]);
@@ -172,13 +228,9 @@ void CDebugLinePass::AddAABB(XMFLOAT3 localMin, XMFLOAT3 localMax,
         XMStoreFloat3(&worldCorners[i], worldCorner);
     }
 
-    // 12 edges of AABB
     int edges[12][2] = {
-        // Front face
         {0, 1}, {1, 2}, {2, 3}, {3, 0},
-        // Back face
         {4, 5}, {5, 6}, {6, 7}, {7, 4},
-        // Connecting edges
         {0, 4}, {1, 5}, {2, 6}, {3, 7}
     };
 
@@ -188,63 +240,61 @@ void CDebugLinePass::AddAABB(XMFLOAT3 localMin, XMFLOAT3 localMax,
 }
 
 void CDebugLinePass::UpdateVertexBuffer() {
-    if (m_dynamicLines.empty()) return;
+    if (m_dynamicLines.empty() || !m_vertexBuffer) return;
 
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!context) return;
-
-    // Map and upload vertex data
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    HRESULT hr = context->Map(m_vertexBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-    if (SUCCEEDED(hr)) {
+    void* mappedData = m_vertexBuffer->Map();
+    if (mappedData) {
         size_t dataSize = sizeof(LineVertex) * m_dynamicLines.size();
-        memcpy(mapped.pData, m_dynamicLines.data(), dataSize);
-        context->Unmap(m_vertexBuffer.Get(), 0);
+        memcpy(mappedData, m_dynamicLines.data(), dataSize);
+        m_vertexBuffer->Unmap();
     }
 }
 
 void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
-                            UINT viewportWidth, UINT viewportHeight) {
-    if (!m_initialized || m_dynamicLines.empty()) return;
+                            unsigned int viewportWidth, unsigned int viewportHeight) {
+    if (!m_initialized || m_dynamicLines.empty() || !m_pso) return;
 
-    ID3D11DeviceContext* context = static_cast<ID3D11DeviceContext*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeContext());
-    if (!context) return;
+    IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
+    if (!renderContext) return;
 
-    // Update vertex buffer
     UpdateVertexBuffer();
 
-    // Update constant buffers
+    // Update VS constant buffer
     XMMATRIX viewProj = view * proj;
     CBPerFrameVS cbVS;
-    cbVS.viewProj = XMMatrixTranspose(viewProj);  // HLSL expects column-major
-    context->UpdateSubresource(m_cbPerFrameVS.Get(), 0, nullptr, &cbVS, 0, 0);
+    cbVS.viewProj = XMMatrixTranspose(viewProj);
 
+    void* mappedVS = m_cbPerFrameVS->Map();
+    if (mappedVS) {
+        memcpy(mappedVS, &cbVS, sizeof(CBPerFrameVS));
+        m_cbPerFrameVS->Unmap();
+    }
+
+    // Update GS constant buffer
     CBPerFrameGS cbGS;
     cbGS.viewportSize = XMFLOAT2(static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
     cbGS.lineThickness = m_lineThickness;
     cbGS.padding = 0.0f;
-    context->UpdateSubresource(m_cbPerFrameGS.Get(), 0, nullptr, &cbGS, 0, 0);
 
-    // Set pipeline state
-    context->IASetInputLayout(m_inputLayout.Get());
-    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+    void* mappedGS = m_cbPerFrameGS->Map();
+    if (mappedGS) {
+        memcpy(mappedGS, &cbGS, sizeof(CBPerFrameGS));
+        m_cbPerFrameGS->Unmap();
+    }
 
-    UINT stride = sizeof(LineVertex);
-    UINT offset = 0;
-    context->IASetVertexBuffers(0, 1, m_vertexBuffer.GetAddressOf(), &stride, &offset);
+    // Get command list and render
+    ICommandList* cmdList = renderContext->GetCommandList();
 
-    context->VSSetShader(m_vs.Get(), nullptr, 0);
-    context->VSSetConstantBuffers(0, 1, m_cbPerFrameVS.GetAddressOf());
+    cmdList->SetPipelineState(m_pso.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::LineList);
 
-    context->GSSetShader(m_gs.Get(), nullptr, 0);
-    context->GSSetConstantBuffers(0, 1, m_cbPerFrameGS.GetAddressOf());
+    unsigned int stride = sizeof(LineVertex);
+    unsigned int offset = 0;
+    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), stride, offset);
 
-    context->PSSetShader(m_ps.Get(), nullptr, 0);
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbPerFrameVS.get());
+    cmdList->SetConstantBuffer(EShaderStage::Geometry, 0, m_cbPerFrameGS.get());
 
-    // Draw lines
-    UINT vertexCount = static_cast<UINT>(m_dynamicLines.size());
-    context->Draw(vertexCount, 0);
-
-    // Unbind geometry shader (important!)
-    context->GSSetShader(nullptr, nullptr, 0);
+    unsigned int vertexCount = static_cast<unsigned int>(m_dynamicLines.size());
+    cmdList->Draw(vertexCount, 0);
 }
