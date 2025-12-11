@@ -96,6 +96,17 @@ enum class ECPUAccess {
 };
 
 // ============================================
+// Texture Dimension
+// ============================================
+enum class ETextureDimension {
+    Tex2D,          // Regular 2D texture
+    Tex3D,          // Volume texture
+    TexCube,        // Cubemap (6 faces)
+    Tex2DArray,     // 2D texture array
+    TexCubeArray    // Cubemap array
+};
+
+// ============================================
 // Texture Format
 // ============================================
 enum class ETextureFormat {

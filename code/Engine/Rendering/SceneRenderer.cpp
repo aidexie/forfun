@@ -438,6 +438,7 @@ void CSceneRenderer::Render(
 
     // Render Transparent
     { RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
+    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
     cmdList->SetPipelineState(m_psoTransparent.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
     renderItems(cmdList, transparentItems, m_cbObj.get());

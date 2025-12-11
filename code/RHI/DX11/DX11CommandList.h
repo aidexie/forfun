@@ -74,6 +74,10 @@ public:
 private:
     ID3D11DeviceContext* m_context;  // Non-owning
     ID3DUserDefinedAnnotation* m_annotation = nullptr;  // Owned, for debug events
+
+    // Debug tracking
+    const wchar_t* m_currentEventName = nullptr;  // Current debug event name for error tracking
+    IPipelineState* m_currentPSO = nullptr;  // Current PSO for validation
 };
 
 } // namespace DX11

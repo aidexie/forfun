@@ -10,6 +10,7 @@
 #include <algorithm>  // For std::transform (fuzzy matching)
 
 #include "RHI/RHIManager.h"  // RHI 全局管理器
+#include "RHI/RHIHelpers.h"  // RHI helper functions
 #include "Engine/Rendering/ForwardRenderPipeline.h"  // ✅ Forward 渲染流程
 #include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
@@ -361,7 +362,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     if (!activeTest)
     {
         // Use FFPath to resolve path (accepts relative or absolute)
-        std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
+        std::string scenePath = FFPath::GetAbsolutePath("scenes/simple.scene");
         CScene::Instance().LoadFromFile(scenePath);
     }
 
@@ -450,8 +451,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // Bind backbuffer for UI rendering
-        ID3D11RenderTargetView* rtv = static_cast<ID3D11RenderTargetView*>(rhiCtx->GetBackbuffer()->GetRTV());
-        ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(rhiCtx->GetDepthStencil()->GetDSV());
+        ID3D11RenderTargetView* rtv = static_cast<ID3D11RenderTargetView*>(RHI::GetNativeRTV(rhiCtx->GetBackbuffer()));
+        ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(RHI::GetNativeDSV(rhiCtx->GetDepthStencil()));
         d3dCtx->OMSetRenderTargets(1, &rtv, dsv);
 
         D3D11_VIEWPORT vp{};

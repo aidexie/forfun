@@ -207,7 +207,7 @@ public:
     // ============================================
     // 生命周期
     // ============================================
-    CVolumetricLightmap() = default;
+    CVolumetricLightmap();
     ~CVolumetricLightmap() = default;
 
     bool Initialize(const Config& config);

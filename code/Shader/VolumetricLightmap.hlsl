@@ -61,7 +61,7 @@ struct BrickInfo
 StructuredBuffer<BrickInfo> g_BrickInfoBuffer : register(t24);
 
 // Sampler for trilinear interpolation
-SamplerState g_VLSampler : register(s3);
+SamplerState g_VLSampler : register(s2);
 
 // ============================================
 // Constants

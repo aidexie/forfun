@@ -1,6 +1,23 @@
 #include "DX11CommandList.h"
+#include "DX11Resources.h"
 #include "DX11Utils.h"
+#include "../../Core/FFLog.h"
 #include <d3d11_1.h>  // For ID3DUserDefinedAnnotation
+
+// Enable this to log draw calls for debugging shader linkage errors
+#define DEBUG_DRAW_CALLS 0
+
+#if DEBUG_DRAW_CALLS
+#include <Windows.h>
+#include <cstdio>
+
+static void DebugDrawLog(const wchar_t* eventName, const char* drawType, void* pso) {
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "[Draw] %s in event: %ls, PSO: %p\n", drawType, eventName, pso);
+    OutputDebugStringA(buffer);
+    CFFLog::Info("%s", buffer);
+}
+#endif
 
 namespace RHI {
 namespace DX11 {
@@ -26,13 +43,15 @@ void CDX11CommandList::SetRenderTargets(uint32_t numRTs, ITexture* const* render
 
     for (uint32_t i = 0; i < numRTs && i < 8; i++) {
         if (renderTargets[i]) {
-            rtvs[i] = static_cast<ID3D11RenderTargetView*>(renderTargets[i]->GetRTV());
+            CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(renderTargets[i]);
+            rtvs[i] = dx11Tex->GetOrCreateRTV();
         }
     }
 
     ID3D11DepthStencilView* dsv = nullptr;
     if (depthStencil) {
-        dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSV());
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(depthStencil);
+        dsv = dx11Tex->GetOrCreateDSV();
     }
 
     m_context->OMSetRenderTargets(numRTs, rtvs, dsv);
@@ -40,7 +59,8 @@ void CDX11CommandList::SetRenderTargets(uint32_t numRTs, ITexture* const* render
 
 void CDX11CommandList::ClearRenderTarget(ITexture* renderTarget, const float color[4]) {
     if (!renderTarget) return;
-    ID3D11RenderTargetView* rtv = static_cast<ID3D11RenderTargetView*>(renderTarget->GetRTV());
+    CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(renderTarget);
+    ID3D11RenderTargetView* rtv = dx11Tex->GetOrCreateRTV();
     if (rtv) {
         m_context->ClearRenderTargetView(rtv, color);
     }
@@ -48,7 +68,8 @@ void CDX11CommandList::ClearRenderTarget(ITexture* renderTarget, const float col
 
 void CDX11CommandList::ClearDepthStencil(ITexture* depthStencil, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) {
     if (!depthStencil) return;
-    ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSV());
+    CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(depthStencil);
+    ID3D11DepthStencilView* dsv = dx11Tex->GetOrCreateDSV();
     if (dsv) {
         UINT flags = 0;
         if (clearDepth) flags |= D3D11_CLEAR_DEPTH;
@@ -60,12 +81,14 @@ void CDX11CommandList::ClearDepthStencil(ITexture* depthStencil, bool clearDepth
 void CDX11CommandList::SetRenderTargetSlice(ITexture* renderTarget, uint32_t arraySlice, ITexture* depthStencil) {
     ID3D11RenderTargetView* rtv = nullptr;
     if (renderTarget) {
-        rtv = static_cast<ID3D11RenderTargetView*>(renderTarget->GetRTVSlice(arraySlice));
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(renderTarget);
+        rtv = dx11Tex->GetOrCreateRTVSlice(arraySlice, 0);
     }
 
     ID3D11DepthStencilView* dsv = nullptr;
     if (depthStencil) {
-        dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSV());
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(depthStencil);
+        dsv = dx11Tex->GetOrCreateDSV();
     }
 
     m_context->OMSetRenderTargets(rtv ? 1 : 0, rtv ? &rtv : nullptr, dsv);
@@ -74,10 +97,11 @@ void CDX11CommandList::SetRenderTargetSlice(ITexture* renderTarget, uint32_t arr
 void CDX11CommandList::SetDepthStencilOnly(ITexture* depthStencil, uint32_t arraySlice) {
     ID3D11DepthStencilView* dsv = nullptr;
     if (depthStencil) {
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(depthStencil);
         if (depthStencil->GetArraySize() > 1) {
-            dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSVSlice(arraySlice));
+            dsv = dx11Tex->GetOrCreateDSVSlice(arraySlice);
         } else {
-            dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSV());
+            dsv = dx11Tex->GetOrCreateDSV();
         }
     }
     m_context->OMSetRenderTargets(0, nullptr, dsv);
@@ -85,7 +109,8 @@ void CDX11CommandList::SetDepthStencilOnly(ITexture* depthStencil, uint32_t arra
 
 void CDX11CommandList::ClearDepthStencilSlice(ITexture* depthStencil, uint32_t arraySlice, bool clearDepth, float depth, bool clearStencil, uint8_t stencil) {
     if (!depthStencil) return;
-    ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(depthStencil->GetDSVSlice(arraySlice));
+    CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(depthStencil);
+    ID3D11DepthStencilView* dsv = dx11Tex->GetOrCreateDSVSlice(arraySlice);
     if (dsv) {
         UINT flags = 0;
         if (clearDepth) flags |= D3D11_CLEAR_DEPTH;
@@ -96,6 +121,8 @@ void CDX11CommandList::ClearDepthStencilSlice(ITexture* depthStencil, uint32_t a
 
 void CDX11CommandList::SetPipelineState(IPipelineState* pso) {
     if (!pso) return;
+
+    m_currentPSO = pso;  // Track current PSO for debug
 
     CDX11PipelineState* d3dPSO = static_cast<CDX11PipelineState*>(pso);
 
@@ -117,6 +144,9 @@ void CDX11CommandList::SetPipelineState(IPipelineState* pso) {
     }
     if (d3dPSO->GetPixelShader()) {
         m_context->PSSetShader(d3dPSO->GetPixelShader()->GetPixelShader(), nullptr, 0);
+    } else {
+        // Clear PS to avoid linkage errors with depth-only passes (e.g., ShadowPass)
+        m_context->PSSetShader(nullptr, nullptr, 0);
     }
     if (d3dPSO->GetGeometryShader()) {
         m_context->GSSetShader(d3dPSO->GetGeometryShader()->GetGeometryShader(), nullptr, 0);
@@ -195,7 +225,11 @@ void CDX11CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuf
 }
 
 void CDX11CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) {
-    ID3D11ShaderResourceView* srv = texture ? static_cast<ID3D11ShaderResourceView*>(texture->GetSRV()) : nullptr;
+    ID3D11ShaderResourceView* srv = nullptr;
+    if (texture) {
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(texture);
+        srv = dx11Tex->GetOrCreateSRV();
+    }
 
     switch (stage) {
         case EShaderStage::Vertex:
@@ -245,6 +279,7 @@ void CDX11CommandList::SetSampler(EShaderStage stage, uint32_t slot, ISampler* s
             m_context->VSSetSamplers(slot, 1, &d3dSampler);
             break;
         case EShaderStage::Pixel:
+        if(d3dSampler)
             m_context->PSSetSamplers(slot, 1, &d3dSampler);
             break;
         case EShaderStage::Compute:
@@ -262,25 +297,57 @@ void CDX11CommandList::SetUnorderedAccess(uint32_t slot, IBuffer* buffer) {
 }
 
 void CDX11CommandList::SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) {
-    ID3D11UnorderedAccessView* uav = texture ? static_cast<ID3D11UnorderedAccessView*>(texture->GetUAV()) : nullptr;
+    ID3D11UnorderedAccessView* uav = nullptr;
+    if (texture) {
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(texture);
+        uav = dx11Tex->GetOrCreateUAV();
+    }
     m_context->CSSetUnorderedAccessViews(slot, 1, &uav, nullptr);
 }
 
 void CDX11CommandList::Draw(uint32_t vertexCount, uint32_t startVertex) {
+#if DEBUG_DRAW_CALLS
+    static const wchar_t* s_lastEvent = nullptr;
+    if (m_currentEventName && m_currentEventName != s_lastEvent) {
+        DebugDrawLog(m_currentEventName, "Draw", m_currentPSO);
+        s_lastEvent = m_currentEventName;
+    }
+#endif
     m_context->Draw(vertexCount, startVertex);
 }
 
 void CDX11CommandList::DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) {
+#if DEBUG_DRAW_CALLS
+    static const wchar_t* s_lastEvent = nullptr;
+    if (m_currentEventName && m_currentEventName != s_lastEvent) {
+        DebugDrawLog(m_currentEventName, "DrawIndexed", m_currentPSO);
+        s_lastEvent = m_currentEventName;
+    }
+#endif
     m_context->DrawIndexed(indexCount, startIndex, baseVertex);
 }
 
 void CDX11CommandList::DrawInstanced(uint32_t vertexCountPerInstance, uint32_t instanceCount,
                                      uint32_t startVertex, uint32_t startInstance) {
+#if DEBUG_DRAW_CALLS
+    static const wchar_t* s_lastEvent = nullptr;
+    if (m_currentEventName && m_currentEventName != s_lastEvent) {
+        DebugDrawLog(m_currentEventName, "DrawInstanced", m_currentPSO);
+        s_lastEvent = m_currentEventName;
+    }
+#endif
     m_context->DrawInstanced(vertexCountPerInstance, instanceCount, startVertex, startInstance);
 }
 
 void CDX11CommandList::DrawIndexedInstanced(uint32_t indexCountPerInstance, uint32_t instanceCount,
                                             uint32_t startIndex, int32_t baseVertex, uint32_t startInstance) {
+#if DEBUG_DRAW_CALLS
+    static const wchar_t* s_lastEvent = nullptr;
+    if (m_currentEventName && m_currentEventName != s_lastEvent) {
+        DebugDrawLog(m_currentEventName, "DrawIndexedInstanced", m_currentPSO);
+        s_lastEvent = m_currentEventName;
+    }
+#endif
     m_context->DrawIndexedInstanced(indexCountPerInstance, instanceCount, startIndex, baseVertex, startInstance);
 }
 
@@ -369,19 +436,21 @@ void CDX11CommandList::GenerateMips(ITexture* texture) {
     if (!texture) return;
 
     CDX11Texture* dx11Texture = static_cast<CDX11Texture*>(texture);
-    ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(dx11Texture->GetSRV());
+    ID3D11ShaderResourceView* srv = dx11Texture->GetOrCreateSRV();
     if (srv) {
         m_context->GenerateMips(srv);
     }
 }
 
 void CDX11CommandList::BeginEvent(const wchar_t* name) {
+    m_currentEventName = name;  // Track current event for debug
     if (m_annotation) {
         m_annotation->BeginEvent(name);
     }
 }
 
 void CDX11CommandList::EndEvent() {
+    m_currentEventName = nullptr;  // Clear event name
     if (m_annotation) {
         m_annotation->EndEvent();
     }

@@ -6,6 +6,7 @@
 #include "DebugLinePass.h"
 #include "GridPass.h"
 #include "RHI/RHIPointers.h"
+#include "RHI/RHIHelpers.h"
 
 // ============================================
 // CForwardRenderPipeline - Forward 渲染流程
@@ -38,7 +39,7 @@ public:
 
     // 访问离屏纹理（用于 ImGui 显示）
     void* GetOffscreenSRV() const {
-        return m_offLDR ? m_offLDR->GetSRV() : nullptr;
+        return m_offLDR ? RHI::GetNativeSRV(m_offLDR.get()) : nullptr;
     }
     void* GetOffscreenTexture() const {
         return m_offLDR ? m_offLDR->GetNativeHandle() : nullptr;

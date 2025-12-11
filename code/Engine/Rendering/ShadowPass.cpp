@@ -78,11 +78,12 @@ bool CShadowPass::Initialize()
     psoDesc.pixelShader = nullptr;  // Depth-only, no pixel shader
 
     // Input layout (same as MainPass for compatibility)
+    // VertexElement: { semantic, semanticIndex, format, offset, inputSlot }
     psoDesc.inputLayout = {
         { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 },
-        { EVertexSemantic::Normal,   0, EVertexFormat::Float3, 0, 12 },
-        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 0, 24 },
-        { EVertexSemantic::Tangent,  0, EVertexFormat::Float4, 0, 32 }
+        { EVertexSemantic::Normal,   0, EVertexFormat::Float3, 12, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 24, 0 },
+        { EVertexSemantic::Tangent,  0, EVertexFormat::Float4, 32, 0 }
     };
 
     // Rasterizer state (with depth bias to prevent shadow acne)

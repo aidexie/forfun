@@ -55,77 +55,42 @@ private:
 };
 
 // ============================================
-// DX11 Texture (supports 2D and 3D textures)
+// DX11 Texture
+//
+// Design: Stores TextureDesc for metadata, creates Views on-demand and caches them.
+// Views are internal implementation details, accessed only by CDX11CommandList.
 // ============================================
 class CDX11Texture : public ITexture {
 public:
-    // Owning constructor for 2D textures (takes ownership via ComPtr)
-    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format,
-                 uint32_t arraySize = 1, uint32_t mipLevels = 1, ID3D11DeviceContext* context = nullptr)
-        : m_texture2D(texture), m_rawTexture(nullptr), m_width(width), m_height(height), m_depth(1),
-          m_format(format), m_arraySize(arraySize), m_mipLevels(mipLevels), m_owning(true), m_is3D(false), m_context(context) {}
+    // Primary constructor - takes desc and native resource
+    CDX11Texture(const TextureDesc& desc, ID3D11Texture2D* texture, ID3D11Device* device, ID3D11DeviceContext* context)
+        : m_desc(desc), m_texture2D(texture), m_device(device), m_context(context) {}
 
-    // Owning constructor for 3D textures
-    CDX11Texture(ID3D11Texture3D* texture, uint32_t width, uint32_t height, uint32_t depth, ETextureFormat format,
-                 uint32_t mipLevels = 1, ID3D11DeviceContext* context = nullptr)
-        : m_texture3D(texture), m_rawTexture(nullptr), m_width(width), m_height(height), m_depth(depth),
-          m_format(format), m_arraySize(1), m_mipLevels(mipLevels), m_owning(true), m_is3D(true), m_context(context) {}
-
-    // Non-owning constructor for 2D textures
-    CDX11Texture(ID3D11Texture2D* texture, uint32_t width, uint32_t height, ETextureFormat format, bool owning,
-                 ID3D11DeviceContext* context = nullptr)
-        : m_rawTexture(owning ? nullptr : texture), m_width(width), m_height(height), m_depth(1),
-          m_format(format), m_arraySize(1), m_mipLevels(1), m_owning(owning), m_is3D(false), m_context(context)
-    {
-        if (owning) {
-            m_texture2D = texture;
-        }
-    }
+    // Constructor for 3D textures
+    CDX11Texture(const TextureDesc& desc, ID3D11Texture3D* texture, ID3D11Device* device, ID3D11DeviceContext* context)
+        : m_desc(desc), m_texture3D(texture), m_device(device), m_context(context) {}
 
     ~CDX11Texture() override = default;
 
-    uint32_t GetWidth() const override { return m_width; }
-    uint32_t GetHeight() const override { return m_height; }
-    uint32_t GetDepth() const override { return m_depth; }
-    uint32_t GetArraySize() const override { return m_arraySize; }
-    uint32_t GetMipLevels() const override { return m_mipLevels; }
-    ETextureFormat GetFormat() const override { return m_format; }
+    // ============================================
+    // ITexture interface
+    // ============================================
+    const TextureDesc& GetDesc() const override { return m_desc; }
 
     void* GetNativeHandle() override {
-        if (m_is3D) {
+        if (m_desc.dimension == ETextureDimension::Tex3D) {
             return m_texture3D.Get();
         }
-        return m_owning ? m_texture2D.Get() : m_rawTexture;
-    }
-    void* GetRTV() override { return m_rtv.Get(); }
-    void* GetDSV() override { return m_dsv.Get(); }
-    void* GetSRV() override { return m_srv.Get(); }
-    void* GetUAV() override { return m_uav.Get(); }
-
-    // Per-slice DSV for texture arrays (CSM shadow mapping)
-    void* GetDSVSlice(uint32_t arrayIndex) override {
-        if (arrayIndex >= m_arraySize || arrayIndex >= MAX_SLICE_VIEWS) return nullptr;
-        return m_sliceDSVs[arrayIndex].Get();
+        return m_texture2D.Get();
     }
 
-    // Per-slice RTV for texture arrays/cubemaps (face rendering)
-    void* GetRTVSlice(uint32_t arrayIndex) override {
-        if (arrayIndex >= m_arraySize || arrayIndex >= MAX_SLICE_VIEWS) return nullptr;
-        return m_sliceRTVs[arrayIndex].Get();
-    }
-
-    // Per-slice SRV for texture arrays/cubemaps (debug visualization)
-    // Created on-demand and cached
-    void* GetSRVSlice(uint32_t arrayIndex, uint32_t mipLevel = 0) override;
-
-    // CPU Access (for Staging textures)
     MappedTexture Map(uint32_t arraySlice = 0, uint32_t mipLevel = 0) override {
         MappedTexture result;
-        if (!m_context || !m_isStaging) return result;
+        if (!m_context || !(m_desc.usage & ETextureUsage::Staging)) return result;
 
-        UINT subresource = D3D11CalcSubresource(mipLevel, arraySlice, m_mipLevels);
+        UINT subresource = D3D11CalcSubresource(mipLevel, arraySlice, m_desc.mipLevels);
         D3D11_MAPPED_SUBRESOURCE mapped;
-        D3D11_MAP mapType = (m_cpuAccess == ECPUAccess::Write) ? D3D11_MAP_WRITE : D3D11_MAP_READ;
+        D3D11_MAP mapType = (m_desc.cpuAccess == ECPUAccess::Write) ? D3D11_MAP_WRITE : D3D11_MAP_READ;
         HRESULT hr = m_context->Map(GetD3D11Resource(), subresource, mapType, 0, &mapped);
         if (SUCCEEDED(hr)) {
             result.pData = mapped.pData;
@@ -136,65 +101,103 @@ public:
     }
 
     void Unmap(uint32_t arraySlice = 0, uint32_t mipLevel = 0) override {
-        if (!m_context || !m_isStaging) return;
-        UINT subresource = D3D11CalcSubresource(mipLevel, arraySlice, m_mipLevels);
+        if (!m_context || !(m_desc.usage & ETextureUsage::Staging)) return;
+        UINT subresource = D3D11CalcSubresource(mipLevel, arraySlice, m_desc.mipLevels);
         m_context->Unmap(GetD3D11Resource(), subresource);
     }
 
-    void SetRTV(ID3D11RenderTargetView* rtv) { m_rtv = rtv; }
-    void SetDSV(ID3D11DepthStencilView* dsv) { m_dsv = dsv; }
-    void SetSRV(ID3D11ShaderResourceView* srv) { m_srv = srv; }
-    void SetUAV(ID3D11UnorderedAccessView* uav) { m_uav = uav; }
-    void SetSliceDSV(uint32_t index, ID3D11DepthStencilView* dsv) { if (index < MAX_SLICE_VIEWS) m_sliceDSVs[index] = dsv; }
-    void SetSliceRTV(uint32_t index, ID3D11RenderTargetView* rtv) { if (index < MAX_SLICE_VIEWS) m_sliceRTVs[index] = rtv; }
-    void SetArraySize(uint32_t arraySize) { m_arraySize = arraySize; }
-    void SetMipLevels(uint32_t mipLevels) { m_mipLevels = mipLevels; }
-    void SetIsStaging(bool isStaging) { m_isStaging = isStaging; }
-    void SetContext(ID3D11DeviceContext* context) { m_context = context; }
-    void SetCPUAccess(ECPUAccess cpuAccess) { m_cpuAccess = cpuAccess; }
-    void SetIsCubemapArray(bool isCubemapArray) { m_isCubemapArray = isCubemapArray; }
-    void SetCubeCount(uint32_t cubeCount) { m_cubeCount = cubeCount; }
-    void SetDevice(ID3D11Device* device) { m_device = device; }
+    // ============================================
+    // View accessors (internal use by CDX11CommandList)
+    // GetOrCreate pattern: creates on first access, caches for reuse
+    // ============================================
 
-    ID3D11Texture2D* GetD3D11Texture() { return m_owning ? m_texture2D.Get() : m_rawTexture; }
-    ID3D11Texture3D* GetD3D11Texture3D() { return m_texture3D.Get(); }
+    // Get default SRV (all mips, all slices)
+    ID3D11ShaderResourceView* GetOrCreateSRV();
+
+    // Get SRV for specific mip/slice
+    ID3D11ShaderResourceView* GetOrCreateSRVSlice(uint32_t arraySlice, uint32_t mipLevel = 0);
+
+    // Get default RTV (mip 0, slice 0)
+    ID3D11RenderTargetView* GetOrCreateRTV();
+
+    // Get RTV for specific mip/slice
+    ID3D11RenderTargetView* GetOrCreateRTVSlice(uint32_t arraySlice, uint32_t mipLevel = 0);
+
+    // Get default DSV (slice 0)
+    ID3D11DepthStencilView* GetOrCreateDSV();
+
+    // Get DSV for specific slice
+    ID3D11DepthStencilView* GetOrCreateDSVSlice(uint32_t arraySlice);
+
+    // Get default UAV (mip 0)
+    ID3D11UnorderedAccessView* GetOrCreateUAV();
+
+    // ============================================
+    // Legacy setters (for CreateTexture during migration)
+    // TODO: Remove these after full migration
+    // ============================================
+    void SetSRV(ID3D11ShaderResourceView* srv) { m_defaultSRV = srv; }
+    void SetRTV(ID3D11RenderTargetView* rtv) { m_defaultRTV = rtv; }
+    void SetDSV(ID3D11DepthStencilView* dsv) { m_defaultDSV = dsv; }
+    void SetUAV(ID3D11UnorderedAccessView* uav) { m_defaultUAV = uav; }
+    void SetSliceRTV(uint32_t index, ID3D11RenderTargetView* rtv);
+    void SetSliceDSV(uint32_t index, ID3D11DepthStencilView* dsv);
+
+    // ============================================
+    // Internal helpers
+    // ============================================
     ID3D11Resource* GetD3D11Resource() {
-        if (m_is3D) return m_texture3D.Get();
-        return m_owning ? m_texture2D.Get() : m_rawTexture;
+        if (m_desc.dimension == ETextureDimension::Tex3D) return m_texture3D.Get();
+        return m_texture2D.Get();
     }
-    bool Is3D() const { return m_is3D; }
-    bool IsCubemapArray() const { return m_isCubemapArray; }
-    uint32_t GetCubeCount() const { return m_cubeCount; }
+
+    ID3D11Texture2D* GetD3D11Texture2D() { return m_texture2D.Get(); }
+    ID3D11Texture3D* GetD3D11Texture3D() { return m_texture3D.Get(); }
 
 private:
-    static const uint32_t MAX_SLICE_VIEWS = 6;  // Max for cubemap faces
-    static const uint32_t MAX_MIP_LEVELS = 16;  // Max mip levels for SRV slice cache
+    // View cache key
+    struct ViewKey {
+        uint32_t mipLevel;
+        uint32_t arraySlice;
 
-    ComPtr<ID3D11Texture2D> m_texture2D;    // Owning reference for 2D textures
-    ComPtr<ID3D11Texture3D> m_texture3D;    // Owning reference for 3D textures
-    ID3D11Texture2D* m_rawTexture;          // Non-owning raw pointer (2D only)
-    ComPtr<ID3D11RenderTargetView> m_rtv;
-    ComPtr<ID3D11DepthStencilView> m_dsv;
-    ComPtr<ID3D11ShaderResourceView> m_srv;
-    ComPtr<ID3D11UnorderedAccessView> m_uav;
-    ComPtr<ID3D11DepthStencilView> m_sliceDSVs[MAX_SLICE_VIEWS];  // Per-slice DSVs for array textures
-    ComPtr<ID3D11RenderTargetView> m_sliceRTVs[MAX_SLICE_VIEWS];  // Per-slice RTVs for cubemap faces
-    // SRV slice cache: [arrayIndex * MAX_MIP_LEVELS + mipLevel] -> SRV
-    mutable std::unordered_map<uint32_t, ComPtr<ID3D11ShaderResourceView>> m_sliceSRVCache;
-    uint32_t m_width;
-    uint32_t m_height;
-    uint32_t m_depth;
-    uint32_t m_arraySize;
-    uint32_t m_mipLevels;
-    uint32_t m_cubeCount = 0;       // For cubemap arrays: number of cubes
-    ETextureFormat m_format;
-    ECPUAccess m_cpuAccess = ECPUAccess::None;  // CPU access mode for staging textures
-    bool m_owning;      // If true, texture is owned by ComPtr; if false, m_rawTexture is used
-    bool m_is3D;        // If true, m_texture3D is used; if false, m_texture2D/m_rawTexture is used
-    bool m_isStaging = false;       // If true, this is a staging texture for CPU access
-    bool m_isCubemapArray = false;  // If true, this is a cubemap array texture
-    ID3D11DeviceContext* m_context = nullptr;  // Non-owning, for Map/Unmap operations
-    ID3D11Device* m_device = nullptr;  // Non-owning, for creating SRV slices on-demand
+        bool operator==(const ViewKey& other) const {
+            return mipLevel == other.mipLevel && arraySlice == other.arraySlice;
+        }
+    };
+
+    struct ViewKeyHash {
+        size_t operator()(const ViewKey& key) const {
+            return std::hash<uint64_t>{}((uint64_t)key.mipLevel << 32 | key.arraySlice);
+        }
+    };
+
+    // View creation helpers
+    ComPtr<ID3D11ShaderResourceView> createSRV(uint32_t mipLevel, uint32_t numMips, uint32_t arraySlice, uint32_t numSlices);
+    ComPtr<ID3D11RenderTargetView> createRTV(uint32_t mipLevel, uint32_t arraySlice);
+    ComPtr<ID3D11DepthStencilView> createDSV(uint32_t arraySlice);
+    ComPtr<ID3D11UnorderedAccessView> createUAV(uint32_t mipLevel);
+
+private:
+    TextureDesc m_desc;
+
+    // Native resource (one of these is used based on dimension)
+    ComPtr<ID3D11Texture2D> m_texture2D;
+    ComPtr<ID3D11Texture3D> m_texture3D;
+
+    // Device/context for view creation and mapping
+    ID3D11Device* m_device = nullptr;
+    ID3D11DeviceContext* m_context = nullptr;
+
+    // Default views (created on first access)
+    ComPtr<ID3D11ShaderResourceView> m_defaultSRV;
+    ComPtr<ID3D11RenderTargetView> m_defaultRTV;
+    ComPtr<ID3D11DepthStencilView> m_defaultDSV;
+    ComPtr<ID3D11UnorderedAccessView> m_defaultUAV;
+
+    // View caches for slice/mip-specific views
+    mutable std::unordered_map<ViewKey, ComPtr<ID3D11ShaderResourceView>, ViewKeyHash> m_srvCache;
+    mutable std::unordered_map<ViewKey, ComPtr<ID3D11RenderTargetView>, ViewKeyHash> m_rtvCache;
+    mutable std::unordered_map<uint32_t, ComPtr<ID3D11DepthStencilView>> m_dsvCache;  // keyed by arraySlice
 };
 
 // ============================================

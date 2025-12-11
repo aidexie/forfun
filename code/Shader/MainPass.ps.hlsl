@@ -207,8 +207,8 @@ float4 main(PSIn i) : SV_Target {
     // Vertex color R channel typically contains AO data
     float3 albedo = gMatAlbedo * albedoTex;
 
-    float metallic = gHasMetallicRoughnessTexture ? metallicTex : gMatMetallic;
-    float roughness = gHasMetallicRoughnessTexture ? roughnessTex : gMatRoughness;
+    float metallic =  gMatMetallic;
+    float roughness =  gMatRoughness;
     float ao = i.color.r;  // Use vertex color R channel as AO (common in glTF baked lighting)
 
     // Calculate vectors
@@ -241,7 +241,7 @@ float4 main(PSIn i) : SV_Target {
     float3 kS = F;  // Fresnel already gives us specular contribution
     float3 kD = float3(1.0, 1.0, 1.0) - kS;
     kD *= 1.0 - metallic;  // Metals have no diffuse reflection
-
+ 
     // Lambert diffuse
     float3 diffuse = kD * albedo / PI;
 
@@ -250,7 +250,8 @@ float4 main(PSIn i) : SV_Target {
 
     // Direct lighting (affected by shadow)
     float3 Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
-
+    // return float4(F, 1.0); // TEMP: Return direct lighting only for testing
+    // return float4(specular, 1.0); // TEMP: Return direct lighting only for testing
     // ============================================
     // Clustered Point Lights
     // ============================================
@@ -308,6 +309,7 @@ float4 main(PSIn i) : SV_Target {
         float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
         diffuseIBL = irradiance * albedo;
     }
+
     // else: DIFFUSE_GI_NONE - diffuseIBL stays at 0 (no diffuse GI)
     // Sample BRDF LUT (X: NdotV, Y: roughness)
     float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;

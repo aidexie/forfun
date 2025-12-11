@@ -1,6 +1,7 @@
 #pragma once
 #include "../RHICommon.h"
 #include <d3d11.h>
+#include <string>
 
 // ============================================
 // DX11 Utility Functions - RHI to D3D11 conversions
@@ -8,6 +9,50 @@
 
 namespace RHI {
 namespace DX11 {
+
+// ============================================
+// HRESULT Error Formatting
+// ============================================
+
+inline std::string HRESULTToString(HRESULT hr) {
+    switch (hr) {
+        case S_OK: return "S_OK";
+        case E_OUTOFMEMORY: return "E_OUTOFMEMORY (Out of memory)";
+        case E_INVALIDARG: return "E_INVALIDARG (Invalid argument)";
+        case E_FAIL: return "E_FAIL (Generic failure)";
+        case E_NOTIMPL: return "E_NOTIMPL (Not implemented)";
+        case DXGI_ERROR_DEVICE_REMOVED: return "DXGI_ERROR_DEVICE_REMOVED";
+        case DXGI_ERROR_DEVICE_RESET: return "DXGI_ERROR_DEVICE_RESET";
+        case DXGI_ERROR_INVALID_CALL: return "DXGI_ERROR_INVALID_CALL";
+        default: {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "0x%08X", static_cast<unsigned int>(hr));
+            return buf;
+        }
+    }
+}
+
+inline const char* BufferUsageToString(EBufferUsage usage) {
+    static char buf[256];
+    buf[0] = '\0';
+    if (usage & EBufferUsage::Vertex) strcat(buf, "Vertex|");
+    if (usage & EBufferUsage::Index) strcat(buf, "Index|");
+    if (usage & EBufferUsage::Constant) strcat(buf, "Constant|");
+    if (usage & EBufferUsage::Structured) strcat(buf, "Structured|");
+    if (usage & EBufferUsage::UnorderedAccess) strcat(buf, "UAV|");
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '|') buf[len - 1] = '\0';
+    return buf[0] ? buf : "None";
+}
+
+inline const char* CPUAccessToString(ECPUAccess access) {
+    switch (access) {
+        case ECPUAccess::None: return "None";
+        case ECPUAccess::Read: return "Read";
+        case ECPUAccess::Write: return "Write";
+        default: return "Unknown";
+    }
+}
 
 // ============================================
 // Format Conversions

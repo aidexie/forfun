@@ -42,12 +42,11 @@ struct TextureDesc {
     uint32_t arraySize = 1;     // Number of textures in array (or number of cubes for cubemap arrays)
     uint32_t mipLevels = 1;
     ETextureFormat format = ETextureFormat::Unknown;
+    ETextureDimension dimension = ETextureDimension::Tex2D;  // Texture dimension type
     ETextureUsage usage = ETextureUsage::ShaderResource;
     ECPUAccess cpuAccess = ECPUAccess::None;  // For staging textures: Read or Write
     ETextureMiscFlags miscFlags = ETextureMiscFlags::None;  // Misc flags (GenerateMips, etc.)
     uint32_t sampleCount = 1;   // For MSAA
-    bool isCubemap = false;     // If true, creates a single cubemap (6 faces)
-    bool isCubemapArray = false; // If true, creates a cubemap array (arraySize cubes, each with 6 faces)
     const char* debugName = nullptr;
 
     // View format overrides (for TYPELESS textures)
@@ -57,6 +56,10 @@ struct TextureDesc {
     ETextureFormat srvFormat = ETextureFormat::Unknown;  // ShaderResourceView format
     ETextureFormat uavFormat = ETextureFormat::Unknown;  // UnorderedAccessView format
 
+    // Legacy compatibility (mapped to dimension)
+    bool isCubemap = false;     // DEPRECATED: use dimension = TexCube
+    bool isCubemapArray = false; // DEPRECATED: use dimension = TexCubeArray
+
     TextureDesc() = default;
 
     static TextureDesc Texture2D(uint32_t w, uint32_t h, ETextureFormat fmt, ETextureUsage usage_ = ETextureUsage::ShaderResource) {
@@ -64,6 +67,29 @@ struct TextureDesc {
         desc.width = w;
         desc.height = h;
         desc.format = fmt;
+        desc.dimension = ETextureDimension::Tex2D;
+        desc.usage = usage_;
+        return desc;
+    }
+
+    static TextureDesc Texture3D(uint32_t w, uint32_t h, uint32_t d, ETextureFormat fmt, ETextureUsage usage_ = ETextureUsage::ShaderResource) {
+        TextureDesc desc;
+        desc.width = w;
+        desc.height = h;
+        desc.depth = d;
+        desc.format = fmt;
+        desc.dimension = ETextureDimension::Tex3D;
+        desc.usage = usage_;
+        return desc;
+    }
+
+    static TextureDesc Texture2DArray(uint32_t w, uint32_t h, uint32_t arrayCount, ETextureFormat fmt, ETextureUsage usage_ = ETextureUsage::ShaderResource) {
+        TextureDesc desc;
+        desc.width = w;
+        desc.height = h;
+        desc.arraySize = arrayCount;
+        desc.format = fmt;
+        desc.dimension = ETextureDimension::Tex2DArray;
         desc.usage = usage_;
         return desc;
     }
@@ -83,6 +109,7 @@ struct TextureDesc {
         desc.width = w;
         desc.height = h;
         desc.format = ETextureFormat::R8G8B8A8_TYPELESS;
+        desc.dimension = ETextureDimension::Tex2D;
         desc.usage = ETextureUsage::RenderTarget | ETextureUsage::ShaderResource;
         desc.rtvFormat = ETextureFormat::R8G8B8A8_UNORM_SRGB;  // sRGB for gamma-correct writes
         desc.srvFormat = ETextureFormat::R8G8B8A8_UNORM;       // Linear for shader sampling
@@ -95,6 +122,7 @@ struct TextureDesc {
         desc.width = w;
         desc.height = h;
         desc.format = ETextureFormat::R24G8_TYPELESS;
+        desc.dimension = ETextureDimension::Tex2D;
         desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
         desc.dsvFormat = ETextureFormat::D24_UNORM_S8_UINT;
         desc.srvFormat = ETextureFormat::R24_UNORM_X8_TYPELESS;  // Read depth from R24G8
@@ -108,6 +136,7 @@ struct TextureDesc {
         desc.height = h;
         desc.arraySize = arrayCount;
         desc.format = ETextureFormat::R24G8_TYPELESS;
+        desc.dimension = ETextureDimension::Tex2DArray;
         desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
         desc.dsvFormat = ETextureFormat::D24_UNORM_S8_UINT;
         desc.srvFormat = ETextureFormat::R24_UNORM_X8_TYPELESS;  // Read depth from R24G8
@@ -115,13 +144,14 @@ struct TextureDesc {
     }
 
     // Cubemap texture (6 faces)
-    static TextureDesc Cubemap(uint32_t size, ETextureFormat fmt, uint32_t mipLevels = 1) {
+    static TextureDesc Cubemap(uint32_t size, ETextureFormat fmt, uint32_t mipLevels_ = 1) {
         TextureDesc desc;
         desc.width = size;
         desc.height = size;
         desc.format = fmt;
-        desc.mipLevels = mipLevels;
-        desc.isCubemap = true;
+        desc.mipLevels = mipLevels_;
+        desc.dimension = ETextureDimension::TexCube;
+        desc.isCubemap = true;  // Legacy compatibility
         desc.usage = ETextureUsage::ShaderResource;
         return desc;
     }
@@ -133,21 +163,23 @@ struct TextureDesc {
         desc.height = size;
         desc.format = fmt;
         desc.mipLevels = 1;
-        desc.isCubemap = true;
+        desc.dimension = ETextureDimension::TexCube;
+        desc.isCubemap = true;  // Legacy compatibility
         desc.usage = ETextureUsage::RenderTarget | ETextureUsage::ShaderResource;
         return desc;
     }
 
     // Cubemap array (multiple cubemaps, for reflection probe arrays)
     // arrayCount: number of cubemaps in the array
-    static TextureDesc CubemapArray(uint32_t size, uint32_t arrayCount, ETextureFormat fmt, uint32_t mipLevels = 1) {
+    static TextureDesc CubemapArray(uint32_t size, uint32_t arrayCount, ETextureFormat fmt, uint32_t mipLevels_ = 1) {
         TextureDesc desc;
         desc.width = size;
         desc.height = size;
         desc.format = fmt;
-        desc.mipLevels = mipLevels;
+        desc.mipLevels = mipLevels_;
         desc.arraySize = arrayCount;
-        desc.isCubemapArray = true;
+        desc.dimension = ETextureDimension::TexCubeArray;
+        desc.isCubemapArray = true;  // Legacy compatibility
         desc.usage = ETextureUsage::ShaderResource;
         return desc;
     }
@@ -161,6 +193,7 @@ struct TextureDesc {
         desc.format = fmt;
         desc.mipLevels = 1;
         desc.arraySize = 6;  // 6 faces
+        desc.dimension = ETextureDimension::Tex2DArray;  // Staging cubemap is just a 2D array
         desc.usage = ETextureUsage::Staging;
         desc.cpuAccess = access;
         return desc;

@@ -48,50 +48,37 @@ struct MappedTexture {
 
 // ============================================
 // Texture Interface
+//
+// Design principle: ITexture represents only the GPU resource.
+// Views (RTV, DSV, SRV, UAV) are implementation details hidden inside
+// the backend implementation. Upper layers express "intent" through
+// ICommandList methods, and the backend creates/caches views as needed.
 // ============================================
 class ITexture : public IResource {
 public:
     virtual ~ITexture() = default;
 
-    // Get texture dimensions
-    virtual uint32_t GetWidth() const = 0;
-    virtual uint32_t GetHeight() const = 0;
-    virtual uint32_t GetDepth() const = 0;
-    virtual uint32_t GetArraySize() const = 0;
-    virtual uint32_t GetMipLevels() const = 0;
-    virtual ETextureFormat GetFormat() const = 0;
+    // Get texture descriptor (all metadata in one struct)
+    virtual const TextureDesc& GetDesc() const = 0;
 
-    // Get views (may return nullptr if not applicable)
-    virtual void* GetRTV() = 0;  // ID3D11RenderTargetView*, D3D12_CPU_DESCRIPTOR_HANDLE
-    virtual void* GetDSV() = 0;  // ID3D11DepthStencilView*, D3D12_CPU_DESCRIPTOR_HANDLE
-    virtual void* GetSRV() = 0;  // ID3D11ShaderResourceView*, D3D12_CPU_DESCRIPTOR_HANDLE
-    virtual void* GetUAV() = 0;  // ID3D11UnorderedAccessView*, D3D12_CPU_DESCRIPTOR_HANDLE
-
-    // Get per-slice DSV for texture arrays (for CSM shadow mapping)
-    // Returns nullptr if arrayIndex is out of bounds or texture is not an array
-    virtual void* GetDSVSlice(uint32_t arrayIndex) = 0;
-
-    // Get per-slice RTV for texture arrays/cubemaps (for cubemap face rendering)
-    // Returns nullptr if arrayIndex is out of bounds or texture is not an array
-    virtual void* GetRTVSlice(uint32_t arrayIndex) = 0;
-
-    // Get per-slice SRV for texture arrays/cubemaps (for debug visualization)
-    // For cubemaps: arrayIndex = face (0-5: +X, -X, +Y, -Y, +Z, -Z), mipLevel = mip
-    // Returns nullptr if indices are out of bounds
-    // Note: SRV slices are created on-demand and cached
-    virtual void* GetSRVSlice(uint32_t arrayIndex, uint32_t mipLevel = 0) = 0;
+    // Convenience accessors (all read from GetDesc())
+    uint32_t GetWidth() const { return GetDesc().width; }
+    uint32_t GetHeight() const { return GetDesc().height; }
+    uint32_t GetDepth() const { return GetDesc().depth; }
+    uint32_t GetArraySize() const { return GetDesc().arraySize; }
+    uint32_t GetMipLevels() const { return GetDesc().mipLevels; }
+    ETextureFormat GetFormat() const { return GetDesc().format; }
+    ETextureDimension GetDimension() const { return GetDesc().dimension; }
 
     // ============================================
-    // CPU Access (for Staging textures)
+    // CPU Access (for Staging textures only)
     // ============================================
 
-    // Map texture subresource for CPU read (only valid for Staging textures)
-    // arraySlice: Array slice index (0-5 for cubemap faces)
-    // mipLevel: Mip level index
-    // Returns mapped data info, pData is nullptr on failure
+    // Map texture subresource for CPU read/write
+    // Only valid for textures created with ETextureUsage::Staging
     virtual MappedTexture Map(uint32_t arraySlice = 0, uint32_t mipLevel = 0) = 0;
 
-    // Unmap texture subresource after reading
+    // Unmap texture subresource
     virtual void Unmap(uint32_t arraySlice = 0, uint32_t mipLevel = 0) = 0;
 };
 

@@ -4,6 +4,7 @@
 #include "Engine/Rendering/Skybox.h"
 #include "RHI/RHIManager.h"
 #include "RHI/RHIResources.h"
+#include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
 
 // Window visibility state
@@ -38,7 +39,7 @@ void Panels::DrawIrradianceDebug() {
 
             // Get environment map from Scene's skybox
             RHI::ITexture* envTexture = skybox.GetEnvironmentTexture();
-            if (!envTexture || !envTexture->GetSRV()) {
+            if (!envTexture || !RHI::GetNativeSRV(envTexture)) {
                 ImGui::TextColored(ImVec4(1, 0, 0, 1), "No environment map loaded!");
                 ImGui::Text("Load a skybox first.");
             }
@@ -78,7 +79,7 @@ void Panels::DrawIrradianceDebug() {
 
                 // Helper lambda to get face SRV
                 auto getFaceSRV = [&](int faceIndex) -> void* {
-                    return envTexture->GetSRVSlice(faceIndex, selectedEnvMip);
+                    return RHI::GetNativeSRVSlice(envTexture, faceIndex, selectedEnvMip);
                 };
 
                 // Row 1: +Y (Top)
@@ -195,7 +196,7 @@ void Panels::DrawIrradianceDebug() {
                 ImGui::Separator();
 
                 RHI::ITexture* brdfLutTex = CScene::Instance().GetProbeManager().GetBrdfLutTexture();
-                if (brdfLutTex && brdfLutTex->GetSRV()) {
+                if (brdfLutTex && RHI::GetNativeSRV(brdfLutTex)) {
                     ImGui::Text("Resolution: 512 x 512");
                     ImGui::Text("Format: R16G16_FLOAT (RG channels)");
                     ImGui::Text("R channel: Scale (multiply with F0)");
@@ -211,7 +212,7 @@ void Panels::DrawIrradianceDebug() {
                     ImGui::Text("Y-axis: Roughness [0=mirror, 1=rough]");
                     ImGui::Separator();
 
-                    ImGui::Image(brdfLutTex->GetSRV(), ImVec2(lutDisplaySize, lutDisplaySize));
+                    ImGui::Image(RHI::GetNativeSRV(brdfLutTex), ImVec2(lutDisplaySize, lutDisplaySize));
 
                     ImGui::Separator();
                     ImGui::TextWrapped("Expected appearance: Bright in top-left (smooth + perpendicular), "

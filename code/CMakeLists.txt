@@ -108,6 +108,8 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/RHICommon.h
     ${CODE_PATH}/RHI/RHIDescriptors.h
     ${CODE_PATH}/RHI/RHIResources.h
+    ${CODE_PATH}/RHI/RHIHelpers.cpp
+    ${CODE_PATH}/RHI/RHIHelpers.h
     ${CODE_PATH}/RHI/ICommandList.h
     ${CODE_PATH}/RHI/IRenderContext.h
     ${CODE_PATH}/RHI/RHIFactory.cpp
@@ -123,6 +125,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.cpp
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.h
     ${CODE_PATH}/RHI/DX11/DX11Resources.h
+    ${CODE_PATH}/RHI/DX11/DX11Texture.cpp
     ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h
     ${CODE_PATH}/RHI/ShaderCompiler.h

@@ -206,7 +206,7 @@ bool CLightProbeManager::createStructuredBuffer()
     // 创建 StructuredBuffer（最大容量）
     RHI::BufferDesc desc;
     desc.size = sizeof(LightProbeData) * MAX_PROBES;
-    desc.usage = RHI::EBufferUsage::Structured | RHI::EBufferUsage::UnorderedAccess;  // For SRV
+    desc.usage = RHI::EBufferUsage::Structured;  // For SRV
     desc.cpuAccess = RHI::ECPUAccess::Write;
     desc.structureByteStride = sizeof(LightProbeData);
     desc.debugName = "LightProbeManager_ProbeBuffer";

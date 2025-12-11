@@ -66,6 +66,10 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
 
+    // CRITICAL: Unbind render targets before using hdrInput as SRV
+    // Otherwise D3D11 will null out the SRV to avoid RTV/SRV hazard
+    cmdList->UnbindRenderTargets();
+
     // Update constant buffer with exposure
     CB_PostProcess cb;
     cb.exposure = exposure;
@@ -234,7 +238,7 @@ void CPostProcessPass::createPipelineState() {
     // Input layout: POSITION + TEXCOORD
     psoDesc.inputLayout = {
         { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
-        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 0, 8 }
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 8, 0 }
     };
 
     // Rasterizer state: no culling, no depth clip

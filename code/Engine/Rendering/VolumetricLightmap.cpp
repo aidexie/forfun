@@ -23,12 +23,28 @@ using namespace DirectX::PackedVector;
 // 生命周期
 // ============================================
 
+CVolumetricLightmap::CVolumetricLightmap() 
+{
+    // 创建 sampler（不依赖烘焙数据，在禁用时也需要绑定以避免 D3D11 warning）
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    if (renderContext)
+    {
+        RHI::SamplerDesc samplerDesc;
+        samplerDesc.filter = RHI::EFilter::MinMagMipLinear;
+        samplerDesc.addressU = RHI::ETextureAddressMode::Clamp;
+        samplerDesc.addressV = RHI::ETextureAddressMode::Clamp;
+        samplerDesc.addressW = RHI::ETextureAddressMode::Clamp;
+        m_sampler.reset(renderContext->CreateSampler(samplerDesc));
+    }
+}
+
 bool CVolumetricLightmap::Initialize(const Config& config)
 {
     m_config = config;
 
     // 计算派生参数
     computeDerivedParams();
+
 
     CFFLog::Info("[VolumetricLightmap] Initialized:");
     CFFLog::Info("  Volume: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
@@ -1015,12 +1031,13 @@ void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
 {
     // 如果未启用或未烘焙，不绑定任何资源
     if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
-        // 绑定空资源，避免残留
+        // 绑定空 SRV，避免 RTV/SRV 资源冲突
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, nullptr);
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, nullptr);
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, nullptr);
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, nullptr);
         cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, nullptr);
+        cmdList->SetSampler(RHI::EShaderStage::Pixel, 2, m_sampler.get());
         return;
     }
 
@@ -1065,7 +1082,7 @@ void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, m_brickInfoBuffer.get());
 
     // 绑定采样器到 s3
-    cmdList->SetSampler(RHI::EShaderStage::Pixel, 3, m_sampler.get());
+    cmdList->SetSampler(RHI::EShaderStage::Pixel, 2, m_sampler.get());
 }
 
 void CVolumetricLightmap::Unbind(RHI::ICommandList* cmdList)
