@@ -150,6 +150,46 @@ public:
 
     // Unbind shader resources for a stage (slots 0-7)
     virtual void UnbindShaderResources(EShaderStage stage, uint32_t startSlot = 0, uint32_t numSlots = 8) = 0;
+
+    // ============================================
+    // Debug Events (GPU profiling markers for RenderDoc/PIX)
+    // ============================================
+
+    // Begin a named event region
+    virtual void BeginEvent(const wchar_t* name) = 0;
+
+    // End the current event region
+    virtual void EndEvent() = 0;
+};
+
+// RAII wrapper for debug events
+// Usage:
+//   {
+//       RHI::CScopedDebugEvent evt(cmdList, L"Shadow Pass");
+//       // ... rendering code ...
+//   } // Automatically calls EndEvent
+class CScopedDebugEvent {
+public:
+    CScopedDebugEvent(ICommandList* cmdList, const wchar_t* name)
+        : m_cmdList(cmdList)
+    {
+        if (m_cmdList) {
+            m_cmdList->BeginEvent(name);
+        }
+    }
+
+    ~CScopedDebugEvent() {
+        if (m_cmdList) {
+            m_cmdList->EndEvent();
+        }
+    }
+
+    // Delete copy/move to prevent misuse
+    CScopedDebugEvent(const CScopedDebugEvent&) = delete;
+    CScopedDebugEvent& operator=(const CScopedDebugEvent&) = delete;
+
+private:
+    ICommandList* m_cmdList;
 };
 
 } // namespace RHI

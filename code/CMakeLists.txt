@@ -52,8 +52,6 @@ set(CORE_SRC
     # Root
     ${CODE_PATH}/Core/Console.cpp
     ${CODE_PATH}/Core/Console.h
-    ${CODE_PATH}/Core/DebugEvent.cpp
-    ${CODE_PATH}/Core/DebugEvent.h
     ${CODE_PATH}/Core/DebugPaths.h
     ${CODE_PATH}/Core/FFLog.cpp
     ${CODE_PATH}/Core/FFLog.h

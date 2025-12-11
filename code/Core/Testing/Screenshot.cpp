@@ -1,92 +1,84 @@
 #include "Screenshot.h"
 #include "RHI/RHIManager.h"
+#include "RHI/RHIDescriptors.h"
+#include "RHI/ICommandList.h"
 #include "Core/FFLog.h"
 #include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "TestCase.h"
-#include <d3d11.h>
 #include <vector>
 #include <filesystem>
+#include <memory>
 
 // stb_image_write: Single-header library for writing images
 // https://github.com/nothings/stb/blob/master/stb_image_write.h
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
-bool CScreenshot::Capture(void* texturePtr, const std::string& path) {
-    if (!texturePtr) {
+using namespace RHI;
+
+bool CScreenshot::Capture(ITexture* texture, const std::string& path) {
+    if (!texture) {
         CFFLog::Error("Screenshot: Null texture");
         return false;
     }
 
-    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(texturePtr);
-    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
-    auto* device = static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice());
-    auto* context = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());
-
-    if (!device || !context) {
-        CFFLog::Error("Screenshot: D3D11 context not initialized");
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    ICommandList* cmdList = ctx->GetCommandList();
+    if (!ctx || !cmdList) {
+        CFFLog::Error("Screenshot: RHI context not initialized");
         return false;
     }
 
-    // Get texture description
-    D3D11_TEXTURE2D_DESC desc;
-    texture->GetDesc(&desc);
+    // Get texture dimensions
+    uint32_t width = texture->GetWidth();
+    uint32_t height = texture->GetHeight();
+    ETextureFormat format = texture->GetFormat();
 
-    // Verify format (accept TYPELESS as it's used for multi-view textures)
-    if (desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
-        desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB &&
-        desc.Format != DXGI_FORMAT_R8G8B8A8_TYPELESS) {
-        CFFLog::Error("Screenshot: Unsupported format (expected R8G8B8A8, got %d)", desc.Format);
+    // Verify format (accept R8G8B8A8 variants)
+    if (format != ETextureFormat::R8G8B8A8_UNORM &&
+        format != ETextureFormat::R8G8B8A8_UNORM_SRGB &&
+        format != ETextureFormat::R8G8B8A8_TYPELESS) {
+        CFFLog::Error("Screenshot: Unsupported format (expected R8G8B8A8, got %d)", (int)format);
         return false;
     }
 
-    // Create staging texture (CPU-readable)
-    D3D11_TEXTURE2D_DESC stagingDesc = desc;
-    stagingDesc.Width = desc.Width;
-    stagingDesc.Height = desc.Height;
-    stagingDesc.MipLevels = 1;
-    stagingDesc.ArraySize = 1;
-    stagingDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;  // Use UNORM for staging (compatible with TYPELESS source)
-    stagingDesc.SampleDesc.Count = 1;
-    stagingDesc.SampleDesc.Quality = 0;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    stagingDesc.MiscFlags = 0;
+    // Create staging texture for CPU readback
+    TextureDesc stagingDesc;
+    stagingDesc.width = width;
+    stagingDesc.height = height;
+    stagingDesc.mipLevels = 1;
+    stagingDesc.arraySize = 1;
+    stagingDesc.format = ETextureFormat::R8G8B8A8_UNORM;  // Use UNORM for staging
+    stagingDesc.usage = ETextureUsage::Staging;
+    stagingDesc.cpuAccess = ECPUAccess::Read;
+    stagingDesc.debugName = "ScreenshotStaging";
 
-    ID3D11Texture2D* stagingTexture = nullptr;
-    HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
-    if (FAILED(hr)) {
-        CFFLog::Error("Screenshot: Failed to create staging texture (HRESULT: 0x%08X)", hr);
+    std::unique_ptr<ITexture> stagingTexture(ctx->CreateTexture(stagingDesc));
+    if (!stagingTexture) {
+        CFFLog::Error("Screenshot: Failed to create staging texture");
         return false;
     }
 
-    // Copy GPU texture to staging texture
-    context->CopyResource(stagingTexture, texture);
+    // Copy source texture to staging texture
+    cmdList->CopyTexture(stagingTexture.get(), texture);
 
     // Map staging texture to read pixels
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    hr = context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
-    if (FAILED(hr)) {
-        CFFLog::Error("Screenshot: Failed to map staging texture (HRESULT: 0x%08X)", hr);
-        stagingTexture->Release();
+    MappedTexture mapped = stagingTexture->Map(0, 0);
+    if (!mapped.pData) {
+        CFFLog::Error("Screenshot: Failed to map staging texture");
         return false;
     }
 
     // Copy pixel data (handle row pitch)
-    UINT width = desc.Width;
-    UINT height = desc.Height;
     std::vector<uint8_t> pixels(width * height * 4);
-
     uint8_t* src = static_cast<uint8_t*>(mapped.pData);
     uint8_t* dst = pixels.data();
 
-    for (UINT y = 0; y < height; ++y) {
-        memcpy(dst + y * width * 4, src + y * mapped.RowPitch, width * 4);
+    for (uint32_t y = 0; y < height; ++y) {
+        memcpy(dst + y * width * 4, src + y * mapped.rowPitch, width * 4);
     }
 
-    context->Unmap(stagingTexture, 0);
-    stagingTexture->Release();
+    stagingTexture->Unmap(0, 0);
 
     // Ensure output directory exists
     if (!EnsureDirectoryExists(path)) {
@@ -111,7 +103,7 @@ bool CScreenshot::CaptureFromPipeline(CForwardRenderPipeline* pipeline, const st
         return false;
     }
 
-    ID3D11Texture2D* texture = static_cast<ID3D11Texture2D*>(pipeline->GetOffscreenTexture());
+    ITexture* texture = pipeline->GetOffscreenTextureRHI();
     if (!texture) {
         CFFLog::Error("Screenshot: ForwardRenderPipeline offscreen texture is null");
         return false;

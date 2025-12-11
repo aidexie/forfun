@@ -75,6 +75,12 @@ public:
     // Returns nullptr if arrayIndex is out of bounds or texture is not an array
     virtual void* GetRTVSlice(uint32_t arrayIndex) = 0;
 
+    // Get per-slice SRV for texture arrays/cubemaps (for debug visualization)
+    // For cubemaps: arrayIndex = face (0-5: +X, -X, +Y, -Y, +Z, -Z), mipLevel = mip
+    // Returns nullptr if indices are out of bounds
+    // Note: SRV slices are created on-demand and cached
+    virtual void* GetSRVSlice(uint32_t arrayIndex, uint32_t mipLevel = 0) = 0;
+
     // ============================================
     // CPU Access (for Staging textures)
     // ============================================

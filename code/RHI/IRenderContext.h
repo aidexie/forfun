@@ -60,6 +60,12 @@ public:
     // Create texture
     virtual ITexture* CreateTexture(const TextureDesc& desc, const void* initialData = nullptr) = 0;
 
+    // Create texture with multiple subresources (cubemaps, mipmaps, texture arrays)
+    // subresources: Array of SubresourceData, ordered by [arraySlice][mipLevel]
+    //   For cubemaps: arraySlice 0-5 = +X, -X, +Y, -Y, +Z, -Z
+    //   Total count = arraySize * mipLevels (for cubemap: 6 * mipLevels)
+    virtual ITexture* CreateTextureWithData(const TextureDesc& desc, const SubresourceData* subresources, uint32_t numSubresources) = 0;
+
     // Create sampler
     virtual ISampler* CreateSampler(const SamplerDesc& desc) = 0;
 

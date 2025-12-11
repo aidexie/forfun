@@ -3,7 +3,6 @@
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/RHIDescriptors.h"
-#include <d3d11.h>
 #include <ktx.h>
 #include <vector>
 
@@ -20,31 +19,6 @@ static ETextureFormat VkFormatToRHIFormat(uint32_t vkFormat) {
         default:
             CFFLog::Error("KTXLoader: Unsupported Vulkan format: %d", vkFormat);
             return ETextureFormat::Unknown;
-    }
-}
-
-// Helper: Convert Vulkan format to DXGI format (for internal use)
-static DXGI_FORMAT VkFormatToDXGIFormat(uint32_t vkFormat) {
-    switch (vkFormat) {
-        case 97:  return DXGI_FORMAT_R16G16B16A16_FLOAT;  // VK_FORMAT_R16G16B16A16_SFLOAT
-        case 109: return DXGI_FORMAT_R32G32B32A32_FLOAT;  // VK_FORMAT_R32G32B32A32_SFLOAT
-        case 37:  return DXGI_FORMAT_R8G8B8A8_UNORM;      // VK_FORMAT_R8G8B8A8_UNORM
-        case 43:  return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; // VK_FORMAT_R8G8B8A8_SRGB
-        case 83:  return DXGI_FORMAT_R16G16_FLOAT;        // VK_FORMAT_R16G16_SFLOAT
-        default:
-            return DXGI_FORMAT_UNKNOWN;
-    }
-}
-
-// Helper: Get bytes per pixel
-static size_t GetBytesPerPixel(DXGI_FORMAT format) {
-    switch (format) {
-        case DXGI_FORMAT_R16G16B16A16_FLOAT: return 8;
-        case DXGI_FORMAT_R32G32B32A32_FLOAT: return 16;
-        case DXGI_FORMAT_R8G8B8A8_UNORM:
-        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return 4;
-        case DXGI_FORMAT_R16G16_FLOAT: return 4;
-        default: return 0;
     }
 }
 
@@ -65,29 +39,22 @@ ITexture* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
 
     // Convert format
     ETextureFormat rhiFormat = VkFormatToRHIFormat(ktxTex->vkFormat);
-    DXGI_FORMAT dxgiFormat = VkFormatToDXGIFormat(ktxTex->vkFormat);
     if (rhiFormat == ETextureFormat::Unknown) {
         ktxTexture2_Destroy(ktxTex);
         return nullptr;
     }
 
-    // Create D3D11 texture directly (RHI CreateTexture doesn't support initial data for cubemaps well)
-    auto* device = static_cast<ID3D11Device*>(CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) {
+        CFFLog::Error("KTXLoader: RHI context not available");
+        ktxTexture2_Destroy(ktxTex);
+        return nullptr;
+    }
 
-    D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = ktxTex->baseWidth;
-    desc.Height = ktxTex->baseHeight;
-    desc.MipLevels = ktxTex->numLevels;
-    desc.ArraySize = 6;
-    desc.Format = dxgiFormat;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    desc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
-
-    // Prepare initial data
-    std::vector<D3D11_SUBRESOURCE_DATA> initData;
-    initData.reserve(6 * ktxTex->numLevels);
+    // Prepare subresource data (faces * mipLevels)
+    uint32_t bytesPerPixel = GetBytesPerPixel(rhiFormat);
+    std::vector<SubresourceData> subresources;
+    subresources.reserve(6 * ktxTex->numLevels);
 
     for (uint32_t face = 0; face < 6; ++face) {
         for (uint32_t mip = 0; mip < ktxTex->numLevels; ++mip) {
@@ -99,55 +66,33 @@ ITexture* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
                 return nullptr;
             }
 
-            D3D11_SUBRESOURCE_DATA data = {};
-            data.pSysMem = ktxTex->pData + offset;
-
             uint32_t mipWidth = ktxTex->baseWidth >> mip;
-            uint32_t mipHeight = ktxTex->baseHeight >> mip;
             if (mipWidth == 0) mipWidth = 1;
-            if (mipHeight == 0) mipHeight = 1;
 
-            data.SysMemPitch = static_cast<UINT>(mipWidth * GetBytesPerPixel(dxgiFormat));
-            data.SysMemSlicePitch = 0;
-
-            initData.push_back(data);
+            SubresourceData data;
+            data.pData = ktxTex->pData + offset;
+            data.rowPitch = mipWidth * bytesPerPixel;
+            data.slicePitch = 0;
+            subresources.push_back(data);
         }
     }
 
-    // Create texture
-    ID3D11Texture2D* texture = nullptr;
-    HRESULT hr = device->CreateTexture2D(&desc, initData.data(), &texture);
+    // Create texture via RHI
+    TextureDesc desc;
+    desc.width = ktxTex->baseWidth;
+    desc.height = ktxTex->baseHeight;
+    desc.mipLevels = ktxTex->numLevels;
+    desc.format = rhiFormat;
+    desc.usage = ETextureUsage::ShaderResource;
+    desc.isCubemap = true;
+    desc.debugName = "KTXCubemap";
 
-    if (FAILED(hr)) {
-        CFFLog::Error("KTXLoader: Failed to create D3D11 texture");
-        ktxTexture2_Destroy(ktxTex);
-        return nullptr;
-    }
+    ITexture* texture = ctx->CreateTextureWithData(desc, subresources.data(), (uint32_t)subresources.size());
 
-    // Create SRV
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = dxgiFormat;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-    srvDesc.TextureCube.MipLevels = ktxTex->numLevels;
-    srvDesc.TextureCube.MostDetailedMip = 0;
-
-    ID3D11ShaderResourceView* srv = nullptr;
-    hr = device->CreateShaderResourceView(texture, &srvDesc, &srv);
-    if (FAILED(hr)) {
-        CFFLog::Error("KTXLoader: Failed to create SRV");
-        texture->Release();
-        ktxTexture2_Destroy(ktxTex);
-        return nullptr;
-    }
-
-    CFFLog::Info("KTXLoader: Loaded cubemap %s (%dx%d, %d mips)", filepath.c_str(), desc.Width, desc.Height, desc.MipLevels);
-
-    // Wrap in RHI texture
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ITexture* rhiTexture = ctx->WrapNativeTexture(texture, srv, ktxTex->baseWidth, ktxTex->baseHeight, rhiFormat);
+    CFFLog::Info("KTXLoader: Loaded cubemap %s (%dx%d, %d mips)", filepath.c_str(), desc.width, desc.height, desc.mipLevels);
 
     ktxTexture2_Destroy(ktxTex);
-    return rhiTexture;
+    return texture;
 }
 
 ITexture* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) {
@@ -167,28 +112,22 @@ ITexture* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) {
 
     // Convert format
     ETextureFormat rhiFormat = VkFormatToRHIFormat(ktxTex->vkFormat);
-    DXGI_FORMAT dxgiFormat = VkFormatToDXGIFormat(ktxTex->vkFormat);
     if (rhiFormat == ETextureFormat::Unknown) {
         ktxTexture2_Destroy(ktxTex);
         return nullptr;
     }
 
-    // Create D3D11 texture
-    auto* device = static_cast<ID3D11Device*>(CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) {
+        CFFLog::Error("KTXLoader: RHI context not available");
+        ktxTexture2_Destroy(ktxTex);
+        return nullptr;
+    }
 
-    D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = ktxTex->baseWidth;
-    desc.Height = ktxTex->baseHeight;
-    desc.MipLevels = ktxTex->numLevels;
-    desc.ArraySize = 1;
-    desc.Format = dxgiFormat;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-    // Prepare initial data
-    std::vector<D3D11_SUBRESOURCE_DATA> initData;
-    initData.reserve(ktxTex->numLevels);
+    // Prepare subresource data (mipLevels)
+    uint32_t bytesPerPixel = GetBytesPerPixel(rhiFormat);
+    std::vector<SubresourceData> subresources;
+    subresources.reserve(ktxTex->numLevels);
 
     for (uint32_t mip = 0; mip < ktxTex->numLevels; ++mip) {
         size_t offset;
@@ -199,54 +138,31 @@ ITexture* CKTXLoader::Load2DTextureFromKTX2(const std::string& filepath) {
             return nullptr;
         }
 
-        D3D11_SUBRESOURCE_DATA data = {};
-        data.pSysMem = ktxTex->pData + offset;
-
         uint32_t mipWidth = ktxTex->baseWidth >> mip;
-        uint32_t mipHeight = ktxTex->baseHeight >> mip;
         if (mipWidth == 0) mipWidth = 1;
-        if (mipHeight == 0) mipHeight = 1;
 
-        data.SysMemPitch = static_cast<UINT>(mipWidth * GetBytesPerPixel(dxgiFormat));
-        data.SysMemSlicePitch = 0;
-
-        initData.push_back(data);
+        SubresourceData data;
+        data.pData = ktxTex->pData + offset;
+        data.rowPitch = mipWidth * bytesPerPixel;
+        data.slicePitch = 0;
+        subresources.push_back(data);
     }
 
-    // Create texture
-    ID3D11Texture2D* texture = nullptr;
-    HRESULT hr = device->CreateTexture2D(&desc, initData.data(), &texture);
+    // Create texture via RHI
+    TextureDesc desc;
+    desc.width = ktxTex->baseWidth;
+    desc.height = ktxTex->baseHeight;
+    desc.mipLevels = ktxTex->numLevels;
+    desc.format = rhiFormat;
+    desc.usage = ETextureUsage::ShaderResource;
+    desc.debugName = "KTX2DTexture";
 
-    if (FAILED(hr)) {
-        CFFLog::Error("KTXLoader: Failed to create D3D11 texture");
-        ktxTexture2_Destroy(ktxTex);
-        return nullptr;
-    }
+    ITexture* texture = ctx->CreateTextureWithData(desc, subresources.data(), (uint32_t)subresources.size());
 
-    // Create SRV
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = dxgiFormat;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = ktxTex->numLevels;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-
-    ID3D11ShaderResourceView* srv = nullptr;
-    hr = device->CreateShaderResourceView(texture, &srvDesc, &srv);
-    if (FAILED(hr)) {
-        CFFLog::Error("KTXLoader: Failed to create SRV");
-        texture->Release();
-        ktxTexture2_Destroy(ktxTex);
-        return nullptr;
-    }
-
-    CFFLog::Info("KTXLoader: Loaded 2D texture %s (%dx%d, %d mips)", filepath.c_str(), desc.Width, desc.Height, desc.MipLevels);
-
-    // Wrap in RHI texture
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ITexture* rhiTexture = ctx->WrapNativeTexture(texture, srv, ktxTex->baseWidth, ktxTex->baseHeight, rhiFormat);
+    CFFLog::Info("KTXLoader: Loaded 2D texture %s (%dx%d, %d mips)", filepath.c_str(), desc.width, desc.height, desc.mipLevels);
 
     ktxTexture2_Destroy(ktxTex);
-    return rhiTexture;
+    return texture;
 }
 
 // ============================================

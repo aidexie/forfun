@@ -264,6 +264,7 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     // Store additional metadata
     texture->SetIsCubemapArray(desc.isCubemapArray);
     texture->SetCubeCount(desc.isCubemapArray ? desc.arraySize : (desc.isCubemap ? 1 : 0));
+    texture->SetDevice(ctx.GetDevice());  // For on-demand SRV slice creation
 
     // Mark staging textures
     if (isStaging) {
@@ -427,7 +428,98 @@ ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void*
     return texture;
 }
 
+ITexture* CDX11RenderContext::CreateTextureWithData(const TextureDesc& desc, const SubresourceData* subresources, uint32_t numSubresources) {
+    if (!subresources || numSubresources == 0) {
+        return CreateTexture(desc, nullptr);
+    }
+
+    CDX11Context& ctx = CDX11Context::Instance();
+
+    // Calculate array size (cubemap = 6 faces, cubemapArray = arraySize * 6 faces)
+    uint32_t d3dArraySize = desc.arraySize;
+    if (desc.isCubemap) {
+        d3dArraySize = 6;
+    } else if (desc.isCubemapArray) {
+        d3dArraySize = desc.arraySize * 6;
+    }
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = desc.width;
+    texDesc.Height = desc.height;
+    texDesc.MipLevels = desc.mipLevels;
+    texDesc.ArraySize = d3dArraySize;
+    texDesc.Format = ToDXGIFormat(desc.format);
+    texDesc.SampleDesc.Count = desc.sampleCount;
+    texDesc.SampleDesc.Quality = 0;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = ToD3D11BindFlags(desc.usage);
+    texDesc.CPUAccessFlags = 0;
+    texDesc.MiscFlags = 0;
+
+    if (desc.isCubemap || desc.isCubemapArray) {
+        texDesc.MiscFlags |= D3D11_RESOURCE_MISC_TEXTURECUBE;
+    }
+
+    // Convert SubresourceData array to D3D11_SUBRESOURCE_DATA
+    std::vector<D3D11_SUBRESOURCE_DATA> initData(numSubresources);
+    for (uint32_t i = 0; i < numSubresources; ++i) {
+        initData[i].pSysMem = subresources[i].pData;
+        initData[i].SysMemPitch = subresources[i].rowPitch;
+        initData[i].SysMemSlicePitch = subresources[i].slicePitch;
+    }
+
+    ID3D11Texture2D* d3dTexture = nullptr;
+    HRESULT hr = ctx.GetDevice()->CreateTexture2D(&texDesc, initData.data(), &d3dTexture);
+    if (FAILED(hr)) {
+        return nullptr;
+    }
+
+    auto texture = new CDX11Texture(d3dTexture, desc.width, desc.height, desc.format,
+                                     d3dArraySize, desc.mipLevels, ctx.GetContext());
+
+    texture->SetIsCubemapArray(desc.isCubemapArray);
+    texture->SetCubeCount(desc.isCubemapArray ? desc.arraySize : (desc.isCubemap ? 1 : 0));
+    texture->SetDevice(ctx.GetDevice());  // For on-demand SRV slice creation
+
+    // Create SRV for cubemaps
+    if (desc.usage & ETextureUsage::ShaderResource) {
+        ID3D11ShaderResourceView* srv = nullptr;
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = texDesc.Format;
+
+        if (desc.isCubemapArray) {
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
+            srvDesc.TextureCubeArray.MipLevels = desc.mipLevels;
+            srvDesc.TextureCubeArray.MostDetailedMip = 0;
+            srvDesc.TextureCubeArray.First2DArrayFace = 0;
+            srvDesc.TextureCubeArray.NumCubes = desc.arraySize;
+        } else if (desc.isCubemap) {
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+            srvDesc.TextureCube.MipLevels = desc.mipLevels;
+            srvDesc.TextureCube.MostDetailedMip = 0;
+        } else if (d3dArraySize > 1) {
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+            srvDesc.Texture2DArray.MipLevels = desc.mipLevels;
+            srvDesc.Texture2DArray.MostDetailedMip = 0;
+            srvDesc.Texture2DArray.ArraySize = d3dArraySize;
+            srvDesc.Texture2DArray.FirstArraySlice = 0;
+        } else {
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = desc.mipLevels;
+            srvDesc.Texture2D.MostDetailedMip = 0;
+        }
+
+        hr = ctx.GetDevice()->CreateShaderResourceView(d3dTexture, &srvDesc, &srv);
+        if (SUCCEEDED(hr)) {
+            texture->SetSRV(srv);
+        }
+    }
+
+    return texture;
+}
+
 ITexture* CDX11RenderContext::WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) {
+    CDX11Context& ctx = CDX11Context::Instance();
     auto texture = new CDX11Texture(
         static_cast<ID3D11Texture2D*>(nativeTexture),
         width,
@@ -438,11 +530,13 @@ ITexture* CDX11RenderContext::WrapNativeTexture(void* nativeTexture, void* nativ
     if (nativeSRV) {
         texture->SetSRV(static_cast<ID3D11ShaderResourceView*>(nativeSRV));
     }
+    texture->SetDevice(ctx.GetDevice());  // For on-demand SRV slice creation
 
     return texture;
 }
 
 ITexture* CDX11RenderContext::WrapExternalTexture(void* nativeTexture, const TextureDesc& desc) {
+    CDX11Context& ctx = CDX11Context::Instance();
     // Create a non-owning wrapper around an existing texture
     // This is useful for passing D3D11 textures to RHI copy operations without ownership transfer
     auto texture = new CDX11Texture(
@@ -459,6 +553,7 @@ ITexture* CDX11RenderContext::WrapExternalTexture(void* nativeTexture, const Tex
     } else if (desc.arraySize > 1) {
         texture->SetArraySize(desc.arraySize);
     }
+    texture->SetDevice(ctx.GetDevice());  // For on-demand SRV slice creation
 
     return texture;
 }
@@ -724,6 +819,66 @@ void* CDX11RenderContext::GetNativeDevice() {
 
 void* CDX11RenderContext::GetNativeContext() {
     return CDX11Context::Instance().GetContext();
+}
+
+// ============================================
+// CDX11Texture::GetSRVSlice implementation
+// ============================================
+void* CDX11Texture::GetSRVSlice(uint32_t arrayIndex, uint32_t mipLevel) {
+    // Validate parameters
+    if (arrayIndex >= m_arraySize || mipLevel >= m_mipLevels) {
+        return nullptr;
+    }
+
+    // Need device to create SRV
+    if (!m_device) {
+        return nullptr;
+    }
+
+    // Get texture resource
+    ID3D11Resource* resource = GetD3D11Resource();
+    if (!resource) {
+        return nullptr;
+    }
+
+    // Compute cache key
+    uint32_t key = arrayIndex * MAX_MIP_LEVELS + mipLevel;
+
+    // Check cache
+    auto it = m_sliceSRVCache.find(key);
+    if (it != m_sliceSRVCache.end()) {
+        return it->second.Get();
+    }
+
+    // Get texture format from existing SRV or use stored format
+    DXGI_FORMAT srvFormat = DXGI_FORMAT_UNKNOWN;
+    if (m_srv) {
+        D3D11_SHADER_RESOURCE_VIEW_DESC existingSrvDesc;
+        m_srv->GetDesc(&existingSrvDesc);
+        srvFormat = existingSrvDesc.Format;
+    } else {
+        // Fallback to texture format
+        srvFormat = ToDXGIFormat(m_format);
+    }
+
+    // Create SRV for specific slice and mip
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = srvFormat;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+    srvDesc.Texture2DArray.MostDetailedMip = mipLevel;
+    srvDesc.Texture2DArray.MipLevels = 1;
+    srvDesc.Texture2DArray.FirstArraySlice = arrayIndex;
+    srvDesc.Texture2DArray.ArraySize = 1;
+
+    ComPtr<ID3D11ShaderResourceView> srv;
+    HRESULT hr = m_device->CreateShaderResourceView(resource, &srvDesc, srv.GetAddressOf());
+    if (FAILED(hr)) {
+        return nullptr;
+    }
+
+    // Cache and return
+    m_sliceSRVCache[key] = srv;
+    return srv.Get();
 }
 
 } // namespace DX11

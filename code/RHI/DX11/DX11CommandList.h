@@ -3,13 +3,16 @@
 #include "DX11Resources.h"
 #include <d3d11.h>
 
+// Forward declaration
+struct ID3DUserDefinedAnnotation;
+
 namespace RHI {
 namespace DX11 {
 
 class CDX11CommandList : public ICommandList {
 public:
     CDX11CommandList(ID3D11DeviceContext* context);
-    ~CDX11CommandList() override = default;
+    ~CDX11CommandList() override;
 
     // Render Target Operations
     void SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) override;
@@ -64,8 +67,13 @@ public:
     void UnbindRenderTargets() override;
     void UnbindShaderResources(EShaderStage stage, uint32_t startSlot, uint32_t numSlots) override;
 
+    // Debug Events
+    void BeginEvent(const wchar_t* name) override;
+    void EndEvent() override;
+
 private:
     ID3D11DeviceContext* m_context;  // Non-owning
+    ID3DUserDefinedAnnotation* m_annotation = nullptr;  // Owned, for debug events
 };
 
 } // namespace DX11

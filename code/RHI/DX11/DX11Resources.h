@@ -2,6 +2,7 @@
 #include "../RHIResources.h"
 #include <d3d11.h>
 #include <wrl/client.h>
+#include <unordered_map>
 
 using Microsoft::WRL::ComPtr;
 
@@ -113,6 +114,10 @@ public:
         return m_sliceRTVs[arrayIndex].Get();
     }
 
+    // Per-slice SRV for texture arrays/cubemaps (debug visualization)
+    // Created on-demand and cached
+    void* GetSRVSlice(uint32_t arrayIndex, uint32_t mipLevel = 0) override;
+
     // CPU Access (for Staging textures)
     MappedTexture Map(uint32_t arraySlice = 0, uint32_t mipLevel = 0) override {
         MappedTexture result;
@@ -149,6 +154,7 @@ public:
     void SetCPUAccess(ECPUAccess cpuAccess) { m_cpuAccess = cpuAccess; }
     void SetIsCubemapArray(bool isCubemapArray) { m_isCubemapArray = isCubemapArray; }
     void SetCubeCount(uint32_t cubeCount) { m_cubeCount = cubeCount; }
+    void SetDevice(ID3D11Device* device) { m_device = device; }
 
     ID3D11Texture2D* GetD3D11Texture() { return m_owning ? m_texture2D.Get() : m_rawTexture; }
     ID3D11Texture3D* GetD3D11Texture3D() { return m_texture3D.Get(); }
@@ -162,6 +168,7 @@ public:
 
 private:
     static const uint32_t MAX_SLICE_VIEWS = 6;  // Max for cubemap faces
+    static const uint32_t MAX_MIP_LEVELS = 16;  // Max mip levels for SRV slice cache
 
     ComPtr<ID3D11Texture2D> m_texture2D;    // Owning reference for 2D textures
     ComPtr<ID3D11Texture3D> m_texture3D;    // Owning reference for 3D textures
@@ -172,6 +179,8 @@ private:
     ComPtr<ID3D11UnorderedAccessView> m_uav;
     ComPtr<ID3D11DepthStencilView> m_sliceDSVs[MAX_SLICE_VIEWS];  // Per-slice DSVs for array textures
     ComPtr<ID3D11RenderTargetView> m_sliceRTVs[MAX_SLICE_VIEWS];  // Per-slice RTVs for cubemap faces
+    // SRV slice cache: [arrayIndex * MAX_MIP_LEVELS + mipLevel] -> SRV
+    mutable std::unordered_map<uint32_t, ComPtr<ID3D11ShaderResourceView>> m_sliceSRVCache;
     uint32_t m_width;
     uint32_t m_height;
     uint32_t m_depth;
@@ -185,6 +194,7 @@ private:
     bool m_isStaging = false;       // If true, this is a staging texture for CPU access
     bool m_isCubemapArray = false;  // If true, this is a cubemap array texture
     ID3D11DeviceContext* m_context = nullptr;  // Non-owning, for Map/Unmap operations
+    ID3D11Device* m_device = nullptr;  // Non-owning, for creating SRV slices on-demand
 };
 
 // ============================================

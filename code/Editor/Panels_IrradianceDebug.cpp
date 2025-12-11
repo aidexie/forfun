@@ -5,82 +5,12 @@
 #include "RHI/RHIManager.h"
 #include "RHI/RHIResources.h"
 #include "Core/FFLog.h"
-#include <d3d11.h>
-#include <wrl/client.h>
-#include <unordered_map>
-
-using Microsoft::WRL::ComPtr;
 
 // Window visibility state
 static bool s_showWindow = false;
 
-// Cache for environment face SRVs (key = mipLevel * 6 + faceIndex)
-static std::unordered_map<int, ComPtr<ID3D11ShaderResourceView>> g_envFaceSRVCache;
-static ID3D11Texture2D* g_lastEnvTexture = nullptr;
-
-// Helper: Create SRV for specific environment face and mip level
-static ID3D11ShaderResourceView* GetEnvironmentFaceSRV(
-    ID3D11ShaderResourceView* envCubemap,
-    int faceIndex,
-    int mipLevel)
-{
-    if (!envCubemap || faceIndex < 0 || faceIndex >= 6 || mipLevel < 0) {
-        return nullptr;
-    }
-
-    // Get the underlying texture
-    ID3D11Resource* resource;
-    envCubemap->GetResource(&resource);
-    ComPtr<ID3D11Texture2D> texture;
-    resource->QueryInterface(texture.GetAddressOf());
-    resource->Release();
-
-    if (!texture) return nullptr;
-
-    // Get texture description
-    D3D11_TEXTURE2D_DESC desc;
-    texture->GetDesc(&desc);
-
-    // Validate mip level
-    if (mipLevel >= (int)desc.MipLevels) {
-        return nullptr;
-    }
-
-    // Clear cache if texture changed
-    if (g_lastEnvTexture != texture.Get()) {
-        g_envFaceSRVCache.clear();
-        g_lastEnvTexture = texture.Get();
-    }
-
-    // Check cache
-    int key = mipLevel * 6 + faceIndex;
-    auto it = g_envFaceSRVCache.find(key);
-    if (it != g_envFaceSRVCache.end()) {
-        return it->second.Get();
-    }
-
-    // Create new SRV for this face and mip level
-    ID3D11Device* device = static_cast<ID3D11Device*>(RHI::CRHIManager::Instance().GetRenderContext()->GetNativeDevice());
-    if (!device) return nullptr;
-
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = desc.Format;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    srvDesc.Texture2DArray.MostDetailedMip = mipLevel;
-    srvDesc.Texture2DArray.MipLevels = 1;
-    srvDesc.Texture2DArray.FirstArraySlice = faceIndex;
-    srvDesc.Texture2DArray.ArraySize = 1;
-
-    ComPtr<ID3D11ShaderResourceView> srv;
-    HRESULT hr = device->CreateShaderResourceView(texture.Get(), &srvDesc, srv.GetAddressOf());
-    if (FAILED(hr)) {
-        CFFLog::Error("ERROR: Failed to create environment face SRV (face=%d, mip=%d)", faceIndex, mipLevel);
-        return nullptr;
-    }
-
-    g_envFaceSRVCache[key] = srv;
-    return srv.Get();
-}
+// Cache for last environment texture (to detect texture changes)
+static RHI::ITexture* g_lastEnvTexture = nullptr;
 
 void Panels::DrawIrradianceDebug() {
     if (!s_showWindow) return;
@@ -108,28 +38,22 @@ void Panels::DrawIrradianceDebug() {
 
             // Get environment map from Scene's skybox
             RHI::ITexture* envTexture = skybox.GetEnvironmentTexture();
-            ID3D11ShaderResourceView* envMap = envTexture ? static_cast<ID3D11ShaderResourceView*>(envTexture->GetSRV()) : nullptr;
-            if (!envMap) {
+            if (!envTexture || !envTexture->GetSRV()) {
                 ImGui::TextColored(ImVec4(1, 0, 0, 1), "No environment map loaded!");
                 ImGui::Text("Load a skybox first.");
             }
             else {
-                // Get texture info
-                ID3D11Resource* resource;
-                envMap->GetResource(&resource);
-                ComPtr<ID3D11Texture2D> texture;
-                resource->QueryInterface(texture.GetAddressOf());
-                resource->Release();
+                // Get texture info from RHI
+                uint32_t texWidth = envTexture->GetWidth();
+                uint32_t texHeight = envTexture->GetHeight();
+                uint32_t mipLevels = envTexture->GetMipLevels();
 
-                D3D11_TEXTURE2D_DESC desc;
-                texture->GetDesc(&desc);
-
-                int maxMipLevel = (int)desc.MipLevels - 1;
+                int maxMipLevel = (int)mipLevels - 1;
 
                 // Display texture info
-                ImGui::Text("Resolution: %u x %u", desc.Width, desc.Height);
+                ImGui::Text("Resolution: %u x %u", texWidth, texHeight);
                 ImGui::Text("Format: R16G16B16A16_FLOAT (HDR)");
-                ImGui::Text("Mip Levels: %u", desc.MipLevels);
+                ImGui::Text("Mip Levels: %u", mipLevels);
                 ImGui::Separator();
 
                 // Mip level selection
@@ -138,7 +62,7 @@ void Panels::DrawIrradianceDebug() {
 
                 ImGui::SliderInt("Mip Level", &selectedEnvMip, 0, maxMipLevel);
 
-                int mipSize = desc.Width >> selectedEnvMip;  // size / 2^mip
+                int mipSize = texWidth >> selectedEnvMip;  // size / 2^mip
                 ImGui::Text("Mip %d: %d x %d", selectedEnvMip, mipSize, mipSize);
 
                 if (selectedEnvMip == 0) {
@@ -152,14 +76,19 @@ void Panels::DrawIrradianceDebug() {
                 }
                 ImGui::Separator();
 
+                // Helper lambda to get face SRV
+                auto getFaceSRV = [&](int faceIndex) -> void* {
+                    return envTexture->GetSRVSlice(faceIndex, selectedEnvMip);
+                };
+
                 // Row 1: +Y (Top)
                 ImGui::Dummy(ImVec2(displaySize, 0));
                 ImGui::SameLine();
                 ImGui::BeginGroup();
                 ImGui::Text("+Y");
-                ID3D11ShaderResourceView* envTopSRV = GetEnvironmentFaceSRV(envMap, 2, selectedEnvMip);
+                void* envTopSRV = getFaceSRV(2);
                 if (envTopSRV) {
-                    ImGui::Image((void*)envTopSRV, ImVec2(displaySize, displaySize));
+                    ImGui::Image(envTopSRV, ImVec2(displaySize, displaySize));
                 }
                 else {
                     ImGui::Text("Error");
@@ -172,9 +101,9 @@ void Panels::DrawIrradianceDebug() {
                 // -X (Left)
                 ImGui::BeginGroup();
                 ImGui::Text("-X");
-                ID3D11ShaderResourceView* envLeftSRV = GetEnvironmentFaceSRV(envMap, 1, selectedEnvMip);
+                void* envLeftSRV = getFaceSRV(1);
                 if (envLeftSRV) {
-                    ImGui::Image((void*)envLeftSRV, ImVec2(displaySize, displaySize));
+                    ImGui::Image(envLeftSRV, ImVec2(displaySize, displaySize));
                 }
                 else {
                     ImGui::Text("Error");
@@ -185,9 +114,9 @@ void Panels::DrawIrradianceDebug() {
                 // +Z (Front)
                 ImGui::BeginGroup();
                 ImGui::Text("+Z");
-                ID3D11ShaderResourceView* envFrontSRV = GetEnvironmentFaceSRV(envMap, 4, selectedEnvMip);
+                void* envFrontSRV = getFaceSRV(4);
                 if (envFrontSRV) {
-                    ImGui::Image((void*)envFrontSRV, ImVec2(displaySize, displaySize));
+                    ImGui::Image(envFrontSRV, ImVec2(displaySize, displaySize));
                 }
                 else {
                     ImGui::Text("Error");
@@ -198,9 +127,9 @@ void Panels::DrawIrradianceDebug() {
                 // +X (Right)
                 ImGui::BeginGroup();
                 ImGui::Text("+X");
-                ID3D11ShaderResourceView* envRightSRV = GetEnvironmentFaceSRV(envMap, 0, selectedEnvMip);
+                void* envRightSRV = getFaceSRV(0);
                 if (envRightSRV) {
-                    ImGui::Image((void*)envRightSRV, ImVec2(displaySize, displaySize));
+                    ImGui::Image(envRightSRV, ImVec2(displaySize, displaySize));
                 }
                 else {
                     ImGui::Text("Error");
@@ -211,9 +140,9 @@ void Panels::DrawIrradianceDebug() {
                 // -Z (Back)
                 ImGui::BeginGroup();
                 ImGui::Text("-Z");
-                ID3D11ShaderResourceView* envBackSRV = GetEnvironmentFaceSRV(envMap, 5, selectedEnvMip);
+                void* envBackSRV = getFaceSRV(5);
                 if (envBackSRV) {
-                    ImGui::Image((void*)envBackSRV, ImVec2(displaySize, displaySize));
+                    ImGui::Image(envBackSRV, ImVec2(displaySize, displaySize));
                 }
                 else {
                     ImGui::Text("Error");
@@ -227,9 +156,9 @@ void Panels::DrawIrradianceDebug() {
                 ImGui::SameLine();
                 ImGui::BeginGroup();
                 ImGui::Text("-Y");
-                ID3D11ShaderResourceView* envBottomSRV = GetEnvironmentFaceSRV(envMap, 3, selectedEnvMip);
+                void* envBottomSRV = getFaceSRV(3);
                 if (envBottomSRV) {
-                    ImGui::Image((void*)envBottomSRV, ImVec2(displaySize, displaySize));
+                    ImGui::Image(envBottomSRV, ImVec2(displaySize, displaySize));
                 }
                 else {
                     ImGui::Text("Error");

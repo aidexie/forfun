@@ -281,14 +281,34 @@ Phase 7 (Header RHI 重构) ✅
 **保留 D3D11 的文件 (允许):**
 - `RHI/DX11/*` - RHI 后端实现
 - `main.cpp` - ImGui DX11 后端
-- `Editor/Panels_IrradianceDebug.cpp` - Debug panel (per-face SRV 创建)
 - `Core/Loader/TextureLoader.cpp` - WIC 加载 (内部 WIC COM 接口，但输出 RHI::ITexture)
 - `Core/Loader/KTXLoader.cpp` - KTX 加载器 (内部实现)
 - `Core/Exporter/*.cpp` - 导出器 (内部实现)
 - `Core/Testing/Screenshot.cpp` - 截图功能 (内部实现)
-- `Core/DebugEvent.cpp` - GPU 调试事件 (内部实现)
 
 **Phase 8 状态**: ✅ 完成 - 所有模块迁移成功
+
+---
+
+### Phase 9: Debug 功能 RHI 迁移 (完成)
+
+**目标**: 迁移调试和编辑器工具到 RHI
+
+| 任务 | 文件 | 复杂度 | 状态 | 说明 |
+|------|------|--------|------|------|
+| 9.1 | `Core/DebugEvent` | 中 | ✅ 完成 | 移动到 RHI::ICommandList::BeginEvent/EndEvent |
+| 9.2 | `Editor/Panels_IrradianceDebug.cpp` | 中 | ✅ 完成 | 使用 RHI::ITexture::GetSRVSlice() |
+
+**RHI 扩展 (Phase 9)**:
+- `ICommandList::BeginEvent()/EndEvent()` - GPU 调试事件 (RenderDoc/PIX)
+- `RHI::CScopedDebugEvent` - RAII wrapper for debug events
+- `ITexture::GetSRVSlice(arrayIndex, mipLevel)` - 按需创建单个 face/mip 的 SRV
+
+**已删除的文件**:
+- `Core/DebugEvent.h` - 已移至 RHI::ICommandList::BeginEvent/EndEvent
+- `Core/DebugEvent.cpp` - 已移至 RHI/DX11/DX11CommandList.cpp
+
+**Phase 9 状态**: ✅ 完成
 
 ---
 

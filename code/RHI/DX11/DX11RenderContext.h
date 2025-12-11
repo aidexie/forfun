@@ -29,6 +29,7 @@ public:
     // Resource Creation
     IBuffer* CreateBuffer(const BufferDesc& desc, const void* initialData) override;
     ITexture* CreateTexture(const TextureDesc& desc, const void* initialData) override;
+    ITexture* CreateTextureWithData(const TextureDesc& desc, const SubresourceData* subresources, uint32_t numSubresources) override;
     ISampler* CreateSampler(const SamplerDesc& desc) override;
     IShader* CreateShader(const ShaderDesc& desc) override;
     IPipelineState* CreatePipelineState(const PipelineStateDesc& desc) override;

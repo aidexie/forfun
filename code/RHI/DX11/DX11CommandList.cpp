@@ -1,5 +1,6 @@
 #include "DX11CommandList.h"
 #include "DX11Utils.h"
+#include <d3d11_1.h>  // For ID3DUserDefinedAnnotation
 
 namespace RHI {
 namespace DX11 {
@@ -7,6 +8,17 @@ namespace DX11 {
 CDX11CommandList::CDX11CommandList(ID3D11DeviceContext* context)
     : m_context(context)
 {
+    // Query for annotation interface for debug events
+    if (m_context) {
+        m_context->QueryInterface(__uuidof(ID3DUserDefinedAnnotation), (void**)&m_annotation);
+    }
+}
+
+CDX11CommandList::~CDX11CommandList() {
+    if (m_annotation) {
+        m_annotation->Release();
+        m_annotation = nullptr;
+    }
 }
 
 void CDX11CommandList::SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) {
@@ -360,6 +372,18 @@ void CDX11CommandList::GenerateMips(ITexture* texture) {
     ID3D11ShaderResourceView* srv = static_cast<ID3D11ShaderResourceView*>(dx11Texture->GetSRV());
     if (srv) {
         m_context->GenerateMips(srv);
+    }
+}
+
+void CDX11CommandList::BeginEvent(const wchar_t* name) {
+    if (m_annotation) {
+        m_annotation->BeginEvent(name);
+    }
+}
+
+void CDX11CommandList::EndEvent() {
+    if (m_annotation) {
+        m_annotation->EndEvent();
     }
 }
 

@@ -8,7 +8,6 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
-#include "Core/DebugEvent.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Engine/Scene.h"
@@ -426,19 +425,19 @@ void CSceneRenderer::Render(
     collectRenderItems(scene, eye, opaqueItems, transparentItems, &probeManager);
 
     // Render Opaque
-    { CScopedDebugEvent evt(ctx->GetNativeContext(), L"Opaque Pass");
+    { RHI::CScopedDebugEvent evt(cmdList, L"Opaque Pass");
     cmdList->SetPipelineState(m_psoOpaque.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
     renderItems(cmdList, opaqueItems, m_cbObj.get());
     }
 
     // Render Skybox
-    { CScopedDebugEvent evt(ctx->GetNativeContext(), L"Skybox");
+    { RHI::CScopedDebugEvent evt(cmdList, L"Skybox");
     CScene::Instance().GetSkybox().Render(view, proj);
     }
 
     // Render Transparent
-    { CScopedDebugEvent evt(ctx->GetNativeContext(), L"Transparent Pass");
+    { RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
     cmdList->SetPipelineState(m_psoTransparent.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
     renderItems(cmdList, transparentItems, m_cbObj.get());

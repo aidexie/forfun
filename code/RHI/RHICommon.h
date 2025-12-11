@@ -130,6 +130,25 @@ enum class ETextureFormat {
     R32G32B32A32_UINT
 };
 
+// Helper: Get bytes per pixel for a format (returns 0 for compressed/unknown)
+inline uint32_t GetBytesPerPixel(ETextureFormat format) {
+    switch (format) {
+        case ETextureFormat::R8_UNORM:              return 1;
+        case ETextureFormat::R8G8B8A8_UNORM:
+        case ETextureFormat::R8G8B8A8_UNORM_SRGB:
+        case ETextureFormat::R8G8B8A8_TYPELESS:
+        case ETextureFormat::B8G8R8A8_UNORM:
+        case ETextureFormat::B8G8R8A8_UNORM_SRGB:
+        case ETextureFormat::R32_UINT:              return 4;
+        case ETextureFormat::R16G16_FLOAT:          return 4;
+        case ETextureFormat::R16G16B16A16_FLOAT:    return 8;
+        case ETextureFormat::R32G32_UINT:           return 8;
+        case ETextureFormat::R32G32B32A32_FLOAT:
+        case ETextureFormat::R32G32B32A32_UINT:     return 16;
+        default:                                     return 0;
+    }
+}
+
 // ============================================
 // Index Format
 // ============================================

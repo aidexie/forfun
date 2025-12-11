@@ -1,4 +1,5 @@
 #pragma once
+#include "RHI/RHIResources.h"
 #include <string>
 
 class CForwardRenderPipeline;
@@ -7,11 +8,11 @@ class CForwardRenderPipeline;
 // Captures rendered frames to PNG files for AI visual verification
 class CScreenshot {
 public:
-    // Capture from a texture to PNG file
-    // texture: void* to native texture (ID3D11Texture2D* for D3D11)
+    // Capture from an RHI texture to PNG file
+    // texture: RHI texture (must be R8G8B8A8 format)
     // path: Output file path
     // Returns true on success
-    static bool Capture(void* texture, const std::string& path);
+    static bool Capture(RHI::ITexture* texture, const std::string& path);
 
     // Capture from ForwardRenderPipeline offscreen target
     static bool CaptureFromPipeline(CForwardRenderPipeline* pipeline, const std::string& path);

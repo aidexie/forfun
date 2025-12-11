@@ -4,7 +4,6 @@
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
-#include "Core/DebugEvent.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/DirectionalLight.h"
@@ -57,9 +56,6 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     RHI::ICommandList* cmdList = rhiCtx->GetCommandList();
     if (!cmdList) return;
 
-    // For debug events, we still need native context
-    void* nativeCtx = rhiCtx->GetNativeContext();
-
     // ============================================
     // 0. Unbind resources to avoid hazards
     // ============================================
@@ -85,7 +81,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
         }
 
         if (dirLight) {
-            CScopedDebugEvent evt(nativeCtx, L"Shadow Pass");
+            RHI::CScopedDebugEvent evt(cmdList, L"Shadow Pass");
             m_shadowPass.Render(ctx.scene, dirLight,
                               ctx.camera.GetViewMatrix(),
                               ctx.camera.GetProjectionMatrix());
@@ -107,7 +103,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 4. Scene Rendering (Opaque + Transparent + Skybox)
     // ============================================
     {
-        CScopedDebugEvent evt(nativeCtx, L"Scene Rendering");
+        RHI::CScopedDebugEvent evt(cmdList, L"Scene Rendering");
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
                               m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
@@ -118,7 +114,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 5. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
-        CScopedDebugEvent evt(nativeCtx, L"Post-Processing");
+        RHI::CScopedDebugEvent evt(cmdList, L"Post-Processing");
         m_postProcess.Render(m_offHDR.get(), m_offLDR.get(),
                            ctx.width, ctx.height, 1.0f);
     }
@@ -128,7 +124,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 6. Debug Lines (if enabled)
     // ============================================
     if (ctx.showFlags.DebugLines) {
-        CScopedDebugEvent evt(nativeCtx, L"Debug Lines");
+        RHI::CScopedDebugEvent evt(cmdList, L"Debug Lines");
         // Rebind LDR RTV + HDR depth (Debug lines need depth test)
         RHI::ITexture* ldrRT = m_offLDR.get();
         cmdList->SetRenderTargets(1, &ldrRT, m_offDepth.get());
@@ -141,7 +137,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 7. Grid (if enabled)
     // ============================================
     if (ctx.showFlags.Grid) {
-        CScopedDebugEvent evt(nativeCtx, L"Grid");
+        RHI::CScopedDebugEvent evt(cmdList, L"Grid");
         // Rebind LDR RTV + HDR depth (Grid needs depth test)
         RHI::ITexture* ldrRT = m_offLDR.get();
         cmdList->SetRenderTargets(1, &ldrRT, m_offDepth.get());

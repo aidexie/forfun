@@ -43,6 +43,9 @@ public:
     void* GetOffscreenTexture() const {
         return m_offLDR ? m_offLDR->GetNativeHandle() : nullptr;
     }
+    RHI::ITexture* GetOffscreenTextureRHI() const {
+        return m_offLDR.get();
+    }
     unsigned int GetOffscreenWidth() const { return m_offscreenWidth; }
     unsigned int GetOffscreenHeight() const { return m_offscreenHeight; }
 

@@ -9,6 +9,15 @@
 namespace RHI {
 
 // ============================================
+// Subresource Data (for multi-subresource texture creation)
+// ============================================
+struct SubresourceData {
+    const void* pData = nullptr;   // Pointer to pixel data
+    uint32_t rowPitch = 0;         // Row pitch in bytes
+    uint32_t slicePitch = 0;       // Slice pitch (for 3D textures)
+};
+
+// ============================================
 // Buffer Descriptor
 // ============================================
 struct BufferDesc {

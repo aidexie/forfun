@@ -20,7 +20,7 @@
 // Test framework
 #include "Core/Testing/TestCase.h"
 #include "Core/Testing/TestRegistry.h"
-#include "Core/DebugEvent.h"
+#include "RHI/ICommandList.h"  // For RHI::CScopedDebugEvent
 
 // ImGui
 #include "imgui.h"
@@ -434,7 +434,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
 
         // Forward Rendering Pipeline
-        {CScopedDebugEvent evtScene(d3dCtx, L"forward pipeline");
+        {RHI::CScopedDebugEvent evtScene(rhiCtx->GetCommandList(), L"forward pipeline");
         // Setup RenderContext for editor viewport
         CRenderPipeline::RenderContext renderCtx{
             editorCamera,               // camera
@@ -482,7 +482,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // 5.5 提交 ImGui
-        {CScopedDebugEvent evtScene(d3dCtx, L"imgui pass");
+        {RHI::CScopedDebugEvent evtScene(rhiCtx->GetCommandList(), L"imgui pass");
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         }
