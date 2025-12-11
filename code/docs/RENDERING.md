@@ -1560,13 +1560,78 @@ CScene::ReloadProbesFromScene();
 
 ---
 
+## GPU Debug Events (RHI)
+
+### Overview
+
+**位置**: `RHI/ICommandList.h`
+
+GPU 调试事件用于在 RenderDoc/PIX 等 GPU 分析工具中标记渲染阶段。
+
+### API
+
+```cpp
+// 接口
+class ICommandList {
+    virtual void BeginEvent(const wchar_t* name) = 0;
+    virtual void EndEvent() = 0;
+};
+
+// RAII Wrapper
+class RHI::CScopedDebugEvent {
+    CScopedDebugEvent(ICommandList* cmdList, const wchar_t* name);
+    ~CScopedDebugEvent();  // 自动调用 EndEvent()
+};
+```
+
+### 使用示例
+
+```cpp
+// 在 ForwardRenderPipeline.cpp 中
+{
+    RHI::CScopedDebugEvent evt(cmdList, L"Shadow Pass");
+    m_shadowPass.Render(...);
+}  // 自动结束事件
+
+{
+    RHI::CScopedDebugEvent evt(cmdList, L"Scene Rendering");
+    m_sceneRenderer.Render(...);
+}
+```
+
+### RenderDoc 中的显示
+
+在 RenderDoc 的 Event Browser 中会看到层级结构：
+```
+- forward pipeline
+  - Shadow Pass
+  - Scene Rendering
+    - Opaque Pass
+    - Skybox
+    - Transparent Pass
+  - Post-Processing
+  - Debug Lines
+  - Grid
+- imgui pass
+```
+
+### DX11 实现
+
+使用 `ID3DUserDefinedAnnotation` 接口：
+- `CDX11CommandList::BeginEvent()` → `m_annotation->BeginEvent(name)`
+- `CDX11CommandList::EndEvent()` → `m_annotation->EndEvent()`
+
+---
+
 ## IBL Debug UI
 
 **位置**: `Editor/Panels_IrradianceDebug.cpp`
 
 **功能**: 三个 Tab 实时预览 IBL 纹理
 
-### Tab 1: Irradiance Map
+**RHI 集成**: 使用 `RHI::ITexture::GetSRVSlice(arrayIndex, mipLevel)` 获取 cubemap 单个面的 SRV 用于 ImGui 显示。SRV 按需创建并缓存。
+
+### Tab 1: Environment Map
 - 显示: diffuse irradiance (32×32)
 - 用途: 验证漫反射环境光是否正确
 - 特性: 模糊的颜色球，表示整体环境色调
@@ -1983,4 +2048,4 @@ if (gDiffuseGIMode == DIFFUSE_GI_VOLUMETRIC_LIGHTMAP) {
 
 ---
 
-**Last Updated**: 2025-12-09
+**Last Updated**: 2025-12-11
