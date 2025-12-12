@@ -14,7 +14,12 @@
       "Bash(grep:*)",
       "Bash(tee:*)",
       "Bash(done)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:diligentgraphics.com)",
+      "WebFetch(domain:developer.nvidia.com)",
+      "WebFetch(domain:alextardif.com)"
     ],
     "deny": [],
     "ask": []

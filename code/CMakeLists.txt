@@ -130,9 +130,8 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h
     ${CODE_PATH}/RHI/ShaderCompiler.h
-    # DX12 Backend (planned for Phase 3)
-    # ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
-    # ${CODE_PATH}/RHI/DX12/DX12RenderContext.h
+    # DX12 Backend (Phase 0: directory structure)
+    ${CODE_PATH}/RHI/DX12/DX12Common.h
 )
 
 # Engine root sources - explicitly listed (no GLOB)
@@ -205,7 +204,7 @@ target_link_libraries(forfun
     PRIVATE
         imgui_docking
         imguizmo
-        d3d11 dxgi d3dcompiler
+        d3d11 d3d12 dxgi d3dcompiler dxguid
         ${KTX_DIR}/lib/ktx.lib
 )
 
