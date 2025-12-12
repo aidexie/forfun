@@ -428,7 +428,7 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
 
    // 创建 Path Trace Baker
    SPathTraceConfig ptConfig;
-   ptConfig.samplesPerVoxel = 64*64*6;   // 每个 voxel 采样 64 次
+   ptConfig.samplesPerVoxel = 32*32*6;   // 每个 voxel 采样 64 次
    ptConfig.maxBounces = 3;         // 最多 3 次反弹
    ptConfig.useRussianRoulette = true;
 
@@ -497,7 +497,7 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene)
    CFFLog::Info("[VolumetricLightmap] ========================================");
 
    // Apply dilation to fill invalid probes with data from nearby valid probes
-   dilateInvalidProbes();
+   //dilateInvalidProbes();
 }
 
 void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CPathTraceBaker& baker)
@@ -905,6 +905,7 @@ bool CVolumetricLightmap::CreateGPUResources()
         texDesc.mipLevels = 1;
         texDesc.format = RHI::ETextureFormat::R32_UINT;
         texDesc.usage = RHI::ETextureUsage::ShaderResource;
+        texDesc.dimension = RHI::ETextureDimension::Tex3D;
         texDesc.debugName = "VolumetricLightmap_Indirection";
 
         m_indirectionTexture.reset(renderContext->CreateTexture(texDesc, m_indirectionData.data()));
@@ -949,6 +950,7 @@ bool CVolumetricLightmap::CreateGPUResources()
             texDesc.mipLevels = 1;
             texDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
             texDesc.usage = RHI::ETextureUsage::ShaderResource;
+            texDesc.dimension = RHI::ETextureDimension::Tex3D;
             texDesc.debugName = "VolumetricLightmap_BrickAtlas";
 
             m_brickAtlasTexture[i].reset(renderContext->CreateTexture(texDesc, halfData.data()));

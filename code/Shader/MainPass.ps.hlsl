@@ -207,8 +207,8 @@ float4 main(PSIn i) : SV_Target {
     // Vertex color R channel typically contains AO data
     float3 albedo = gMatAlbedo * albedoTex;
 
-    float metallic =  gMatMetallic;
-    float roughness =  gMatRoughness;
+    float metallic =  gHasMetallicRoughnessTexture ? metallicTex : gMatMetallic;
+    float roughness =  gHasMetallicRoughnessTexture ? roughnessTex : gMatRoughness;
     float ao = i.color.r;  // Use vertex color R channel as AO (common in glTF baked lighting)
 
     // Calculate vectors

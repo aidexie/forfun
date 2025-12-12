@@ -399,10 +399,12 @@ void CSceneRenderer::Render(
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Clustered lighting setup
-    m_clusteredLighting.Resize(w, h);
-    m_clusteredLighting.BuildClusterGrid(cmdList, proj, camera.nearZ, camera.farZ);
-    m_clusteredLighting.CullLights(cmdList, &scene, view);
-
+    {
+        RHI::CScopedDebugEvent evt(cmdList, L"clustered Lighting");
+        m_clusteredLighting.Resize(w, h);
+        m_clusteredLighting.BuildClusterGrid(cmdList, proj, camera.nearZ, camera.farZ);
+        m_clusteredLighting.CullLights(cmdList, &scene, view);
+    }
     // Update clustered params constant buffer (b3)
     CB_ClusteredParams clusteredParams{};
     clusteredParams.nearZ = camera.nearZ;
@@ -425,23 +427,26 @@ void CSceneRenderer::Render(
     collectRenderItems(scene, eye, opaqueItems, transparentItems, &probeManager);
 
     // Render Opaque
-    { RHI::CScopedDebugEvent evt(cmdList, L"Opaque Pass");
-    cmdList->SetPipelineState(m_psoOpaque.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-    renderItems(cmdList, opaqueItems, m_cbObj.get());
+    { 
+        RHI::CScopedDebugEvent evt(cmdList, L"Opaque Pass");
+        cmdList->SetPipelineState(m_psoOpaque.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+        renderItems(cmdList, opaqueItems, m_cbObj.get());
     }
 
     // Render Skybox
-    { RHI::CScopedDebugEvent evt(cmdList, L"Skybox");
-    CScene::Instance().GetSkybox().Render(view, proj);
+    { 
+        RHI::CScopedDebugEvent evt(cmdList, L"Skybox");
+        CScene::Instance().GetSkybox().Render(view, proj);
     }
 
     // Render Transparent
-    { RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
-    cmdList->SetPipelineState(m_psoTransparent.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-    renderItems(cmdList, transparentItems, m_cbObj.get());
+    {
+        RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
+        cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
+        cmdList->SetPipelineState(m_psoTransparent.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+        renderItems(cmdList, transparentItems, m_cbObj.get());
     }
 }
 

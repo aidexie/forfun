@@ -145,7 +145,7 @@ IBuffer* CDX11RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
         return nullptr;
     }
 
-    return new CDX11Buffer(d3dBuffer, desc.size, desc.cpuAccess, ctx.GetContext());
+    return new CDX11Buffer(d3dBuffer, desc, ctx.GetDevice(), ctx.GetContext());
 }
 
 ITexture* CDX11RenderContext::CreateTexture(const TextureDesc& desc, const void* initialData) {

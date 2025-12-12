@@ -22,9 +22,19 @@ public:
 // ============================================
 // Buffer Interface
 // ============================================
+
+// Forward declaration
+struct BufferDesc;
+
 class IBuffer : public IResource {
 public:
     virtual ~IBuffer() = default;
+
+    // Get buffer descriptor (all metadata in one struct)
+    virtual const BufferDesc& GetDesc() const = 0;
+
+    // Convenience accessors (read from GetDesc())
+    uint32_t GetSize() const { return GetDesc().size; }
 
     // Map buffer for CPU write (only valid if cpuAccess == Write)
     // Returns pointer to mapped memory
@@ -32,9 +42,6 @@ public:
 
     // Unmap buffer after writing
     virtual void Unmap() = 0;
-
-    // Get buffer size
-    virtual uint32_t GetSize() const = 0;
 };
 
 // ============================================

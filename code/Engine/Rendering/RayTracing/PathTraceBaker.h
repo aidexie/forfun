@@ -26,7 +26,7 @@ struct SPathTraceConfig
 
     // Debug: export cubemap at position
     bool debugExportCubemap = false;
-    DirectX::XMFLOAT3 debugExportPosition = {0, 0, 0};
+    DirectX::XMFLOAT3 debugExportPosition = {10, 10, 10};
     float debugExportRadius = 1.0f;
     int debugCubemapResolution = 64;
     std::string debugExportPath = "";

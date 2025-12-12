@@ -311,6 +311,11 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
                                         const XMMATRIX& view) {
     if (!m_cullLightsCS || !scene || !cmdList) return;
 
+    // Unbind cluster buffers from pixel shader before using them as UAVs
+    // This prevents D3D11 resource hazard warnings
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 10, nullptr);
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 11, nullptr);
+
     // Gather all lights (Point + Spot) from scene
     std::vector<SGpuLight> gpuLights;
     auto& world = scene->GetWorld();
@@ -394,9 +399,9 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
         m_pointLightBuffer->Unmap();
     }
 
-    // Reset global counter to 0 - need to use UpdateSubresource or Map
-    // For now, we'll use a staging approach via Map if the buffer supports it
-    // Actually, we need to clear this buffer - let's use a workaround
+    // Reset global counter to 0 for atomic operations
+    const uint32_t zeroValues[4] = {0, 0, 0, 0};
+    cmdList->ClearUnorderedAccessViewUint(m_globalCounterBuffer.get(), zeroValues);
 
     // Update constant buffer for light culling
     mapped = m_lightCullingCB->Map();

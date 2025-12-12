@@ -288,6 +288,7 @@ XMFLOAT3 CPathTraceBaker::traceRadiance(
         directLight.z + indirectContrib.z
     };
 }
+SDirectionalLight* dirLight = nullptr;
 
 XMFLOAT3 CPathTraceBaker::evaluateDirectLight(
     const XMFLOAT3& hitPos,
@@ -297,140 +298,160 @@ XMFLOAT3 CPathTraceBaker::evaluateDirectLight(
 {
     XMFLOAT3 totalLight = {0, 0, 0};
     auto& world = scene.GetWorld();
+    //static SDirectionalLight* dirLight;
+    
 
-    for (size_t i = 0; i < world.Count(); i++)
+    if (dirLight)
     {
-        auto* obj = world.Get(i);
-        if (!obj) continue;
+        XMFLOAT3 dir = dirLight->GetDirection();
+        XMFLOAT3 lightDir = {-dir.x, -dir.y, -dir.z};
 
-        auto* transform = obj->GetComponent<STransform>();
-        if (!transform) continue;
+        float NdotL = hitNormal.x * lightDir.x +
+                        hitNormal.y * lightDir.y +
+                        hitNormal.z * lightDir.z;
 
-        // Directional Light
-        auto* dirLight = obj->GetComponent<SDirectionalLight>();
-        if (dirLight)
-        {
-            XMFLOAT3 dir = dirLight->GetDirection();
-            XMFLOAT3 lightDir = {-dir.x, -dir.y, -dir.z};
-
-            float NdotL = hitNormal.x * lightDir.x +
-                          hitNormal.y * lightDir.y +
-                          hitNormal.z * lightDir.z;
-
-            if (NdotL > 0.0f) {
-                XMFLOAT3 shadowOrigin = {
-                    hitPos.x + hitNormal.x * 0.001f,
-                    hitPos.y + hitNormal.y * 0.001f,
-                    hitPos.z + hitNormal.z * 0.001f
-                };
-
-                bool inShadow = m_rayTracer->TraceShadowRay(shadowOrigin, lightDir, 1000.0f);
-
-                if (!inShadow) {
-                    float intensity = dirLight->intensity;
-                    totalLight.x += dirLight->color.x * intensity * albedo.x * NdotL * INV_PI;
-                    totalLight.y += dirLight->color.y * intensity * albedo.y * NdotL * INV_PI;
-                    totalLight.z += dirLight->color.z * intensity * albedo.z * NdotL * INV_PI;
-                }
-            }
-            continue;
-        }
-
-        // Point Light
-        auto* pointLight = obj->GetComponent<SPointLight>();
-        if (pointLight)
-        {
-            XMFLOAT3 lightPos = transform->position;
-            XMFLOAT3 toLight = {
-                lightPos.x - hitPos.x,
-                lightPos.y - hitPos.y,
-                lightPos.z - hitPos.z
+        if (NdotL > 0.0f) {
+            XMFLOAT3 shadowOrigin = {
+                hitPos.x + hitNormal.x * 0.001f,
+                hitPos.y + hitNormal.y * 0.001f,
+                hitPos.z + hitNormal.z * 0.001f
             };
 
-            float dist = std::sqrt(toLight.x * toLight.x + toLight.y * toLight.y + toLight.z * toLight.z);
-            if (dist < 0.001f) continue;
+            bool inShadow = m_rayTracer->TraceShadowRay(shadowOrigin, lightDir, 1000.0f);
 
-            XMFLOAT3 lightDir = {toLight.x / dist, toLight.y / dist, toLight.z / dist};
-
-            float NdotL = hitNormal.x * lightDir.x +
-                          hitNormal.y * lightDir.y +
-                          hitNormal.z * lightDir.z;
-
-            if (NdotL > 0.0f) {
-                XMFLOAT3 shadowOrigin = {
-                    hitPos.x + hitNormal.x * 0.001f,
-                    hitPos.y + hitNormal.y * 0.001f,
-                    hitPos.z + hitNormal.z * 0.001f
-                };
-
-                bool inShadow = m_rayTracer->TraceShadowRay(shadowOrigin, lightDir, dist - 0.001f);
-
-                if (!inShadow) {
-                    float attenuation = 1.0f / (dist * dist);
-                    float intensity = pointLight->intensity * attenuation;
-
-                    totalLight.x += pointLight->color.x * intensity * albedo.x * NdotL * INV_PI;
-                    totalLight.y += pointLight->color.y * intensity * albedo.y * NdotL * INV_PI;
-                    totalLight.z += pointLight->color.z * intensity * albedo.z * NdotL * INV_PI;
-                }
+            if (!inShadow) {
+                float intensity = dirLight->intensity;
+                totalLight.x += dirLight->color.x * intensity * albedo.x * NdotL * INV_PI;
+                totalLight.y += dirLight->color.y * intensity * albedo.y * NdotL * INV_PI;
+                totalLight.z += dirLight->color.z * intensity * albedo.z * NdotL * INV_PI;
             }
-            continue;
         }
+        return totalLight;
+    }
+    else
+    {
 
-        // Spot Light
-        auto* spotLight = obj->GetComponent<SSpotLight>();
-        if (spotLight)
+        for (size_t i = 0; i < world.Count(); i++)
         {
-            XMFLOAT3 lightPos = transform->position;
-            XMFLOAT3 toLight = {
-                lightPos.x - hitPos.x,
-                lightPos.y - hitPos.y,
-                lightPos.z - hitPos.z
-            };
+            auto* obj = world.Get(i);
+            if (!obj)
+                continue;
 
-            float dist = std::sqrt(toLight.x * toLight.x + toLight.y * toLight.y + toLight.z * toLight.z);
-            if (dist < 0.001f) continue;
+            auto* transform = obj->GetComponent<STransform>();
+            if (!transform)
+                continue;
 
-            XMFLOAT3 lightDir = {toLight.x / dist, toLight.y / dist, toLight.z / dist};
+            // Directional Light
+            dirLight = obj->GetComponent<SDirectionalLight>();
+            if (dirLight)
+            {
+                XMFLOAT3 dir = dirLight->GetDirection();
+                XMFLOAT3 lightDir = {-dir.x, -dir.y, -dir.z};
 
-            float cosAngle = -(lightDir.x * spotLight->direction.x +
-                               lightDir.y * spotLight->direction.y +
-                               lightDir.z * spotLight->direction.z);
+                float NdotL = hitNormal.x * lightDir.x + hitNormal.y * lightDir.y + hitNormal.z * lightDir.z;
 
-            float outerCos = std::cos(spotLight->outerConeAngle * PI / 180.0f);
-            float innerCos = std::cos(spotLight->innerConeAngle * PI / 180.0f);
+                if (NdotL > 0.0f)
+                {
+                    XMFLOAT3 shadowOrigin = {hitPos.x + hitNormal.x * 0.001f, hitPos.y + hitNormal.y * 0.001f,
+                                             hitPos.z + hitNormal.z * 0.001f};
 
-            if (cosAngle > outerCos) {
-                float NdotL = hitNormal.x * lightDir.x +
-                              hitNormal.y * lightDir.y +
-                              hitNormal.z * lightDir.z;
+                    bool inShadow = m_rayTracer->TraceShadowRay(shadowOrigin, lightDir, 1000.0f);
 
-                if (NdotL > 0.0f) {
-                    XMFLOAT3 shadowOrigin = {
-                        hitPos.x + hitNormal.x * 0.001f,
-                        hitPos.y + hitNormal.y * 0.001f,
-                        hitPos.z + hitNormal.z * 0.001f
-                    };
+                    if (!inShadow)
+                    {
+                        float intensity = dirLight->intensity;
+                        totalLight.x += dirLight->color.x * intensity * albedo.x * NdotL * INV_PI;
+                        totalLight.y += dirLight->color.y * intensity * albedo.y * NdotL * INV_PI;
+                        totalLight.z += dirLight->color.z * intensity * albedo.z * NdotL * INV_PI;
+                    }
+                }
+                break;
+            }
+
+            // Point Light
+            auto* pointLight = obj->GetComponent<SPointLight>();
+            if (pointLight)
+            {
+                XMFLOAT3 lightPos = transform->position;
+                XMFLOAT3 toLight = {lightPos.x - hitPos.x, lightPos.y - hitPos.y, lightPos.z - hitPos.z};
+
+                float dist = std::sqrt(toLight.x * toLight.x + toLight.y * toLight.y + toLight.z * toLight.z);
+                if (dist < 0.001f)
+                    continue;
+
+                XMFLOAT3 lightDir = {toLight.x / dist, toLight.y / dist, toLight.z / dist};
+
+                float NdotL = hitNormal.x * lightDir.x + hitNormal.y * lightDir.y + hitNormal.z * lightDir.z;
+
+                if (NdotL > 0.0f)
+                {
+                    XMFLOAT3 shadowOrigin = {hitPos.x + hitNormal.x * 0.001f, hitPos.y + hitNormal.y * 0.001f,
+                                             hitPos.z + hitNormal.z * 0.001f};
 
                     bool inShadow = m_rayTracer->TraceShadowRay(shadowOrigin, lightDir, dist - 0.001f);
 
-                    if (!inShadow) {
-                        float spotFactor = (cosAngle - outerCos) / (innerCos - outerCos);
-                        spotFactor = std::clamp(spotFactor, 0.0f, 1.0f);
-
+                    if (!inShadow)
+                    {
                         float attenuation = 1.0f / (dist * dist);
-                        float intensity = spotLight->intensity * attenuation * spotFactor;
+                        float intensity = pointLight->intensity * attenuation;
 
-                        totalLight.x += spotLight->color.x * intensity * albedo.x * NdotL * INV_PI;
-                        totalLight.y += spotLight->color.y * intensity * albedo.y * NdotL * INV_PI;
-                        totalLight.z += spotLight->color.z * intensity * albedo.z * NdotL * INV_PI;
+                        totalLight.x += pointLight->color.x * intensity * albedo.x * NdotL * INV_PI;
+                        totalLight.y += pointLight->color.y * intensity * albedo.y * NdotL * INV_PI;
+                        totalLight.z += pointLight->color.z * intensity * albedo.z * NdotL * INV_PI;
+                    }
+                }
+                continue;
+            }
+
+            // Spot Light
+            auto* spotLight = obj->GetComponent<SSpotLight>();
+            if (spotLight)
+            {
+                XMFLOAT3 lightPos = transform->position;
+                XMFLOAT3 toLight = {lightPos.x - hitPos.x, lightPos.y - hitPos.y, lightPos.z - hitPos.z};
+
+                float dist = std::sqrt(toLight.x * toLight.x + toLight.y * toLight.y + toLight.z * toLight.z);
+                if (dist < 0.001f)
+                    continue;
+
+                XMFLOAT3 lightDir = {toLight.x / dist, toLight.y / dist, toLight.z / dist};
+
+                float cosAngle = -(lightDir.x * spotLight->direction.x + lightDir.y * spotLight->direction.y +
+                                   lightDir.z * spotLight->direction.z);
+
+                float outerCos = std::cos(spotLight->outerConeAngle * PI / 180.0f);
+                float innerCos = std::cos(spotLight->innerConeAngle * PI / 180.0f);
+
+                if (cosAngle > outerCos)
+                {
+                    float NdotL = hitNormal.x * lightDir.x + hitNormal.y * lightDir.y + hitNormal.z * lightDir.z;
+
+                    if (NdotL > 0.0f)
+                    {
+                        XMFLOAT3 shadowOrigin = {hitPos.x + hitNormal.x * 0.001f, hitPos.y + hitNormal.y * 0.001f,
+                                                 hitPos.z + hitNormal.z * 0.001f};
+
+                        bool inShadow = m_rayTracer->TraceShadowRay(shadowOrigin, lightDir, dist - 0.001f);
+
+                        if (!inShadow)
+                        {
+                            float spotFactor = (cosAngle - outerCos) / (innerCos - outerCos);
+                            spotFactor = std::clamp(spotFactor, 0.0f, 1.0f);
+
+                            float attenuation = 1.0f / (dist * dist);
+                            float intensity = spotLight->intensity * attenuation * spotFactor;
+
+                            totalLight.x += spotLight->color.x * intensity * albedo.x * NdotL * INV_PI;
+                            totalLight.y += spotLight->color.y * intensity * albedo.y * NdotL * INV_PI;
+                            totalLight.z += spotLight->color.z * intensity * albedo.z * NdotL * INV_PI;
+                        }
                     }
                 }
             }
         }
-    }
 
-    return totalLight;
+        return totalLight;
+    }
 }
 
 // ============================================

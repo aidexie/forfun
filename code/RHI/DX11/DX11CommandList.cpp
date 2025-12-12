@@ -254,9 +254,12 @@ void CDX11CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITex
 }
 
 void CDX11CommandList::SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) {
-    // For structured buffers, we need SRV (not implemented yet in CDX11Buffer)
-    // For now, this is a placeholder
     ID3D11ShaderResourceView* srv = nullptr;
+
+    if (buffer) {
+        CDX11Buffer* dx11Buffer = static_cast<CDX11Buffer*>(buffer);
+        srv = dx11Buffer->GetOrCreateSRV();
+    }
 
     switch (stage) {
         case EShaderStage::Vertex:
@@ -267,6 +270,15 @@ void CDX11CommandList::SetShaderResourceBuffer(EShaderStage stage, uint32_t slot
             break;
         case EShaderStage::Compute:
             m_context->CSSetShaderResources(slot, 1, &srv);
+            break;
+        case EShaderStage::Geometry:
+            m_context->GSSetShaderResources(slot, 1, &srv);
+            break;
+        case EShaderStage::Hull:
+            m_context->HSSetShaderResources(slot, 1, &srv);
+            break;
+        case EShaderStage::Domain:
+            m_context->DSSetShaderResources(slot, 1, &srv);
             break;
     }
 }
@@ -292,7 +304,13 @@ void CDX11CommandList::SetSampler(EShaderStage stage, uint32_t slot, ISampler* s
 }
 
 void CDX11CommandList::SetUnorderedAccess(uint32_t slot, IBuffer* buffer) {
-    ID3D11UnorderedAccessView* uav = nullptr;  // TODO: Implement UAV in CDX11Buffer
+    ID3D11UnorderedAccessView* uav = nullptr;
+
+    if (buffer) {
+        CDX11Buffer* dx11Buffer = static_cast<CDX11Buffer*>(buffer);
+        uav = dx11Buffer->GetOrCreateUAV();
+    }
+
     m_context->CSSetUnorderedAccessViews(slot, 1, &uav, nullptr);
 }
 
@@ -303,6 +321,16 @@ void CDX11CommandList::SetUnorderedAccessTexture(uint32_t slot, ITexture* textur
         uav = dx11Tex->GetOrCreateUAV();
     }
     m_context->CSSetUnorderedAccessViews(slot, 1, &uav, nullptr);
+}
+
+void CDX11CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) {
+    if (!buffer) return;
+
+    CDX11Buffer* dx11Buffer = static_cast<CDX11Buffer*>(buffer);
+    ID3D11UnorderedAccessView* uav = dx11Buffer->GetOrCreateUAV();
+    if (uav) {
+        m_context->ClearUnorderedAccessViewUint(uav, values);
+    }
 }
 
 void CDX11CommandList::Draw(uint32_t vertexCount, uint32_t startVertex) {

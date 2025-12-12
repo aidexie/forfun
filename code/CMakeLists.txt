@@ -125,6 +125,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.cpp
     ${CODE_PATH}/RHI/DX11/DX11RenderContext.h
     ${CODE_PATH}/RHI/DX11/DX11Resources.h
+    ${CODE_PATH}/RHI/DX11/DX11Buffer.cpp
     ${CODE_PATH}/RHI/DX11/DX11Texture.cpp
     ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h

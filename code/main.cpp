@@ -362,7 +362,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     if (!activeTest)
     {
         // Use FFPath to resolve path (accepts relative or absolute)
-        std::string scenePath = FFPath::GetAbsolutePath("scenes/simple.scene");
+        std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
         CScene::Instance().LoadFromFile(scenePath);
     }
 

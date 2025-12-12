@@ -37,6 +37,7 @@ public:
     void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) override;
     void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) override;
     void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) override;
+    void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) override;
 
     // Draw Commands
     void Draw(uint32_t vertexCount, uint32_t startVertex) override;

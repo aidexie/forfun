@@ -82,6 +82,10 @@ public:
     virtual void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) = 0;
     virtual void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) = 0;
 
+    // Clear UAV buffer with uint values (for resetting atomic counters, etc.)
+    // values: array of 4 uint32_t values to clear with
+    virtual void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) = 0;
+
     // ============================================
     // Draw Commands
     // ============================================

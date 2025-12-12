@@ -18,13 +18,18 @@ namespace DX11 {
 // ============================================
 class CDX11Buffer : public IBuffer {
 public:
-    CDX11Buffer(ID3D11Buffer* buffer, uint32_t size, ECPUAccess cpuAccess, ID3D11DeviceContext* context)
-        : m_buffer(buffer), m_size(size), m_cpuAccess(cpuAccess), m_context(context) {}
+    CDX11Buffer(ID3D11Buffer* buffer, const BufferDesc& desc, ID3D11Device* device, ID3D11DeviceContext* context)
+        : m_buffer(buffer), m_desc(desc), m_device(device), m_context(context) {}
 
     ~CDX11Buffer() override = default;
 
+    // ============================================
+    // IBuffer interface
+    // ============================================
+    const BufferDesc& GetDesc() const override { return m_desc; }
+
     void* Map() override {
-        if (m_cpuAccess != ECPUAccess::Write) {
+        if (m_desc.cpuAccess != ECPUAccess::Write) {
             return nullptr;
         }
 
@@ -37,21 +42,38 @@ public:
     }
 
     void Unmap() override {
-        if (m_cpuAccess == ECPUAccess::Write) {
+        if (m_desc.cpuAccess == ECPUAccess::Write) {
             m_context->Unmap(m_buffer.Get(), 0);
         }
     }
 
-    uint32_t GetSize() const override { return m_size; }
     void* GetNativeHandle() override { return m_buffer.Get(); }
 
+    // ============================================
+    // View accessors (internal use by CDX11CommandList)
+    // GetOrCreate pattern: creates on first access, caches for reuse
+    // ============================================
+
+    // Get SRV for structured buffer (read-only access in shader)
+    ID3D11ShaderResourceView* GetOrCreateSRV();
+
+    // Get UAV for structured buffer (read-write access in compute shader)
+    ID3D11UnorderedAccessView* GetOrCreateUAV();
+
+    // ============================================
+    // Internal helpers
+    // ============================================
     ID3D11Buffer* GetD3D11Buffer() { return m_buffer.Get(); }
 
 private:
     ComPtr<ID3D11Buffer> m_buffer;
-    uint32_t m_size;
-    ECPUAccess m_cpuAccess;
-    ID3D11DeviceContext* m_context;  // Non-owning
+    BufferDesc m_desc;
+    ID3D11Device* m_device = nullptr;      // Non-owning
+    ID3D11DeviceContext* m_context = nullptr;  // Non-owning
+
+    // Cached views
+    ComPtr<ID3D11ShaderResourceView> m_srv;
+    ComPtr<ID3D11UnorderedAccessView> m_uav;
 };
 
 // ============================================
