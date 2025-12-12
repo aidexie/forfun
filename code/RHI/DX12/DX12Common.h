@@ -75,9 +75,42 @@ inline bool CheckHR(HRESULT hr, const char* operation) {
             obj->SetName(buffer); \
         } \
     } while(0)
+
+// ============================================
+// DX12_CHECK Macro - Wrap D3D12 calls with error checking
+// ============================================
+// In Debug mode: clears message queue, executes, checks result, prints errors with file/line
+// In Release mode: just executes the expression
+
+// Forward declarations for debug helpers (implemented in DX12Debug.cpp)
+void DX12Debug_ClearMessages();
+void DX12Debug_PrintMessages(const char* expr, const char* file, int line);
+
+// DX12_CHECK for HRESULT-returning functions
+#define DX12_CHECK(expr) \
+    [&]() -> HRESULT { \
+        DX12Debug_ClearMessages(); \
+        HRESULT hr_ = (expr); \
+        if (FAILED(hr_)) { \
+            DX12Debug_PrintMessages(#expr, __FILE__, __LINE__); \
+        } \
+        return hr_; \
+    }()
+
+// DX12_CHECK_VOID for void functions (e.g., command list operations)
+#define DX12_CHECK_VOID(expr) \
+    do { \
+        DX12Debug_ClearMessages(); \
+        (expr); \
+        DX12Debug_PrintMessages(#expr, __FILE__, __LINE__); \
+    } while(0)
+
 #else
+// Release mode - no overhead
 #define DX12_SET_DEBUG_NAME(obj, name) ((void)0)
 #define DX12_SET_DEBUG_NAME_INDEXED(obj, name, index) ((void)0)
+#define DX12_CHECK(expr) (expr)
+#define DX12_CHECK_VOID(expr) (expr)
 #endif
 
 // ============================================

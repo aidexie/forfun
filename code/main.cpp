@@ -304,6 +304,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 1) FFPath initialization (must be first - config paths depend on it)
     FFPath::Initialize("E:/forfun");
 
+    // 1.5) Initialize logging (clears old log file)
+    CFFLog::Initialize();
+
     // 2) Load render configuration
     {
         std::string configPath = SRenderConfig::GetDefaultPath();

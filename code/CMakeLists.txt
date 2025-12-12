@@ -150,6 +150,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
     ${CODE_PATH}/RHI/DX12/DX12PipelineState.h
     ${CODE_PATH}/RHI/DX12/DX12PipelineState.cpp
+    ${CODE_PATH}/RHI/DX12/DX12Debug.cpp
 )
 
 # Engine root sources - explicitly listed (no GLOB)

@@ -1,4 +1,5 @@
 #include "DX12CommandList.h"
+#include "DX12Common.h"
 #include "DX12RenderContext.h"
 #include "DX12Context.h"
 #include "DX12Resources.h"
@@ -29,13 +30,13 @@ bool CDX12CommandList::Initialize() {
     ID3D12Device* device = dx12Context.GetDevice();
 
     // Create command list (initially closed)
-    HRESULT hr = device->CreateCommandList(
+    HRESULT hr = DX12_CHECK(device->CreateCommandList(
         0,
         D3D12_COMMAND_LIST_TYPE_DIRECT,
         dx12Context.GetCurrentCommandAllocator(),
         nullptr,  // Initial PSO
         IID_PPV_ARGS(&m_commandList)
-    );
+    ));
 
     if (FAILED(hr)) {
         CFFLog::Error("[DX12CommandList] CreateCommandList failed: %s", HRESULTToString(hr).c_str());
@@ -300,9 +301,9 @@ void CDX12CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuf
     CDX12Buffer* dx12Buffer = static_cast<CDX12Buffer*>(buffer);
     EnsureDescriptorHeapsBound();
 
-    // Root parameter 0, 1, 2 are root CBVs (b0, b1, b2)
+    // Root parameter 0-6 are root CBVs (b0-b6)
     // Using root CBV directly (no descriptor)
-    if (slot < 3) {
+    if (slot < 7) {
         D3D12_GPU_VIRTUAL_ADDRESS address = dx12Buffer->GetGPUVirtualAddress();
         if (stage == EShaderStage::Compute) {
             m_commandList->SetComputeRootConstantBufferView(slot, address);
@@ -310,7 +311,7 @@ void CDX12CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuf
             m_commandList->SetGraphicsRootConstantBufferView(slot, address);
         }
     }
-    // For slots > 2, would need descriptor table (not implemented in fixed layout)
+    // For slots >= 7, would need descriptor table (not implemented in fixed layout)
 }
 
 void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) {

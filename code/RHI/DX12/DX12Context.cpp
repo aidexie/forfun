@@ -1,4 +1,5 @@
 #include "DX12Context.h"
+#include "DX12Common.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -42,7 +43,7 @@ bool CDX12Context::Initialize(HWND hwnd, uint32_t width, uint32_t height) {
     factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
-    HRESULT hr = CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&m_factory));
+    HRESULT hr = DX12_CHECK(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(&m_factory)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] Failed to create DXGI factory: %s", HRESULTToString(hr).c_str());
         return false;
@@ -185,11 +186,11 @@ bool CDX12Context::CreateDevice() {
         }
 
         // Try to create device with this adapter
-        HRESULT hr = D3D12CreateDevice(
+        HRESULT hr = DX12_CHECK(D3D12CreateDevice(
             adapter.Get(),
             D3D_FEATURE_LEVEL_11_0,  // Minimum feature level
             IID_PPV_ARGS(&m_device)
-        );
+        ));
 
         if (SUCCEEDED(hr)) {
             // Log adapter info
@@ -207,17 +208,17 @@ bool CDX12Context::CreateDevice() {
     CFFLog::Warning("[DX12Context] No hardware adapter found, falling back to WARP");
 
     ComPtr<IDXGIAdapter> warpAdapter;
-    HRESULT hr = m_factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter));
+    HRESULT hr = DX12_CHECK(m_factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] Failed to get WARP adapter: %s", HRESULTToString(hr).c_str());
         return false;
     }
 
-    hr = D3D12CreateDevice(
+    hr = DX12_CHECK(D3D12CreateDevice(
         warpAdapter.Get(),
         D3D_FEATURE_LEVEL_11_0,
         IID_PPV_ARGS(&m_device)
-    );
+    ));
 
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] Failed to create WARP device: %s", HRESULTToString(hr).c_str());
@@ -253,7 +254,7 @@ bool CDX12Context::CreateCommandQueue() {
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.NodeMask = 0;
 
-    HRESULT hr = m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
+    HRESULT hr = DX12_CHECK(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] CreateCommandQueue failed: %s", HRESULTToString(hr).c_str());
         return false;
@@ -283,14 +284,14 @@ bool CDX12Context::CreateSwapChain(HWND hwnd) {
     swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     ComPtr<IDXGISwapChain1> swapChain1;
-    HRESULT hr = m_factory->CreateSwapChainForHwnd(
+    HRESULT hr = DX12_CHECK(m_factory->CreateSwapChainForHwnd(
         m_commandQueue.Get(),  // DX12: swap chain needs command queue, not device
         hwnd,
         &swapChainDesc,
         nullptr,  // No fullscreen desc
         nullptr,  // No restrict to output
         &swapChain1
-    );
+    ));
 
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] CreateSwapChainForHwnd failed: %s", HRESULTToString(hr).c_str());
@@ -321,7 +322,7 @@ bool CDX12Context::CreateRTVHeap() {
     rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     rtvHeapDesc.NodeMask = 0;
 
-    HRESULT hr = m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap));
+    HRESULT hr = DX12_CHECK(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] CreateDescriptorHeap (RTV) failed: %s", HRESULTToString(hr).c_str());
         return false;
@@ -342,7 +343,7 @@ bool CDX12Context::CreateImGuiSrvHeap() {
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     srvHeapDesc.NodeMask = 0;
 
-    HRESULT hr = m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_imguiSrvHeap));
+    HRESULT hr = DX12_CHECK(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_imguiSrvHeap)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] CreateDescriptorHeap (ImGui SRV) failed: %s", HRESULTToString(hr).c_str());
         return false;
@@ -399,10 +400,10 @@ void CDX12Context::ReleaseBackbuffers() {
 
 bool CDX12Context::CreateCommandAllocators() {
     for (uint32_t i = 0; i < NUM_FRAMES_IN_FLIGHT; i++) {
-        HRESULT hr = m_device->CreateCommandAllocator(
+        HRESULT hr = DX12_CHECK(m_device->CreateCommandAllocator(
             D3D12_COMMAND_LIST_TYPE_DIRECT,
             IID_PPV_ARGS(&m_commandAllocators[i])
-        );
+        ));
 
         if (FAILED(hr)) {
             CFFLog::Error("[DX12Context] CreateCommandAllocator(%u) failed: %s", i, HRESULTToString(hr).c_str());
@@ -419,7 +420,7 @@ bool CDX12Context::CreateCommandAllocators() {
 // ============================================
 
 bool CDX12Context::CreateFence() {
-    HRESULT hr = m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence));
+    HRESULT hr = DX12_CHECK(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12Context] CreateFence failed: %s", HRESULTToString(hr).c_str());
         return false;

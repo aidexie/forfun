@@ -38,6 +38,26 @@ const char* CFFLog::GetRuntimeLogPath() {
     return GetRuntimeLogPathInternal().c_str();
 }
 
+void CFFLog::Initialize() {
+    const std::string& logPath = GetRuntimeLogPathInternal();
+    if (logPath.empty()) {
+        return;  // FFPath not initialized yet
+    }
+
+    // Ensure directory exists
+    std::filesystem::path p(logPath);
+    std::filesystem::path dir = p.parent_path();
+    if (!dir.empty() && !std::filesystem::exists(dir)) {
+        std::filesystem::create_directories(dir);
+    }
+
+    // Clear (truncate) the log file
+    std::ofstream file(logPath, std::ios::out | std::ios::trunc);
+    if (file.is_open()) {
+        file.close();
+    }
+}
+
 void CFFLog::BeginSession(const char* sessionType, const char* sessionName) {
     if (m_sessionActive) {
         EndSession();  // Auto-close previous session

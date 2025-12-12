@@ -1,4 +1,5 @@
 #include "DX12UploadManager.h"
+#include "DX12Common.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -31,14 +32,14 @@ CUploadPage::CUploadPage(ID3D12Device* device, uint64_t size)
     resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     resourceDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-    HRESULT hr = device->CreateCommittedResource(
+    HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &resourceDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
         IID_PPV_ARGS(&m_resource)
-    );
+    ));
 
     if (FAILED(hr)) {
         CFFLog::Error("[UploadPage] Failed to create upload buffer: %s", HRESULTToString(hr).c_str());
@@ -47,7 +48,7 @@ CUploadPage::CUploadPage(ID3D12Device* device, uint64_t size)
 
     // Map the buffer
     D3D12_RANGE readRange = { 0, 0 };
-    hr = m_resource->Map(0, &readRange, &m_cpuAddress);
+    hr = DX12_CHECK(m_resource->Map(0, &readRange, &m_cpuAddress));
     if (FAILED(hr)) {
         CFFLog::Error("[UploadPage] Failed to map upload buffer: %s", HRESULTToString(hr).c_str());
         m_resource.Reset();

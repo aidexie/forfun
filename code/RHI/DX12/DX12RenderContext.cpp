@@ -1,4 +1,5 @@
 #include "DX12RenderContext.h"
+#include "DX12Common.h"
 #include "DX12Context.h"
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
@@ -220,14 +221,14 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
     D3D12_RESOURCE_STATES initialState = GetInitialResourceState(heapType, desc.usage);
 
     ComPtr<ID3D12Resource> resource;
-    HRESULT hr = device->CreateCommittedResource(
+    HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &resourceDesc,
         initialState,
         nullptr,
         IID_PPV_ARGS(&resource)
-    );
+    ));
 
     if (FAILED(hr)) {
         CFFLog::Error("[DX12RenderContext] CreateBuffer failed: %s", HRESULTToString(hr).c_str());
@@ -309,6 +310,69 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
                      ((desc.cpuAccess == ECPUAccess::Read) ? D3D12_HEAP_TYPE_READBACK : D3D12_HEAP_TYPE_UPLOAD) :
                      D3D12_HEAP_TYPE_DEFAULT;
 
+    // DX12: Staging textures (UPLOAD/READBACK) must be buffers, not textures
+    // For texture staging, we create a buffer with appropriate size instead
+    if (heapProps.Type == D3D12_HEAP_TYPE_UPLOAD || heapProps.Type == D3D12_HEAP_TYPE_READBACK) {
+        // Calculate required buffer size for the texture data
+        UINT64 totalSize = 0;
+        D3D12_RESOURCE_DESC tempDesc = {};
+        tempDesc.Dimension = dimension;
+        tempDesc.Width = desc.width;
+        tempDesc.Height = desc.height;
+        tempDesc.DepthOrArraySize = (dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? desc.depth : static_cast<UINT16>(arraySize);
+        tempDesc.MipLevels = static_cast<UINT16>(desc.mipLevels);
+        tempDesc.Format = ToDXGIFormat(desc.format);
+        tempDesc.SampleDesc.Count = 1;
+        tempDesc.SampleDesc.Quality = 0;
+        tempDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        tempDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        device->GetCopyableFootprints(&tempDesc, 0, desc.mipLevels * arraySize, 0, nullptr, nullptr, nullptr, &totalSize);
+
+        // Create buffer for staging
+        D3D12_RESOURCE_DESC bufferDesc = {};
+        bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bufferDesc.Width = totalSize;
+        bufferDesc.Height = 1;
+        bufferDesc.DepthOrArraySize = 1;
+        bufferDesc.MipLevels = 1;
+        bufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+        bufferDesc.SampleDesc.Count = 1;
+        bufferDesc.SampleDesc.Quality = 0;
+        bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+        D3D12_RESOURCE_STATES initialState = (heapProps.Type == D3D12_HEAP_TYPE_READBACK) ?
+            D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_GENERIC_READ;
+
+        ComPtr<ID3D12Resource> stagingBuffer;
+        HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            initialState,
+            nullptr,
+            IID_PPV_ARGS(&stagingBuffer)
+        ));
+
+        if (FAILED(hr)) {
+            CFFLog::Error("[DX12RenderContext] CreateTexture (staging buffer) failed: %s", HRESULTToString(hr).c_str());
+            return nullptr;
+        }
+
+        if (desc.debugName) {
+            wchar_t wname[128];
+            MultiByteToWideChar(CP_UTF8, 0, desc.debugName, -1, wname, 128);
+            stagingBuffer->SetName(wname);
+        }
+
+        // Create texture wrapper with staging buffer
+        // Note: This is a staging buffer, not a real texture - it will need special handling
+        CDX12Texture* texture = new CDX12Texture(stagingBuffer.Get(), desc, device);
+        stagingBuffer.Detach();
+        return texture;
+    }
+
     D3D12_RESOURCE_DESC resourceDesc = {};
     resourceDesc.Dimension = dimension;
     resourceDesc.Width = desc.width;
@@ -341,14 +405,14 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
     }
 
     ComPtr<ID3D12Resource> resource;
-    HRESULT hr = device->CreateCommittedResource(
+    HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &resourceDesc,
         initialState,
         pClearValue,
         IID_PPV_ARGS(&resource)
-    );
+    ));
 
     if (FAILED(hr)) {
         CFFLog::Error("[DX12RenderContext] CreateTexture failed: %s", HRESULTToString(hr).c_str());
@@ -579,8 +643,8 @@ IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipe
     psoDesc.CS = cs->GetBytecode();
 
     ComPtr<ID3D12PipelineState> pso;
-    HRESULT hr = CDX12Context::Instance().GetDevice()->CreateComputePipelineState(
-        &psoDesc, IID_PPV_ARGS(&pso));
+    HRESULT hr = DX12_CHECK(CDX12Context::Instance().GetDevice()->CreateComputePipelineState(
+        &psoDesc, IID_PPV_ARGS(&pso)));
 
     if (FAILED(hr)) {
         CFFLog::Error("[DX12RenderContext] CreateComputePipelineState failed: %s", HRESULTToString(hr).c_str());
@@ -694,35 +758,35 @@ bool CDX12RenderContext::CreateRootSignatures() {
     ID3D12Device* device = CDX12Context::Instance().GetDevice();
 
     // Graphics Root Signature
-    // Parameter 0: Root CBV b0 (PerFrame)
-    // Parameter 1: Root CBV b1 (PerObject)
-    // Parameter 2: Root CBV b2 (Material)
-    // Parameter 3: SRV Descriptor Table t0-t15
-    // Parameter 4: UAV Descriptor Table u0-u7
-    // Parameter 5: Sampler Descriptor Table s0-s7
+    // Parameter 0-6: Root CBV b0-b6
+    //   b0 (PerFrame), b1 (PerObject), b2 (Material), b3 (ClusteredParams),
+    //   b4 (CB_Probes), b5 (CB_LightProbeParams), b6 (CB_VolumetricLightmap)
+    // Parameter 7: SRV Descriptor Table t0-t15
+    // Parameter 8: UAV Descriptor Table u0-u7
+    // Parameter 9: Sampler Descriptor Table s0-s7
 
-    D3D12_ROOT_PARAMETER rootParams[6] = {};
+    D3D12_ROOT_PARAMETER rootParams[10] = {};
 
-    // CBV parameters
-    for (int i = 0; i < 3; ++i) {
+    // CBV parameters (b0-b6)
+    for (int i = 0; i < 7; ++i) {
         rootParams[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParams[i].Descriptor.ShaderRegister = i;
         rootParams[i].Descriptor.RegisterSpace = 0;
         rootParams[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     }
 
-    // SRV table
+    // SRV table (t0-t24)
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    srvRange.NumDescriptors = 16;
+    srvRange.NumDescriptors = 25;  // t0-t24 for VolumetricLightmap textures
     srvRange.BaseShaderRegister = 0;
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    rootParams[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[3].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[3].DescriptorTable.pDescriptorRanges = &srvRange;
-    rootParams[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[7].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[7].DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParams[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // UAV table
     D3D12_DESCRIPTOR_RANGE uavRange = {};
@@ -732,10 +796,10 @@ bool CDX12RenderContext::CreateRootSignatures() {
     uavRange.RegisterSpace = 0;
     uavRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    rootParams[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[4].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[4].DescriptorTable.pDescriptorRanges = &uavRange;
-    rootParams[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[8].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[8].DescriptorTable.pDescriptorRanges = &uavRange;
+    rootParams[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Sampler table
     D3D12_DESCRIPTOR_RANGE samplerRange = {};
@@ -745,13 +809,13 @@ bool CDX12RenderContext::CreateRootSignatures() {
     samplerRange.RegisterSpace = 0;
     samplerRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    rootParams[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[5].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[5].DescriptorTable.pDescriptorRanges = &samplerRange;
-    rootParams[5].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[9].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[9].DescriptorTable.pDescriptorRanges = &samplerRange;
+    rootParams[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-    rootSigDesc.NumParameters = 6;
+    rootSigDesc.NumParameters = 10;
     rootSigDesc.pParameters = rootParams;
     rootSigDesc.NumStaticSamplers = 0;
     rootSigDesc.pStaticSamplers = nullptr;
@@ -759,7 +823,7 @@ bool CDX12RenderContext::CreateRootSignatures() {
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
-    HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error);
+    HRESULT hr = DX12_CHECK(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
     if (FAILED(hr)) {
         if (error) {
             CFFLog::Error("[DX12RenderContext] Root signature serialization failed: %s", (char*)error->GetBufferPointer());
@@ -767,7 +831,7 @@ bool CDX12RenderContext::CreateRootSignatures() {
         return false;
     }
 
-    hr = device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_graphicsRootSignature));
+    hr = DX12_CHECK(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_graphicsRootSignature)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12RenderContext] CreateRootSignature (graphics) failed: %s", HRESULTToString(hr).c_str());
         return false;
@@ -806,7 +870,7 @@ bool CDX12RenderContext::CreateRootSignatures() {
     computeRootSigDesc.pParameters = computeParams;
     computeRootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-    hr = D3D12SerializeRootSignature(&computeRootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error);
+    hr = DX12_CHECK(D3D12SerializeRootSignature(&computeRootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
     if (FAILED(hr)) {
         if (error) {
             CFFLog::Error("[DX12RenderContext] Compute root signature serialization failed: %s", (char*)error->GetBufferPointer());
@@ -814,7 +878,7 @@ bool CDX12RenderContext::CreateRootSignatures() {
         return false;
     }
 
-    hr = device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature));
+    hr = DX12_CHECK(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12RenderContext] CreateRootSignature (compute) failed: %s", HRESULTToString(hr).c_str());
         return false;

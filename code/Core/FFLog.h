@@ -62,6 +62,10 @@ public:
     static void SetRuntimeLogPath(const char* path);
     static const char* GetRuntimeLogPath();
 
+    // Initialize logging system (clears old log file)
+    // Call this once at program startup after FFPath::Initialize()
+    static void Initialize();
+
 private:
     CFFLog() = default;
     ~CFFLog() = default;

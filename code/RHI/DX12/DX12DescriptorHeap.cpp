@@ -1,4 +1,5 @@
 #include "DX12DescriptorHeap.h"
+#include "DX12Common.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -41,7 +42,7 @@ bool CDX12DescriptorHeap::Initialize(
     heapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     heapDesc.NodeMask = 0;
 
-    HRESULT hr = device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_heap));
+    HRESULT hr = DX12_CHECK(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_heap)));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12DescriptorHeap] CreateDescriptorHeap failed: %s", HRESULTToString(hr).c_str());
         return false;

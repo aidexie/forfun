@@ -1,5 +1,6 @@
 #include "DX12PipelineState.h"
 #include "DX12Resources.h"
+#include "DX12Common.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -161,10 +162,33 @@ void CDX12PSOBuilder::SetSampleDesc(UINT count, UINT quality) {
 }
 
 ID3D12PipelineState* CDX12PSOBuilder::Build(ID3D12Device* device) {
+    // Validate required fields
+    if (!m_desc.pRootSignature) {
+        CFFLog::Error("[DX12PSOBuilder] Build failed: No root signature set");
+        return nullptr;
+    }
+    if (m_desc.VS.pShaderBytecode == nullptr || m_desc.VS.BytecodeLength == 0) {
+        CFFLog::Error("[DX12PSOBuilder] Build failed: No vertex shader set");
+        return nullptr;
+    }
+
     ComPtr<ID3D12PipelineState> pso;
-    HRESULT hr = device->CreateGraphicsPipelineState(&m_desc, IID_PPV_ARGS(&pso));
+    HRESULT hr = DX12_CHECK(device->CreateGraphicsPipelineState(&m_desc, IID_PPV_ARGS(&pso)));
     if (FAILED(hr)) {
-        CFFLog::Error("[DX12PSOBuilder] CreateGraphicsPipelineState failed: %s", HRESULTToString(hr).c_str());
+        // Additional context for debugging
+        CFFLog::Error("[DX12PSOBuilder] PSO creation context:");
+        CFFLog::Error("[DX12PSOBuilder]   VS: %p (%zu bytes)", m_desc.VS.pShaderBytecode, m_desc.VS.BytecodeLength);
+        CFFLog::Error("[DX12PSOBuilder]   PS: %p (%zu bytes)", m_desc.PS.pShaderBytecode, m_desc.PS.BytecodeLength);
+        CFFLog::Error("[DX12PSOBuilder]   NumRenderTargets: %u, RTVFormat[0]: %u", m_desc.NumRenderTargets, m_desc.RTVFormats[0]);
+        CFFLog::Error("[DX12PSOBuilder]   DSVFormat: %u", m_desc.DSVFormat);
+        CFFLog::Error("[DX12PSOBuilder]   InputLayout: %u elements", m_desc.InputLayout.NumElements);
+        for (UINT i = 0; i < m_desc.InputLayout.NumElements; i++) {
+            const auto& elem = m_desc.InputLayout.pInputElementDescs[i];
+            CFFLog::Error("[DX12PSOBuilder]     [%u] %s%u Format=%u Slot=%u Offset=%u",
+                i, elem.SemanticName, elem.SemanticIndex, elem.Format, elem.InputSlot, elem.AlignedByteOffset);
+        }
+        CFFLog::Error("[DX12PSOBuilder]   TopologyType: %d", m_desc.PrimitiveTopologyType);
+        CFFLog::Error("[DX12PSOBuilder]   SampleDesc: Count=%u Quality=%u", m_desc.SampleDesc.Count, m_desc.SampleDesc.Quality);
         return nullptr;
     }
     return pso.Detach();

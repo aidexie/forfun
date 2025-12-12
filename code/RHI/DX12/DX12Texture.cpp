@@ -59,7 +59,12 @@ MappedTexture CDX12Texture::Map(uint32_t arraySlice, uint32_t mipLevel) {
         return result;
     }
 
-    UINT subresource = CalcSubresource(mipLevel, arraySlice, 0, m_desc.mipLevels, m_desc.arraySize);
+    // For staging textures, we created a buffer (not a texture) in DX12
+    // Buffers always use subresource 0
+    D3D12_RESOURCE_DESC resDesc = m_resource->GetDesc();
+    bool isBuffer = (resDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
+
+    UINT subresource = isBuffer ? 0 : CalcSubresource(mipLevel, arraySlice, 0, m_desc.mipLevels, m_desc.arraySize);
 
     D3D12_RANGE readRange = {};
     if (m_desc.cpuAccess == ECPUAccess::Write) {
@@ -73,17 +78,42 @@ MappedTexture CDX12Texture::Map(uint32_t arraySlice, uint32_t mipLevel) {
         return result;
     }
 
-    // Get layout info
-    D3D12_RESOURCE_DESC resDesc = m_resource->GetDesc();
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
-    UINT numRows;
-    UINT64 rowSizeInBytes;
-    UINT64 totalBytes;
-    m_device->GetCopyableFootprints(&resDesc, subresource, 1, 0, &footprint, &numRows, &rowSizeInBytes, &totalBytes);
+    if (isBuffer) {
+        // For staging buffers, we need to calculate the offset for the specific subresource
+        // Create a temporary texture desc to get proper footprints
+        D3D12_RESOURCE_DESC tempDesc = {};
+        tempDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        tempDesc.Width = m_desc.width;
+        tempDesc.Height = m_desc.height;
+        tempDesc.DepthOrArraySize = static_cast<UINT16>(m_desc.arraySize);
+        tempDesc.MipLevels = static_cast<UINT16>(m_desc.mipLevels);
+        tempDesc.Format = ToDXGIFormat(m_desc.format);
+        tempDesc.SampleDesc.Count = 1;
+        tempDesc.SampleDesc.Quality = 0;
+        tempDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        tempDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
-    result.pData = mappedData;
-    result.rowPitch = footprint.Footprint.RowPitch;
-    result.depthPitch = footprint.Footprint.RowPitch * footprint.Footprint.Height;
+        UINT targetSubresource = CalcSubresource(mipLevel, arraySlice, 0, m_desc.mipLevels, m_desc.arraySize);
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+        UINT numRows;
+        UINT64 rowSizeInBytes;
+        m_device->GetCopyableFootprints(&tempDesc, targetSubresource, 1, 0, &footprint, &numRows, &rowSizeInBytes, nullptr);
+
+        result.pData = static_cast<uint8_t*>(mappedData) + footprint.Offset;
+        result.rowPitch = footprint.Footprint.RowPitch;
+        result.depthPitch = footprint.Footprint.RowPitch * footprint.Footprint.Height;
+    } else {
+        // Regular texture map
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+        UINT numRows;
+        UINT64 rowSizeInBytes;
+        UINT64 totalBytes;
+        m_device->GetCopyableFootprints(&resDesc, subresource, 1, 0, &footprint, &numRows, &rowSizeInBytes, &totalBytes);
+
+        result.pData = mappedData;
+        result.rowPitch = footprint.Footprint.RowPitch;
+        result.depthPitch = footprint.Footprint.RowPitch * footprint.Footprint.Height;
+    }
 
     return result;
 }
@@ -93,16 +123,23 @@ void CDX12Texture::Unmap(uint32_t arraySlice, uint32_t mipLevel) {
         return;
     }
 
-    UINT subresource = CalcSubresource(mipLevel, arraySlice, 0, m_desc.mipLevels, m_desc.arraySize);
+    // For staging textures, we created a buffer (not a texture) in DX12
+    D3D12_RESOURCE_DESC resDesc = m_resource->GetDesc();
+    bool isBuffer = (resDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
+
+    UINT subresource = isBuffer ? 0 : CalcSubresource(mipLevel, arraySlice, 0, m_desc.mipLevels, m_desc.arraySize);
 
     D3D12_RANGE writtenRange = {};
     if (m_desc.cpuAccess == ECPUAccess::Write) {
-        // Written the whole thing (simplified)
-        D3D12_RESOURCE_DESC resDesc = m_resource->GetDesc();
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
-        UINT64 totalBytes;
-        m_device->GetCopyableFootprints(&resDesc, subresource, 1, 0, &footprint, nullptr, nullptr, &totalBytes);
-        writtenRange = { 0, static_cast<SIZE_T>(totalBytes) };
+        if (isBuffer) {
+            // For staging buffer, the entire buffer was potentially written
+            writtenRange = { 0, static_cast<SIZE_T>(resDesc.Width) };
+        } else {
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+            UINT64 totalBytes;
+            m_device->GetCopyableFootprints(&resDesc, subresource, 1, 0, &footprint, nullptr, nullptr, &totalBytes);
+            writtenRange = { 0, static_cast<SIZE_T>(totalBytes) };
+        }
     }
 
     m_resource->Unmap(subresource, &writtenRange);
