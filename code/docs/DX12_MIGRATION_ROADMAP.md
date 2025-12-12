@@ -5,7 +5,35 @@
 本文档描述了为 RHI 抽象层添加 DX12 后端的实现计划。目标是在不修改上层渲染代码的前提下，实现完整的 DX12 支持。
 
 **开始日期**: 2025-12-12
-**预估工期**: 20-29 个工作日
+**当前状态**: Phase 0-8 已完成 ✅
+**剩余工作**: 资源初始数据上传、资源状态跟踪完善
+
+---
+
+## Current Status (2025-12-12)
+
+### ✅ Completed Phases
+- **Phase 0**: DX12 目录结构创建
+- **Phase 1**: Device, SwapChain, Fence 同步
+- **Phase 2**: Descriptor Heap 管理
+- **Phase 3**: Buffer 和 Texture 资源创建
+- **Phase 4**: 资源状态跟踪
+- **Phase 5**: CommandList 和 RenderContext
+- **Phase 6**: PSO Builder 和缓存
+- **Phase 7**: Shader 编译和验证
+- **Phase 8**: 后端集成和启用
+- **Phase 9**: Debug 基础设施 (DX12_CHECK 宏, InfoQueue)
+
+### ⚠️ Known Issues
+1. **Texture Initial Data Upload**: 未完全实现，KTX 纹理数据需要通过 Upload Heap 复制
+2. **Buffer Initial Data Upload**: Default Heap Buffer 的初始数据上传未实现
+3. **Resource State Warnings**: 部分资源未注册到 StateTracker
+
+### 📊 Root Signature (Updated)
+- **CBV**: b0-b6 (7 slots) - PerFrame, PerObject, Material, ClusteredParams, Probes, LightProbe, VolumetricLightmap
+- **SRV**: t0-t24 (25 slots) - 材质纹理 + VolumetricLightmap
+- **UAV**: u0-u7 (8 slots)
+- **Sampler**: s0-s7 (8 slots)
 
 ---
 
@@ -80,16 +108,20 @@
 │ Parameter 0  │ Root CBV (b0) - PerFrame Constants           │
 │ Parameter 1  │ Root CBV (b1) - PerObject Constants          │
 │ Parameter 2  │ Root CBV (b2) - Material Constants           │
-│ Parameter 3  │ Descriptor Table: SRV t0-t15 (Textures)      │
-│ Parameter 4  │ Descriptor Table: UAV u0-u7 (RW Resources)   │
-│ Parameter 5  │ Descriptor Table: Sampler s0-s7              │
+│ Parameter 3  │ Root CBV (b3) - ClusteredParams              │
+│ Parameter 4  │ Root CBV (b4) - CB_Probes                    │
+│ Parameter 5  │ Root CBV (b5) - CB_LightProbeParams          │
+│ Parameter 6  │ Root CBV (b6) - CB_VolumetricLightmap        │
+│ Parameter 7  │ Descriptor Table: SRV t0-t24 (Textures)      │
+│ Parameter 8  │ Descriptor Table: UAV u0-u7 (RW Resources)   │
+│ Parameter 9  │ Descriptor Table: Sampler s0-s7              │
 └──────────────┴──────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
 │                    Compute Root Signature                    │
 ├──────────────┬──────────────────────────────────────────────┤
 │ Parameter 0  │ Root CBV (b0) - Compute Constants            │
-│ Parameter 1  │ Descriptor Table: SRV t0-t15 (Input)         │
+│ Parameter 1  │ Descriptor Table: SRV t0-t24 (Input)         │
 │ Parameter 2  │ Descriptor Table: UAV u0-u7 (Output)         │
 │ Parameter 3  │ Descriptor Table: Sampler s0-s7              │
 └──────────────┴──────────────────────────────────────────────┘

@@ -7,9 +7,36 @@
 
 ---
 
-## 当前进度 (2025-12-09)
+## 当前进度 (2025-12-12)
 
 ### ✅ 已完成
+
+#### RHI 抽象层 + DX12 后端 (Phase 0.5) ⭐ NEW
+- **RHI 抽象层**: 渲染硬件接口，支持多后端切换
+  - `RHI/IRHIContext.h` - 上下文接口（Device, SwapChain, CommandQueue）
+  - `RHI/IRHIRenderContext.h` - 渲染上下文接口（资源创建, PSO, CommandList）
+  - `RHI/RHIManager.h` - 运行时后端管理和切换
+  - `RHIFactory.h` - 后端工厂模式创建
+- **DX12 后端实现**:
+  - `DX12Context` - Device, SwapChain, CommandQueue, Fence 同步
+  - `DX12RenderContext` - 资源创建, Root Signature, PSO Builder
+  - `DX12CommandList` - 命令列表封装, 资源绑定
+  - `DX12DescriptorHeap` - 描述符堆管理（CBV/SRV/UAV, Sampler, RTV, DSV）
+  - `DX12UploadManager` - 上传堆管理（动态内存分配）
+  - `DX12ResourceStateTracker` - 资源状态跟踪和屏障管理
+  - `DX12PipelineState` - PSO Builder + Cache
+- **DX12 Debug 基础设施**:
+  - `DX12_CHECK` 宏 - 包装所有 D3D12 API 调用，输出文件名/行号
+  - `DX12Debug.cpp` - InfoQueue 错误消息检索
+  - Debug Layer 集成
+- **Root Signature 配置**:
+  - 7 个 CBV (b0-b6): PerFrame, PerObject, Material, ClusteredParams, Probes, LightProbe, VolumetricLightmap
+  - 25 个 SRV (t0-t24): 材质纹理 + VolumetricLightmap 纹理
+  - 8 个 UAV (u0-u7), 8 个 Sampler (s0-s7)
+- **配置系统**:
+  - `render.json` - 运行时后端选择（DX11/DX12）
+  - `RenderConfig` - 配置加载和应用
+- **ImGui DX12 支持**: 完整的 DX12 ImGui 后端集成
 
 #### 自动化测试基础设施 (Phase 0)
 - **测试框架**: 命令行驱动 (`--test TestName`)，帧回调架构，自动退出
@@ -89,6 +116,26 @@
 ---
 
 ## 🐛 已知问题 (Known Issues)
+
+### DX12 后端
+
+1. **纹理初始数据上传未完成**
+   - **现象**: `[WARNING] Texture initial data upload not fully implemented`
+   - **原因**: CreateTexture 时的 initialData 需要通过 Upload Heap 复制到 GPU
+   - **影响**: 部分纹理可能显示错误
+   - **状态**: 待实现
+
+2. **Buffer 初始数据上传未完成**
+   - **现象**: `[WARNING] Initial data for default heap buffer not implemented`
+   - **原因**: 非 Upload Heap 的 Buffer 需要额外复制步骤
+   - **影响**: 部分缓冲区数据可能未正确初始化
+   - **状态**: 待实现
+
+3. **资源状态跟踪警告**
+   - **现象**: `[WARNING] Resource not registered, assuming COMMON state`
+   - **原因**: 某些资源创建后未注册到 ResourceStateTracker
+   - **影响**: 可能产生不必要的资源屏障
+   - **状态**: 待修复
 
 ### Volumetric Lightmap
 
@@ -603,4 +650,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2025-12-02
+**Last Updated**: 2025-12-12
