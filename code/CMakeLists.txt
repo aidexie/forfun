@@ -130,12 +130,17 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h
     ${CODE_PATH}/RHI/ShaderCompiler.h
-    # DX12 Backend (Phase 2: Context + Descriptor Heaps)
+    # DX12 Backend (Phase 3: Context + Descriptor Heaps + Resources)
     ${CODE_PATH}/RHI/DX12/DX12Common.h
     ${CODE_PATH}/RHI/DX12/DX12Context.h
     ${CODE_PATH}/RHI/DX12/DX12Context.cpp
     ${CODE_PATH}/RHI/DX12/DX12DescriptorHeap.h
     ${CODE_PATH}/RHI/DX12/DX12DescriptorHeap.cpp
+    ${CODE_PATH}/RHI/DX12/DX12Resources.h
+    ${CODE_PATH}/RHI/DX12/DX12Buffer.cpp
+    ${CODE_PATH}/RHI/DX12/DX12Texture.cpp
+    ${CODE_PATH}/RHI/DX12/DX12UploadManager.h
+    ${CODE_PATH}/RHI/DX12/DX12UploadManager.cpp
 )
 
 # Engine root sources - explicitly listed (no GLOB)

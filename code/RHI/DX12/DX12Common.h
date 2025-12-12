@@ -124,6 +124,15 @@ constexpr uint32_t CONSTANT_BUFFER_ALIGNMENT = D3D12_CONSTANT_BUFFER_DATA_PLACEM
 constexpr uint32_t TEXTURE_DATA_ALIGNMENT = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
 
 // ============================================
+// Subresource Calculation
+// ============================================
+
+// Calculate subresource index (matches D3D12CalcSubresource)
+inline UINT CalcSubresource(UINT mipSlice, UINT arraySlice, UINT planeSlice, UINT mipLevels, UINT arraySize) {
+    return mipSlice + arraySlice * mipLevels + planeSlice * mipLevels * arraySize;
+}
+
+// ============================================
 // Format Conversion
 // ============================================
 
