@@ -377,6 +377,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 exitCode = -3;
                 goto cleanup;
             }
+
+            // DX12 requires explicit device objects creation (font texture upload)
+            ImGui_ImplDX12_CreateDeviceObjects();
             CFFLog::Info("[Main] ImGui DX12 backend initialized");
         } else {
             // DX11 backend
