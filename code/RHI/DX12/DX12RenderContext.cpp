@@ -3,6 +3,7 @@
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
 #include "DX12UploadManager.h"
+#include "DX12PipelineState.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -46,6 +47,12 @@ bool CDX12RenderContext::Initialize(void* nativeWindowHandle, uint32_t width, ui
         return false;
     }
 
+    // Initialize PSO cache
+    if (!CDX12PSOCache::Instance().Initialize(device)) {
+        CFFLog::Error("[DX12RenderContext] Failed to initialize PSO cache");
+        return false;
+    }
+
     // Create root signatures
     if (!CreateRootSignatures()) {
         CFFLog::Error("[DX12RenderContext] Failed to create root signatures");
@@ -79,6 +86,7 @@ void CDX12RenderContext::Shutdown() {
     m_computeRootSignature.Reset();
 
     // Shutdown managers
+    CDX12PSOCache::Instance().Shutdown();
     CDX12UploadManager::Instance().Shutdown();
     CDX12DescriptorHeapManager::Instance().Shutdown();
     CDX12Context::Instance().Shutdown();
@@ -435,15 +443,153 @@ IShader* CDX12RenderContext::CreateShader(const ShaderDesc& desc) {
 }
 
 IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc& desc) {
-    // Will be implemented in Phase 6
-    CFFLog::Warning("[DX12RenderContext] CreatePipelineState not fully implemented");
-    return nullptr;
+    CDX12PSOBuilder builder;
+
+    // Set root signature
+    builder.SetRootSignature(m_graphicsRootSignature.Get());
+
+    // Set shaders
+    if (desc.vertexShader) {
+        CDX12Shader* vs = static_cast<CDX12Shader*>(desc.vertexShader);
+        builder.SetVertexShader(vs->GetBytecode());
+    }
+    if (desc.pixelShader) {
+        CDX12Shader* ps = static_cast<CDX12Shader*>(desc.pixelShader);
+        builder.SetPixelShader(ps->GetBytecode());
+    }
+    if (desc.geometryShader) {
+        CDX12Shader* gs = static_cast<CDX12Shader*>(desc.geometryShader);
+        builder.SetGeometryShader(gs->GetBytecode());
+    }
+    if (desc.hullShader) {
+        CDX12Shader* hs = static_cast<CDX12Shader*>(desc.hullShader);
+        builder.SetHullShader(hs->GetBytecode());
+    }
+    if (desc.domainShader) {
+        CDX12Shader* ds = static_cast<CDX12Shader*>(desc.domainShader);
+        builder.SetDomainShader(ds->GetBytecode());
+    }
+
+    // Set input layout
+    if (!desc.inputLayout.empty()) {
+        std::vector<D3D12_INPUT_ELEMENT_DESC> elements;
+        for (const auto& elem : desc.inputLayout) {
+            D3D12_INPUT_ELEMENT_DESC d3dElem = {};
+            d3dElem.SemanticName = ToD3D12SemanticName(elem.semantic);
+            d3dElem.SemanticIndex = elem.semanticIndex;
+            d3dElem.Format = ToD3D12VertexFormat(elem.format);
+            d3dElem.InputSlot = elem.inputSlot;
+            d3dElem.AlignedByteOffset = elem.offset;
+            d3dElem.InputSlotClass = elem.instanceData ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
+            d3dElem.InstanceDataStepRate = elem.instanceData ? 1 : 0;
+            elements.push_back(d3dElem);
+        }
+        builder.SetInputLayout(elements);
+    }
+
+    // Set rasterizer state
+    D3D12_RASTERIZER_DESC rasterizerDesc = {};
+    rasterizerDesc.FillMode = ToD3D12FillMode(desc.rasterizer.fillMode);
+    rasterizerDesc.CullMode = ToD3D12CullMode(desc.rasterizer.cullMode);
+    rasterizerDesc.FrontCounterClockwise = desc.rasterizer.frontCounterClockwise;
+    rasterizerDesc.DepthBias = desc.rasterizer.depthBias;
+    rasterizerDesc.DepthBiasClamp = desc.rasterizer.depthBiasClamp;
+    rasterizerDesc.SlopeScaledDepthBias = desc.rasterizer.slopeScaledDepthBias;
+    rasterizerDesc.DepthClipEnable = desc.rasterizer.depthClipEnable;
+    rasterizerDesc.MultisampleEnable = desc.rasterizer.multisampleEnable;
+    rasterizerDesc.AntialiasedLineEnable = desc.rasterizer.antialiasedLineEnable;
+    rasterizerDesc.ForcedSampleCount = 0;
+    rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
+    builder.SetRasterizerState(rasterizerDesc);
+
+    // Set depth stencil state
+    D3D12_DEPTH_STENCIL_DESC depthStencilDesc = {};
+    depthStencilDesc.DepthEnable = desc.depthStencil.depthEnable;
+    depthStencilDesc.DepthWriteMask = desc.depthStencil.depthWriteEnable ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+    depthStencilDesc.DepthFunc = ToD3D12ComparisonFunc(desc.depthStencil.depthFunc);
+    depthStencilDesc.StencilEnable = desc.depthStencil.stencilEnable;
+    depthStencilDesc.StencilReadMask = desc.depthStencil.stencilReadMask;
+    depthStencilDesc.StencilWriteMask = desc.depthStencil.stencilWriteMask;
+    builder.SetDepthStencilState(depthStencilDesc);
+
+    // Set blend state
+    D3D12_BLEND_DESC blendDesc = {};
+    blendDesc.AlphaToCoverageEnable = FALSE;
+    blendDesc.IndependentBlendEnable = FALSE;
+    blendDesc.RenderTarget[0].BlendEnable = desc.blend.blendEnable;
+    blendDesc.RenderTarget[0].SrcBlend = ToD3D12BlendFactor(desc.blend.srcBlend);
+    blendDesc.RenderTarget[0].DestBlend = ToD3D12BlendFactor(desc.blend.dstBlend);
+    blendDesc.RenderTarget[0].BlendOp = ToD3D12BlendOp(desc.blend.blendOp);
+    blendDesc.RenderTarget[0].SrcBlendAlpha = ToD3D12BlendFactor(desc.blend.srcBlendAlpha);
+    blendDesc.RenderTarget[0].DestBlendAlpha = ToD3D12BlendFactor(desc.blend.dstBlendAlpha);
+    blendDesc.RenderTarget[0].BlendOpAlpha = ToD3D12BlendOp(desc.blend.blendOpAlpha);
+    blendDesc.RenderTarget[0].RenderTargetWriteMask = desc.blend.renderTargetWriteMask;
+    builder.SetBlendState(blendDesc);
+
+    // Set render target formats
+    std::vector<DXGI_FORMAT> rtFormats;
+    for (auto fmt : desc.renderTargetFormats) {
+        rtFormats.push_back(ToDXGIFormat(fmt));
+    }
+    if (rtFormats.empty()) {
+        rtFormats.push_back(DXGI_FORMAT_R8G8B8A8_UNORM);  // Default
+    }
+    builder.SetRenderTargetFormats(rtFormats);
+
+    // Set depth stencil format
+    if (desc.depthStencilFormat != ETextureFormat::Unknown) {
+        builder.SetDepthStencilFormat(ToDXGIFormat(desc.depthStencilFormat));
+    } else {
+        builder.SetDepthStencilFormat(DXGI_FORMAT_D24_UNORM_S8_UINT);
+    }
+
+    // Set topology type
+    builder.SetPrimitiveTopologyType(ToD3D12TopologyType(desc.primitiveTopology));
+
+    // Build PSO
+    ID3D12PipelineState* pso = builder.Build(CDX12Context::Instance().GetDevice());
+    if (!pso) {
+        CFFLog::Error("[DX12RenderContext] Failed to create graphics PSO");
+        return nullptr;
+    }
+
+    if (desc.debugName) {
+        wchar_t wname[128];
+        MultiByteToWideChar(CP_UTF8, 0, desc.debugName, -1, wname, 128);
+        pso->SetName(wname);
+    }
+
+    return new CDX12PipelineState(pso, m_graphicsRootSignature.Get(), false);
 }
 
 IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipelineDesc& desc) {
-    // Will be implemented in Phase 6
-    CFFLog::Warning("[DX12RenderContext] CreateComputePipelineState not fully implemented");
-    return nullptr;
+    if (!desc.computeShader) {
+        CFFLog::Error("[DX12RenderContext] CreateComputePipelineState requires compute shader");
+        return nullptr;
+    }
+
+    CDX12Shader* cs = static_cast<CDX12Shader*>(desc.computeShader);
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_computeRootSignature.Get();
+    psoDesc.CS = cs->GetBytecode();
+
+    ComPtr<ID3D12PipelineState> pso;
+    HRESULT hr = CDX12Context::Instance().GetDevice()->CreateComputePipelineState(
+        &psoDesc, IID_PPV_ARGS(&pso));
+
+    if (FAILED(hr)) {
+        CFFLog::Error("[DX12RenderContext] CreateComputePipelineState failed: %s", HRESULTToString(hr).c_str());
+        return nullptr;
+    }
+
+    if (desc.debugName) {
+        wchar_t wname[128];
+        MultiByteToWideChar(CP_UTF8, 0, desc.debugName, -1, wname, 128);
+        pso->SetName(wname);
+    }
+
+    return new CDX12PipelineState(pso.Detach(), m_computeRootSignature.Get(), true);
 }
 
 ITexture* CDX12RenderContext::WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) {

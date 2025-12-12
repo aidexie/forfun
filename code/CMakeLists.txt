@@ -130,7 +130,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h
     ${CODE_PATH}/RHI/ShaderCompiler.h
-    # DX12 Backend (Phase 5: + CommandList and RenderContext)
+    # DX12 Backend (Phase 6: + PSO and Pipeline State)
     ${CODE_PATH}/RHI/DX12/DX12Common.h
     ${CODE_PATH}/RHI/DX12/DX12Context.h
     ${CODE_PATH}/RHI/DX12/DX12Context.cpp
@@ -147,6 +147,8 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12CommandList.cpp
     ${CODE_PATH}/RHI/DX12/DX12RenderContext.h
     ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
+    ${CODE_PATH}/RHI/DX12/DX12PipelineState.h
+    ${CODE_PATH}/RHI/DX12/DX12PipelineState.cpp
 )
 
 # Engine root sources - explicitly listed (no GLOB)
