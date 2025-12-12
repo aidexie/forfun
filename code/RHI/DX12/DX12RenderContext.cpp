@@ -439,6 +439,10 @@ ISampler* CDX12RenderContext::CreateSampler(const SamplerDesc& desc) {
 }
 
 IShader* CDX12RenderContext::CreateShader(const ShaderDesc& desc) {
+    if (!desc.bytecode || desc.bytecodeSize == 0) {
+        CFFLog::Error("[DX12RenderContext] CreateShader failed: No bytecode provided");
+        return nullptr;
+    }
     return new CDX12Shader(desc.type, desc.bytecode, desc.bytecodeSize);
 }
 
