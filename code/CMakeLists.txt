@@ -23,6 +23,7 @@ add_library(imgui_docking STATIC
     ${IMGUI_DIR}/imgui_widgets.cpp
     ${IMGUI_BACK}/imgui_impl_win32.cpp
     ${IMGUI_BACK}/imgui_impl_dx11.cpp
+    ${IMGUI_BACK}/imgui_impl_dx12.cpp
 )
 target_include_directories(imgui_docking PUBLIC
     ${IMGUI_DIR}

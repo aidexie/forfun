@@ -52,6 +52,11 @@ public:
     bool SupportsRaytracing() const { return m_supportsRaytracing; }
     bool SupportsMeshShaders() const { return m_supportsMeshShaders; }
 
+    // ImGui support - dedicated SRV heap for ImGui fonts/textures
+    ID3D12DescriptorHeap* GetImGuiSrvHeap() const { return m_imguiSrvHeap.Get(); }
+    D3D12_CPU_DESCRIPTOR_HANDLE GetImGuiSrvCpuHandle() const;
+    D3D12_GPU_DESCRIPTOR_HANDLE GetImGuiSrvGpuHandle() const;
+
 private:
     CDX12Context() = default;
     ~CDX12Context();
@@ -67,6 +72,7 @@ private:
     bool CreateCommandAllocators();
     bool CreateFence();
     bool CreateRTVHeap();
+    bool CreateImGuiSrvHeap();
     void CreateBackbufferRTVs();
     void EnableDebugLayer();
     void CheckFeatureSupport();
@@ -88,6 +94,10 @@ private:
     // RTV heap for backbuffers (small, dedicated heap)
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     uint32_t m_rtvDescriptorSize = 0;
+
+    // SRV heap for ImGui (shader-visible, for font texture)
+    ComPtr<ID3D12DescriptorHeap> m_imguiSrvHeap;
+    uint32_t m_srvDescriptorSize = 0;
 
     // Synchronization
     ComPtr<ID3D12Fence> m_fence;

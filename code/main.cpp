@@ -12,6 +12,8 @@
 
 #include "RHI/RHIManager.h"  // RHI 全局管理器
 #include "RHI/RHIHelpers.h"  // RHI helper functions
+#include "RHI/DX12/DX12Context.h"  // DX12 Context for ImGui
+#include "RHI/DX12/DX12Common.h"   // NUM_FRAMES_IN_FLIGHT
 #include "Engine/Rendering/ForwardRenderPipeline.h"  // ✅ Forward 渲染流程
 #include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
@@ -357,12 +359,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         ImGui_ImplWin32_Init(hwnd);
 
         if (g_renderConfig.backend == RHI::EBackend::DX12) {
-            // DX12 backend - not yet supported for ImGui
-            // ImGui DX12 requires descriptor heap setup which needs additional work
-            CFFLog::Error("[Main] ImGui DX12 backend not yet integrated - falling back to DX11 for now");
-            CFFLog::Error("[Main] Please use DX11 backend until ImGui DX12 integration is complete");
-            exitCode = -3;
-            goto cleanup;
+            // DX12 backend
+            auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
+
+            // Use legacy init API (simpler, works for single font texture)
+            bool initOk = ImGui_ImplDX12_Init(
+                dx12Ctx.GetDevice(),
+                RHI::DX12::NUM_FRAMES_IN_FLIGHT,
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                dx12Ctx.GetImGuiSrvHeap(),
+                dx12Ctx.GetImGuiSrvCpuHandle(),
+                dx12Ctx.GetImGuiSrvGpuHandle()
+            );
+
+            if (!initOk) {
+                CFFLog::Error("[Main] ImGui_ImplDX12_Init failed");
+                exitCode = -3;
+                goto cleanup;
+            }
+            CFFLog::Info("[Main] ImGui DX12 backend initialized");
         } else {
             // DX11 backend
             ImGui_ImplDX11_Init(
@@ -447,7 +462,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // 5.1 ImGui 帧开始
-        ImGui_ImplDX11_NewFrame();
+        if (g_renderConfig.backend == RHI::EBackend::DX12) {
+            ImGui_ImplDX12_NewFrame();
+        } else {
+            ImGui_ImplDX11_NewFrame();
+        }
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         ImGuizmo::BeginFrame();
@@ -526,7 +545,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // 5.5 提交 ImGui
         {RHI::CScopedDebugEvent evtScene(rhiCtx->GetCommandList(), L"imgui pass");
         ImGui::Render();
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        if (g_renderConfig.backend == RHI::EBackend::DX12) {
+            auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
+            ID3D12GraphicsCommandList* cmdList = static_cast<ID3D12GraphicsCommandList*>(rhiCtx->GetNativeContext());
+            // Set descriptor heap for ImGui
+            ID3D12DescriptorHeap* heaps[] = { dx12Ctx.GetImGuiSrvHeap() };
+            cmdList->SetDescriptorHeaps(1, heaps);
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmdList);
+        } else {
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
         }
 
         // 5.6 Present
@@ -552,7 +580,11 @@ cleanup:
 
     if (imguiInitialized) {
         CFFLog::Info("Shutting down ImGui...");
-        ImGui_ImplDX11_Shutdown();
+        if (g_renderConfig.backend == RHI::EBackend::DX12) {
+            ImGui_ImplDX12_Shutdown();
+        } else {
+            ImGui_ImplDX11_Shutdown();
+        }
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
     }

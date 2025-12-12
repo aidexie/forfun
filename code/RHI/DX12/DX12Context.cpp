@@ -75,6 +75,12 @@ bool CDX12Context::Initialize(HWND hwnd, uint32_t width, uint32_t height) {
         return false;
     }
 
+    // Create SRV heap for ImGui
+    if (!CreateImGuiSrvHeap()) {
+        CFFLog::Error("[DX12Context] Failed to create ImGui SRV heap");
+        return false;
+    }
+
     // Create backbuffer RTVs
     CreateBackbufferRTVs();
 
@@ -124,6 +130,7 @@ void CDX12Context::Shutdown() {
 
     // Release other resources
     m_fence.Reset();
+    m_imguiSrvHeap.Reset();
     m_rtvHeap.Reset();
     m_swapChain.Reset();
     m_commandQueue.Reset();
@@ -324,6 +331,36 @@ bool CDX12Context::CreateRTVHeap() {
 
     DX12_SET_DEBUG_NAME(m_rtvHeap, "BackbufferRTVHeap");
     return true;
+}
+
+bool CDX12Context::CreateImGuiSrvHeap() {
+    // ImGui needs a shader-visible SRV heap for font textures
+    // We allocate a small heap just for ImGui (1 descriptor is enough for basic usage)
+    D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+    srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    srvHeapDesc.NumDescriptors = 1;  // Just for ImGui font texture
+    srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    srvHeapDesc.NodeMask = 0;
+
+    HRESULT hr = m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&m_imguiSrvHeap));
+    if (FAILED(hr)) {
+        CFFLog::Error("[DX12Context] CreateDescriptorHeap (ImGui SRV) failed: %s", HRESULTToString(hr).c_str());
+        return false;
+    }
+
+    m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    DX12_SET_DEBUG_NAME(m_imguiSrvHeap, "ImGuiSrvHeap");
+    CFFLog::Info("[DX12Context] ImGui SRV heap created");
+    return true;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CDX12Context::GetImGuiSrvCpuHandle() const {
+    return m_imguiSrvHeap->GetCPUDescriptorHandleForHeapStart();
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE CDX12Context::GetImGuiSrvGpuHandle() const {
+    return m_imguiSrvHeap->GetGPUDescriptorHandleForHeapStart();
 }
 
 void CDX12Context::CreateBackbufferRTVs() {
