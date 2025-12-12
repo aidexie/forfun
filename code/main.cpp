@@ -3,6 +3,7 @@
 #include <windowsx.h>
 #include <tchar.h>
 #include <d3d11.h>
+#include <d3d12.h>
 #include <direct.h>  // For _chdir, _getcwd
 #include <string>
 #include <iostream>
@@ -16,6 +17,7 @@
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
 #include "Engine/Rendering/DebugRenderSystem.h"  // Debug 几何渲染
 #include "Core/RenderDocCapture.h"  // RenderDoc API
+#include "Core/RenderConfig.h"  // ✅ Render configuration
 #include "Console.h"
 
 // Test framework
@@ -27,6 +29,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_dx11.h"
+#include "backends/imgui_impl_dx12.h"
 #include "ImGuizmo.h"
 
 #include "Panels.h"   // Panels::DrawDockspace / DrawHierarchy / DrawInspector / DrawViewport
@@ -48,6 +51,7 @@ static const wchar_t* kWndTitle = L"ForFunEditor";
 static CForwardRenderPipeline g_pipeline;  // ✅ Forward 渲染 Pipeline
 static bool g_minimized = false;
 static POINT g_last_mouse = { 0, 0 };
+static SRenderConfig g_renderConfig;  // ✅ Global render configuration
 
 // ✅ Scene 现在管理 EditorCamera（通过 CScene::Instance().GetEditorCamera()）
 // ✅ EditorContext 现在管理相机交互（通过 CEditorContext::Instance()）
@@ -252,6 +256,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     _In_ int nCmdShow)
 {
     int exitCode = 0;
+    HWND hwnd = nullptr;
 
     MSG msg{};
     LARGE_INTEGER freq{}, prev{}, curr{};
@@ -294,31 +299,55 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 0) Debug directories (ensure they exist for logging)
     CDebugPaths::EnsureDirectoriesExist();
 
-    // 1) 窗口
-    const int initW = 1600, initH = 900;
-    HWND hwnd = CreateMainWindow(hInstance, initW, initH, WndProc);
-    if (!hwnd) {
-        CFFLog::Error("Failed to create window!");
-        exitCode = -1;
-        goto cleanup;
-    }
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-    CFFLog::Info("Window created: %dx%d", initW, initH);
-
-    // 2) FFPath initialization
+    // 1) FFPath initialization (must be first - config paths depend on it)
     FFPath::Initialize("E:/forfun");
 
-    // 3) RHI Manager 初始化 (包含 DX11 Context)
-    if (!RHI::CRHIManager::Instance().Initialize(RHI::EBackend::DX11, hwnd, initW, initH)) {
-        CFFLog::Error("Failed to initialize RHI Manager!");
-        exitCode = -2;
-        goto cleanup;
+    // 2) Load render configuration
+    {
+        std::string configPath = SRenderConfig::GetDefaultPath();
+        if (!SRenderConfig::Load(configPath, g_renderConfig)) {
+            // Config not found - save defaults for user reference
+            CFFLog::Info("[Main] Creating default config at %s", configPath.c_str());
+            // Ensure config directory exists
+            std::filesystem::create_directories(std::filesystem::path(configPath).parent_path());
+            SRenderConfig::Save(configPath, g_renderConfig);
+        }
     }
-    dx11Initialized = true;
-    CFFLog::Info("RHI Manager initialized (DX11 backend)");
 
-    // 4) ImGui 初始化（在 main.cpp 内）
+    // 3) 窗口 (use config dimensions)
+    {
+        int initW = static_cast<int>(g_renderConfig.windowWidth);
+        int initH = static_cast<int>(g_renderConfig.windowHeight);
+        hwnd = CreateMainWindow(hInstance, initW, initH, WndProc);
+        if (!hwnd) {
+            CFFLog::Error("Failed to create window!");
+            exitCode = -1;
+            goto cleanup;
+        }
+        ShowWindow(hwnd, nCmdShow);
+        UpdateWindow(hwnd);
+        CFFLog::Info("Window created: %dx%d", initW, initH);
+    }
+
+    // 4) RHI Manager 初始化 (use config backend)
+    {
+        const char* backendName = (g_renderConfig.backend == RHI::EBackend::DX12) ? "DX12" : "DX11";
+        CFFLog::Info("[Main] Initializing RHI with %s backend...", backendName);
+
+        if (!RHI::CRHIManager::Instance().Initialize(
+                g_renderConfig.backend,
+                hwnd,
+                g_renderConfig.windowWidth,
+                g_renderConfig.windowHeight)) {
+            CFFLog::Error("Failed to initialize RHI Manager!");
+            exitCode = -2;
+            goto cleanup;
+        }
+        dx11Initialized = true;  // Renamed variable still tracks RHI init
+        CFFLog::Info("RHI Manager initialized (%s backend)", backendName);
+    }
+
+    // 5) ImGui 初始化（根据 backend 选择）
     {
         RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
         IMGUI_CHECKVERSION();
@@ -326,20 +355,32 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         ImGui::StyleColorsDark();
 
         ImGui_ImplWin32_Init(hwnd);
-        ImGui_ImplDX11_Init(
-            static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice()),
-            static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext())
-        );
+
+        if (g_renderConfig.backend == RHI::EBackend::DX12) {
+            // DX12 backend - not yet supported for ImGui
+            // ImGui DX12 requires descriptor heap setup which needs additional work
+            CFFLog::Error("[Main] ImGui DX12 backend not yet integrated - falling back to DX11 for now");
+            CFFLog::Error("[Main] Please use DX11 backend until ImGui DX12 integration is complete");
+            exitCode = -3;
+            goto cleanup;
+        } else {
+            // DX11 backend
+            ImGui_ImplDX11_Init(
+                static_cast<ID3D11Device*>(rhiCtx->GetNativeDevice()),
+                static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext())
+            );
+        }
         ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     }
     imguiInitialized = true;
     CFFLog::Info("ImGui initialized");
 
     // ✅ 初始化编辑器相机的宽高比
-    CScene::Instance().GetEditorCamera().aspectRatio = (float)initW / (float)initH;
+    CScene::Instance().GetEditorCamera().aspectRatio =
+        static_cast<float>(g_renderConfig.windowWidth) / static_cast<float>(g_renderConfig.windowHeight);
 
 
-    // 5) CScene GPU resource initialization
+    // 6) CScene GPU resource initialization
     if (!CScene::Instance().Initialize())
     {
         CFFLog::Error("Failed to initialize CScene!");
