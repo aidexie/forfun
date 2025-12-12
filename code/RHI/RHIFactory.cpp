@@ -1,6 +1,6 @@
 #include "RHIFactory.h"
 #include "DX11/DX11RenderContext.h"
-// #include "DX12/DX12RenderContext.h"  // TODO: Implement in Phase 3
+#include "DX12/DX12RenderContext.h"
 #include "Core/FFLog.h"
 
 namespace RHI {
@@ -12,9 +12,8 @@ IRenderContext* CreateRenderContext(EBackend backend) {
             return new DX11::CDX11RenderContext();
 
         case EBackend::DX12:
-            CFFLog::Error("[RHI] DX12 backend not yet implemented (coming in Phase 3)");
-            CFFLog::Info("[RHI] Falling back to DX11");
-            return new DX11::CDX11RenderContext();
+            CFFLog::Info("[RHI] Creating DX12 backend");
+            return new DX12::CDX12RenderContext();
 
         default:
             CFFLog::Error("[RHI] Unknown backend: %d", static_cast<int>(backend));

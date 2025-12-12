@@ -597,13 +597,39 @@ IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipe
 }
 
 ITexture* CDX12RenderContext::WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) {
-    CFFLog::Warning("[DX12RenderContext] WrapNativeTexture not implemented");
-    return nullptr;
+    // In DX12, we don't have a separate SRV object like DX11 - SRVs are descriptor handles
+    // This function is primarily for DX11 interop, so just wrap the texture
+    if (!nativeTexture) {
+        CFFLog::Error("[DX12RenderContext] WrapNativeTexture: null texture");
+        return nullptr;
+    }
+
+    TextureDesc desc;
+    desc.width = width;
+    desc.height = height;
+    desc.format = format;
+    desc.dimension = ETextureDimension::Tex2D;
+    desc.mipLevels = 1;
+    desc.arraySize = 1;
+    desc.sampleCount = 1;
+    desc.usage = ETextureUsage::ShaderResource;
+
+    ID3D12Resource* resource = static_cast<ID3D12Resource*>(nativeTexture);
+    resource->AddRef();  // CDX12Texture will own this reference
+
+    return new CDX12Texture(resource, desc, CDX12Context::Instance().GetDevice());
 }
 
 ITexture* CDX12RenderContext::WrapExternalTexture(void* nativeTexture, const TextureDesc& desc) {
-    CFFLog::Warning("[DX12RenderContext] WrapExternalTexture not implemented");
-    return nullptr;
+    if (!nativeTexture) {
+        CFFLog::Error("[DX12RenderContext] WrapExternalTexture: null texture");
+        return nullptr;
+    }
+
+    ID3D12Resource* resource = static_cast<ID3D12Resource*>(nativeTexture);
+    resource->AddRef();  // CDX12Texture will own this reference
+
+    return new CDX12Texture(resource, desc, CDX12Context::Instance().GetDevice());
 }
 
 // ============================================
