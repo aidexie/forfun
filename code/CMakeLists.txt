@@ -130,8 +130,10 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX11/DX11ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX11/DX11Utils.h
     ${CODE_PATH}/RHI/ShaderCompiler.h
-    # DX12 Backend (Phase 0: directory structure)
+    # DX12 Backend (Phase 1: Context)
     ${CODE_PATH}/RHI/DX12/DX12Common.h
+    ${CODE_PATH}/RHI/DX12/DX12Context.h
+    ${CODE_PATH}/RHI/DX12/DX12Context.cpp
 )
 
 # Engine root sources - explicitly listed (no GLOB)
