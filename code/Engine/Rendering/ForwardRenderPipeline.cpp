@@ -116,6 +116,14 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
                               m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
                               shadowData);
+    } else {
+        // DX12 Minimal Mode: Only render Skybox for now
+        // (Scene objects are skipped until DX12 SceneRenderer is fully working)
+        RHI::CScopedDebugEvent evt(cmdList, L"Skybox (DX12)");
+        RHI::ITexture* hdrRTs[] = { m_offHDR.get() };
+        cmdList->SetRenderTargets(1, hdrRTs, m_offDepth.get());
+        ctx.scene.GetSkybox().Render(ctx.camera.GetViewMatrix(),
+                                     ctx.camera.GetProjectionMatrix());
     }
 
     // ============================================

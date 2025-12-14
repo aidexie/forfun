@@ -56,6 +56,12 @@ void CDX12CommandList::Reset(ID3D12CommandAllocator* allocator) {
     m_descriptorHeapsBound = false;
     m_currentPSO = nullptr;
     m_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;  // Force re-set on next draw
+
+    // Reset pending descriptor bindings
+    memset(m_pendingSRVs, 0, sizeof(m_pendingSRVs));
+    memset(m_pendingSamplers, 0, sizeof(m_pendingSamplers));
+    m_srvDirty = false;
+    m_samplerDirty = false;
 }
 
 void CDX12CommandList::Close() {
@@ -316,7 +322,7 @@ void CDX12CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuf
 }
 
 void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) {
-    if (!texture) return;
+    if (!texture || slot >= MAX_SRV_SLOTS) return;
 
     CDX12Texture* dx12Texture = static_cast<CDX12Texture*>(texture);
     TransitionResource(dx12Texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -324,10 +330,27 @@ void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITex
 
     EnsureDescriptorHeapsBound();
 
-    // Root parameter 3 is SRV descriptor table
-    // For now, simplified: use GPU handle directly
-    // In a full implementation, we'd copy to the bound descriptor heap
-    // This is a TODO for proper descriptor management
+    // Get the SRV - this is already in the shader-visible heap
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = dx12Texture->GetOrCreateSRV();
+
+    // Get GPU handle from the shader-visible heap
+    // Since SRVs are allocated from the shader-visible CBV_SRV_UAV heap,
+    // we need to calculate the GPU handle from the CPU handle
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    auto& heap = heapMgr.GetCBVSRVUAVHeap();
+
+    // Calculate index from CPU handle
+    SIZE_T cpuHandlePtr = cpuHandle.ptr;
+    SIZE_T heapStartPtr = heap.GetCPUStart().ptr;
+    uint32_t descriptorSize = heap.GetDescriptorSize();
+    uint32_t index = static_cast<uint32_t>((cpuHandlePtr - heapStartPtr) / descriptorSize);
+
+    // Calculate GPU handle
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = heap.GetGPUStart();
+    gpuHandle.ptr += index * descriptorSize;
+
+    m_pendingSRVs[slot] = gpuHandle;
+    m_srvDirty = true;
 }
 
 void CDX12CommandList::SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) {
@@ -342,10 +365,15 @@ void CDX12CommandList::SetShaderResourceBuffer(EShaderStage stage, uint32_t slot
 }
 
 void CDX12CommandList::SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) {
-    if (!sampler) return;
+    if (!sampler || slot >= MAX_SAMPLER_SLOTS) return;
 
     EnsureDescriptorHeapsBound();
-    // Sampler binding via descriptor table - simplified
+
+    CDX12Sampler* dx12Sampler = static_cast<CDX12Sampler*>(sampler);
+
+    // Samplers are already allocated in the shader-visible sampler heap
+    m_pendingSamplers[slot] = dx12Sampler->GetGPUHandle();
+    m_samplerDirty = true;
 }
 
 void CDX12CommandList::SetUnorderedAccess(uint32_t slot, IBuffer* buffer) {
@@ -390,21 +418,25 @@ void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint3
 // ============================================
 
 void CDX12CommandList::Draw(uint32_t vertexCount, uint32_t startVertex) {
+    BindPendingDescriptorTables();
     FlushBarriers();
     m_commandList->DrawInstanced(vertexCount, 1, startVertex, 0);
 }
 
 void CDX12CommandList::DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) {
+    BindPendingDescriptorTables();
     FlushBarriers();
     m_commandList->DrawIndexedInstanced(indexCount, 1, startIndex, baseVertex, 0);
 }
 
 void CDX12CommandList::DrawInstanced(uint32_t vertexCountPerInstance, uint32_t instanceCount, uint32_t startVertex, uint32_t startInstance) {
+    BindPendingDescriptorTables();
     FlushBarriers();
     m_commandList->DrawInstanced(vertexCountPerInstance, instanceCount, startVertex, startInstance);
 }
 
 void CDX12CommandList::DrawIndexedInstanced(uint32_t indexCountPerInstance, uint32_t instanceCount, uint32_t startIndex, int32_t baseVertex, uint32_t startInstance) {
+    BindPendingDescriptorTables();
     FlushBarriers();
     m_commandList->DrawIndexedInstanced(indexCountPerInstance, instanceCount, startIndex, baseVertex, startInstance);
 }

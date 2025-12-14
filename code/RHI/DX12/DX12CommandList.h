@@ -120,6 +120,18 @@ private:
 
     // Cached primitive topology
     D3D12_PRIMITIVE_TOPOLOGY m_currentTopology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+
+    // Pending SRV/Sampler bindings (GPU handles from shader-visible heap)
+    // These are bound as descriptor tables before draw calls
+    static constexpr uint32_t MAX_SRV_SLOTS = 25;
+    static constexpr uint32_t MAX_SAMPLER_SLOTS = 8;
+    D3D12_GPU_DESCRIPTOR_HANDLE m_pendingSRVs[MAX_SRV_SLOTS] = {};
+    D3D12_GPU_DESCRIPTOR_HANDLE m_pendingSamplers[MAX_SAMPLER_SLOTS] = {};
+    bool m_srvDirty = false;
+    bool m_samplerDirty = false;
+
+    // Bind pending descriptor tables before draw
+    void BindPendingDescriptorTables();
 };
 
 } // namespace DX12

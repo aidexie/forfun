@@ -273,6 +273,12 @@ void CSkybox::createPipelineState() {
     // Primitive topology
     psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
 
+    // Render target format: HDR R16G16B16A16_FLOAT for skybox
+    psoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+
+    // Depth stencil format
+    psoDesc.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
+
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }
 
