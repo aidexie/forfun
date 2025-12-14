@@ -590,5 +590,37 @@ void CDX12CommandList::EndEvent() {
 #endif
 }
 
+// ============================================
+// Descriptor Table Binding
+// ============================================
+
+void CDX12CommandList::BindPendingDescriptorTables() {
+    // Root signature layout (from DX12RenderContext::CreateRootSignatures):
+    // Parameter 0-6: Root CBV b0-b6
+    // Parameter 7: SRV Descriptor Table t0-t24
+    // Parameter 8: UAV Descriptor Table u0-u7
+    // Parameter 9: Sampler Descriptor Table s0-s7
+
+    // Bind SRV table if any SRV is set
+    if (m_srvDirty) {
+        // Find the first valid SRV to use as table start
+        // For proper implementation, we would need to copy all SRVs to a contiguous range
+        // For now, bind slot 0's descriptor directly if it's valid
+        if (m_pendingSRVs[0].ptr != 0) {
+            m_commandList->SetGraphicsRootDescriptorTable(7, m_pendingSRVs[0]);
+        }
+        m_srvDirty = false;
+    }
+
+    // Bind Sampler table if any sampler is set
+    if (m_samplerDirty) {
+        // Same approach - bind slot 0's descriptor directly
+        if (m_pendingSamplers[0].ptr != 0) {
+            m_commandList->SetGraphicsRootDescriptorTable(9, m_pendingSamplers[0]);
+        }
+        m_samplerDirty = false;
+    }
+}
+
 } // namespace DX12
 } // namespace RHI

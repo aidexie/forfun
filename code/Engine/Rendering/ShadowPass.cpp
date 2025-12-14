@@ -101,6 +101,10 @@ bool CShadowPass::Initialize()
 
     psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
 
+    // Depth-only pass: no render targets, only depth stencil
+    psoDesc.renderTargetFormats = {};  // Empty - no color outputs
+    psoDesc.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
+
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 
     // Constant buffers (CPU-writable for Map/Unmap pattern)

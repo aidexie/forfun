@@ -801,8 +801,10 @@ IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc&
     for (auto fmt : desc.renderTargetFormats) {
         rtFormats.push_back(ToDXGIFormat(fmt));
     }
-    if (rtFormats.empty()) {
-        rtFormats.push_back(DXGI_FORMAT_R8G8B8A8_UNORM);  // Default
+    // Note: Empty rtFormats is valid for depth-only passes (e.g., shadow mapping)
+    // Only add default if we have a pixel shader but no explicit RT format
+    if (rtFormats.empty() && desc.pixelShader != nullptr) {
+        rtFormats.push_back(DXGI_FORMAT_R8G8B8A8_UNORM);  // Default for passes with PS
     }
     builder.SetRenderTargetFormats(rtFormats);
 
