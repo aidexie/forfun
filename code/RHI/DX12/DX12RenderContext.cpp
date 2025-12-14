@@ -139,6 +139,12 @@ void CDX12RenderContext::BeginFrame() {
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_commandList->GetNativeCommandList()->ResourceBarrier(1, &barrier);
 
+    // Update backbuffer wrapper's tracked state to match
+    uint32_t frameIndex = CDX12Context::Instance().GetFrameIndex();
+    if (m_backbufferWrappers[frameIndex]) {
+        m_backbufferWrappers[frameIndex]->SetCurrentState(D3D12_RESOURCE_STATE_RENDER_TARGET);
+    }
+
     m_frameInProgress = true;
 }
 
@@ -146,6 +152,12 @@ void CDX12RenderContext::EndFrame() {
     if (!m_frameInProgress) {
         CFFLog::Warning("[DX12RenderContext] EndFrame called without BeginFrame");
         return;
+    }
+
+    // Update backbuffer wrapper's tracked state before transition
+    uint32_t frameIndex = CDX12Context::Instance().GetFrameIndex();
+    if (m_backbufferWrappers[frameIndex]) {
+        m_backbufferWrappers[frameIndex]->SetCurrentState(D3D12_RESOURCE_STATE_PRESENT);
     }
 
     // Transition backbuffer to present state

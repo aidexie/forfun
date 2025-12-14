@@ -103,7 +103,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
     cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
 
-    const float clearColor[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
+    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };  // Match optimizedClearValue in CreateTexture
     cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
     cmdList->ClearDepthStencil(m_offDepth.get(), true, 1.0f, true, 0);
 
@@ -127,10 +127,10 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
                            ctx.width, ctx.height, 1.0f);
     } else {
         // DX12 minimal mode: Just copy HDR to LDR (or clear LDR)
-        // For now, clear LDR with a distinct color to verify it works
+        // For now, clear LDR with optimized clear color
         RHI::ITexture* ldrRT = m_offLDR.get();
         cmdList->SetRenderTargets(1, &ldrRT, nullptr);
-        const float ldrClearColor[4] = { 0.2f, 0.3f, 0.4f, 1.0f };  // Blueish to distinguish
+        const float ldrClearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };  // Match optimizedClearValue
         cmdList->ClearRenderTarget(m_offLDR.get(), ldrClearColor);
     }
 
