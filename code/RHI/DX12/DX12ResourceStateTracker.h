@@ -56,6 +56,15 @@ public:
         UINT subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
     );
 
+    // Request a state transition with explicit current state (preferred)
+    // Use this when the caller knows the current state (e.g., from texture/buffer object)
+    bool TransitionResourceExplicit(
+        ID3D12Resource* resource,
+        D3D12_RESOURCE_STATES currentState,
+        D3D12_RESOURCE_STATES targetState,
+        UINT subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES
+    );
+
     // Request a UAV barrier (for same resource R/W sync)
     void UAVBarrier(ID3D12Resource* resource);
 

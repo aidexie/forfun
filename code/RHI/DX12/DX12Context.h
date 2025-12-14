@@ -57,6 +57,18 @@ public:
     D3D12_CPU_DESCRIPTOR_HANDLE GetImGuiSrvCpuHandle() const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetImGuiSrvGpuHandle() const;
 
+    // Viewport texture support - allocate a descriptor for viewport rendering
+    // Returns GPU handle for use with ImGui::Image, or {0} if allocation fails
+    D3D12_GPU_DESCRIPTOR_HANDLE AllocateImGuiTextureDescriptor(ID3D12Resource* texture, DXGI_FORMAT format);
+
+    // Update an existing ImGui texture descriptor at a specific slot
+    // slot: The slot index (1-63, 0 is reserved for font texture)
+    // Returns the GPU handle for the slot
+    D3D12_GPU_DESCRIPTOR_HANDLE UpdateImGuiTextureDescriptor(uint32_t slot, ID3D12Resource* texture, DXGI_FORMAT format);
+
+    // Get the descriptor size for SRV heap
+    uint32_t GetSrvDescriptorSize() const { return m_srvDescriptorSize; }
+
 private:
     CDX12Context() = default;
     ~CDX12Context();
@@ -95,9 +107,11 @@ private:
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     uint32_t m_rtvDescriptorSize = 0;
 
-    // SRV heap for ImGui (shader-visible, for font texture)
+    // SRV heap for ImGui (shader-visible, for font texture + viewport textures)
     ComPtr<ID3D12DescriptorHeap> m_imguiSrvHeap;
     uint32_t m_srvDescriptorSize = 0;
+    uint32_t m_imguiSrvNextSlot = 1;  // Slot 0 is reserved for ImGui font texture
+    static constexpr uint32_t IMGUI_SRV_HEAP_SIZE = 64;  // Support multiple viewport textures
 
     // Synchronization
     ComPtr<ID3D12Fence> m_fence;

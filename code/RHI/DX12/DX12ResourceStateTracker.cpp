@@ -38,6 +38,17 @@ bool CDX12ResourceStateTracker::TransitionResource(
         CFFLog::Warning("[ResourceStateTracker] Resource not registered, assuming COMMON state");
     }
 
+    return TransitionResourceExplicit(resource, currentState, targetState, subresource);
+}
+
+bool CDX12ResourceStateTracker::TransitionResourceExplicit(
+    ID3D12Resource* resource,
+    D3D12_RESOURCE_STATES currentState,
+    D3D12_RESOURCE_STATES targetState,
+    UINT subresource
+) {
+    if (!resource) return false;
+
     // Check if transition is needed
     if (!NeedsTransition(currentState, targetState)) {
         return false;

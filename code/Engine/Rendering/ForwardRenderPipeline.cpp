@@ -69,10 +69,16 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     ensureOffscreen(ctx.width, ctx.height);
 
     // ============================================
+    // DX12 Minimal Test: Only clear, skip complex rendering
+    // TODO: Remove this flag once all features are working
+    // ============================================
+    const bool dx12MinimalMode = (RHI::CRHIManager::Instance().GetBackend() == RHI::EBackend::DX12);
+
+    // ============================================
     // 2. Shadow Pass (if enabled)
     // ============================================
     const CShadowPass::Output* shadowData = nullptr;
-    if (ctx.showFlags.Shadows) {
+    if (!dx12MinimalMode && ctx.showFlags.Shadows) {
         // Find DirectionalLight in scene
         SDirectionalLight* dirLight = nullptr;
         for (auto& objPtr : ctx.scene.GetWorld().Objects()) {
@@ -94,6 +100,8 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     RHI::ITexture* hdrRT = m_offHDR.get();
     cmdList->SetRenderTargets(1, &hdrRT, m_offDepth.get());
+    cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
+    cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
 
     const float clearColor[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
     cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
@@ -102,7 +110,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 4. Scene Rendering (Opaque + Transparent + Skybox)
     // ============================================
-    {
+    if (!dx12MinimalMode) {
         RHI::CScopedDebugEvent evt(cmdList, L"Scene Rendering");
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
                               m_offHDR.get(), m_offDepth.get(),
@@ -113,17 +121,23 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 5. Post-Processing (HDR -> LDR)
     // ============================================
-    if (ctx.showFlags.PostProcessing) {
+    if (!dx12MinimalMode && ctx.showFlags.PostProcessing) {
         RHI::CScopedDebugEvent evt(cmdList, L"Post-Processing");
         m_postProcess.Render(m_offHDR.get(), m_offLDR.get(),
                            ctx.width, ctx.height, 1.0f);
+    } else {
+        // DX12 minimal mode: Just copy HDR to LDR (or clear LDR)
+        // For now, clear LDR with a distinct color to verify it works
+        RHI::ITexture* ldrRT = m_offLDR.get();
+        cmdList->SetRenderTargets(1, &ldrRT, nullptr);
+        const float ldrClearColor[4] = { 0.2f, 0.3f, 0.4f, 1.0f };  // Blueish to distinguish
+        cmdList->ClearRenderTarget(m_offLDR.get(), ldrClearColor);
     }
-    // Note: If PostProcessing is disabled, we skip this step and use HDR directly
 
     // ============================================
     // 6. Debug Lines (if enabled)
     // ============================================
-    if (ctx.showFlags.DebugLines) {
+    if (!dx12MinimalMode && ctx.showFlags.DebugLines) {
         RHI::CScopedDebugEvent evt(cmdList, L"Debug Lines");
         // Rebind LDR RTV + HDR depth (Debug lines need depth test)
         RHI::ITexture* ldrRT = m_offLDR.get();
@@ -136,7 +150,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 7. Grid (if enabled)
     // ============================================
-    if (ctx.showFlags.Grid) {
+    if (!dx12MinimalMode && ctx.showFlags.Grid) {
         RHI::CScopedDebugEvent evt(cmdList, L"Grid");
         // Rebind LDR RTV + HDR depth (Grid needs depth test)
         RHI::ITexture* ldrRT = m_offLDR.get();
@@ -162,6 +176,12 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
         // Copy to destination texture slice
         cmdList->CopyTextureToSlice(ctx.finalOutputTexture, ctx.finalOutputArraySlice, ctx.finalOutputMipLevel, sourceTexture);
     }
+
+    // ============================================
+    // 9. Transition LDR to SRV state for ImGui viewport
+    // ============================================
+    cmdList->UnbindRenderTargets();
+    cmdList->Barrier(m_offLDR.get(), RHI::EResourceState::RenderTarget, RHI::EResourceState::ShaderResource);
 }
 
 void CForwardRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)

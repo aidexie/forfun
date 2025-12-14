@@ -70,7 +70,7 @@ void CDX12CommandList::TransitionResource(CDX12Texture* texture, D3D12_RESOURCE_
     if (!texture) return;
     D3D12_RESOURCE_STATES currentState = texture->GetCurrentState();
     if (NeedsTransition(currentState, targetState)) {
-        m_stateTracker.TransitionResource(texture->GetD3D12Resource(), targetState);
+        m_stateTracker.TransitionResourceExplicit(texture->GetD3D12Resource(), currentState, targetState);
         texture->SetCurrentState(targetState);
     }
 }
@@ -79,7 +79,7 @@ void CDX12CommandList::TransitionResource(CDX12Buffer* buffer, D3D12_RESOURCE_ST
     if (!buffer) return;
     D3D12_RESOURCE_STATES currentState = buffer->GetCurrentState();
     if (NeedsTransition(currentState, targetState)) {
-        m_stateTracker.TransitionResource(buffer->GetD3D12Resource(), targetState);
+        m_stateTracker.TransitionResourceExplicit(buffer->GetD3D12Resource(), currentState, targetState);
         buffer->SetCurrentState(targetState);
     }
 }
@@ -472,18 +472,46 @@ void CDX12CommandList::CopyTextureSubresource(ITexture* dst, uint32_t dstArraySl
     const TextureDesc& dstDesc = dstTex->GetDesc();
     const TextureDesc& srcDesc = srcTex->GetDesc();
 
-    UINT dstSubresource = CalcSubresource(dstMipLevel, dstArraySlice, 0, dstDesc.mipLevels, dstDesc.arraySize);
-    UINT srcSubresource = CalcSubresource(srcMipLevel, srcArraySlice, 0, srcDesc.mipLevels, srcDesc.arraySize);
+    // Check if resources are buffers (staging) or textures
+    D3D12_RESOURCE_DESC dstResDesc = dstTex->GetD3D12Resource()->GetDesc();
+    D3D12_RESOURCE_DESC srcResDesc = srcTex->GetD3D12Resource()->GetDesc();
+
+    bool dstIsBuffer = (dstResDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
+    bool srcIsBuffer = (srcResDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
 
     D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
     dstLoc.pResource = dstTex->GetD3D12Resource();
-    dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLoc.SubresourceIndex = dstSubresource;
 
     D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
     srcLoc.pResource = srcTex->GetD3D12Resource();
-    srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLoc.SubresourceIndex = srcSubresource;
+
+    if (dstIsBuffer) {
+        // Destination is a buffer - use placed footprint
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+        UINT64 totalSize = 0;
+        m_context->GetDevice()->GetCopyableFootprints(&srcResDesc, srcMipLevel, 1, 0, &footprint, nullptr, nullptr, &totalSize);
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        dstLoc.PlacedFootprint = footprint;
+    } else {
+        // Destination is a texture - use subresource index
+        UINT dstSubresource = CalcSubresource(dstMipLevel, dstArraySlice, 0, dstDesc.mipLevels, dstDesc.arraySize);
+        dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        dstLoc.SubresourceIndex = dstSubresource;
+    }
+
+    if (srcIsBuffer) {
+        // Source is a buffer - use placed footprint
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+        UINT64 totalSize = 0;
+        m_context->GetDevice()->GetCopyableFootprints(&dstResDesc, dstMipLevel, 1, 0, &footprint, nullptr, nullptr, &totalSize);
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        srcLoc.PlacedFootprint = footprint;
+    } else {
+        // Source is a texture - use subresource index
+        UINT srcSubresource = CalcSubresource(srcMipLevel, srcArraySlice, 0, srcDesc.mipLevels, srcDesc.arraySize);
+        srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        srcLoc.SubresourceIndex = srcSubresource;
+    }
 
     m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 }

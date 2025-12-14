@@ -89,14 +89,18 @@ private:
     ComPtr<ID3D12RootSignature> m_graphicsRootSignature;
     ComPtr<ID3D12RootSignature> m_computeRootSignature;
 
-    // Backbuffer wrapper
-    std::unique_ptr<class CDX12Texture> m_backbufferWrapper;
+    // Backbuffer wrappers (one per frame in flight)
+    std::unique_ptr<class CDX12Texture> m_backbufferWrappers[3];
 
     // Depth stencil buffer
     std::unique_ptr<class CDX12Texture> m_depthStencilBuffer;
 
     // Frame state
     bool m_frameInProgress = false;
+
+    // Helper to create backbuffer wrappers
+    void CreateBackbufferWrappers();
+    void ReleaseBackbufferWrappers();
 };
 
 } // namespace DX12

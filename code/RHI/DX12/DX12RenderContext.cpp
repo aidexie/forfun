@@ -67,6 +67,9 @@ bool CDX12RenderContext::Initialize(void* nativeWindowHandle, uint32_t width, ui
         return false;
     }
 
+    // Create backbuffer wrappers
+    CreateBackbufferWrappers();
+
     // Create depth stencil buffer
     CreateDepthStencilBuffer();
 
@@ -76,11 +79,11 @@ bool CDX12RenderContext::Initialize(void* nativeWindowHandle, uint32_t width, ui
 
 void CDX12RenderContext::Shutdown() {
     // Wait for GPU to finish
-    CDX12Context::Instance().WaitForGPU();
+    //CDX12Context::Instance().WaitForGPU();
 
     // Release resources
     m_depthStencilBuffer.reset();
-    m_backbufferWrapper.reset();
+    ReleaseBackbufferWrappers();
     m_commandList.reset();
 
     m_graphicsRootSignature.Reset();
@@ -101,14 +104,15 @@ void CDX12RenderContext::OnResize(uint32_t width, uint32_t height) {
     // Wait for GPU
     CDX12Context::Instance().WaitForGPU();
 
-    // Release depth stencil
+    // Release depth stencil and backbuffer wrappers
     ReleaseDepthStencilBuffer();
-    m_backbufferWrapper.reset();
+    ReleaseBackbufferWrappers();
 
     // Resize swapchain
     CDX12Context::Instance().OnResize(width, height);
 
-    // Recreate depth stencil
+    // Recreate backbuffer wrappers and depth stencil
+    CreateBackbufferWrappers();
     CreateDepthStencilBuffer();
 }
 
@@ -124,6 +128,17 @@ void CDX12RenderContext::BeginFrame() {
 
     // Reset command list with current frame's allocator
     m_commandList->Reset(CDX12Context::Instance().GetCurrentCommandAllocator());
+
+    // Transition backbuffer from PRESENT to RENDER_TARGET
+    ID3D12Resource* backbuffer = CDX12Context::Instance().GetCurrentBackbuffer();
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = backbuffer;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->GetNativeCommandList()->ResourceBarrier(1, &barrier);
+
     m_frameInProgress = true;
 }
 
@@ -163,9 +178,45 @@ void CDX12RenderContext::Present(bool vsync) {
     UINT syncInterval = vsync ? 1 : 0;
     UINT presentFlags = 0;
 
-    HRESULT hr = context.GetSwapChain()->Present(syncInterval, presentFlags);
+    HRESULT hr = DX12_CHECK(context.GetSwapChain()->Present(syncInterval, presentFlags));
     if (FAILED(hr)) {
         CFFLog::Error("[DX12RenderContext] Present failed: %s", HRESULTToString(hr).c_str());
+
+        // If device removed, get the actual reason
+        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+            HRESULT removeReason = context.GetDevice()->GetDeviceRemovedReason();
+            CFFLog::Error("[DX12RenderContext] Device removed reason: %s", HRESULTToString(removeReason).c_str());
+
+            // Try to get DRED data for more detailed diagnostics
+            ComPtr<ID3D12DeviceRemovedExtendedData> dred;
+            if (SUCCEEDED(context.GetDevice()->QueryInterface(IID_PPV_ARGS(&dred)))) {
+                D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs = {};
+                if (SUCCEEDED(dred->GetAutoBreadcrumbsOutput(&breadcrumbs))) {
+                    CFFLog::Error("[DX12RenderContext] DRED Breadcrumbs:");
+                    const D3D12_AUTO_BREADCRUMB_NODE* node = breadcrumbs.pHeadAutoBreadcrumbNode;
+                    while (node) {
+                        if (node->pCommandListDebugNameW) {
+                            CFFLog::Error("  CommandList: %S", node->pCommandListDebugNameW);
+                        }
+                        if (node->pLastBreadcrumbValue && node->pCommandHistory) {
+                            uint32_t lastOp = *node->pLastBreadcrumbValue;
+                            if (lastOp > 0 && lastOp <= node->BreadcrumbCount) {
+                                CFFLog::Error("  Last completed op index: %u / %u", lastOp, node->BreadcrumbCount);
+                                CFFLog::Error("  Last op type: %d", node->pCommandHistory[lastOp - 1]);
+                            }
+                        }
+                        node = node->pNext;
+                    }
+                }
+
+                D3D12_DRED_PAGE_FAULT_OUTPUT pageFault = {};
+                if (SUCCEEDED(dred->GetPageFaultAllocationOutput(&pageFault))) {
+                    if (pageFault.PageFaultVA != 0) {
+                        CFFLog::Error("[DX12RenderContext] DRED Page Fault at VA: 0x%llX", pageFault.PageFaultVA);
+                    }
+                }
+            }
+        }
     }
 
     // Move to next frame
@@ -253,8 +304,63 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
             buffer->Unmap();
         }
     } else if (initialData && heapType == D3D12_HEAP_TYPE_DEFAULT) {
-        // Would need upload buffer and copy command
-        CFFLog::Warning("[DX12RenderContext] Initial data for default heap buffer not implemented");
+        // Upload via staging buffer
+        CDX12CommandList* cmdList = m_commandList.get();
+        ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetNativeCommandList();
+
+        // Allocate upload buffer
+        auto& uploadMgr = CDX12UploadManager::Instance();
+        UploadAllocation uploadAlloc = uploadMgr.Allocate(alignedSize, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+
+        if (!uploadAlloc.IsValid()) {
+            CFFLog::Error("[DX12RenderContext] Failed to allocate upload buffer for buffer data");
+            return buffer;  // Return buffer without initial data
+        }
+
+        // Copy data to upload buffer
+        memcpy(uploadAlloc.cpuAddress, initialData, desc.size);
+
+        // Transition buffer to COPY_DEST state
+        D3D12_RESOURCE_STATES currentState = buffer->GetCurrentState();
+        if (currentState != D3D12_RESOURCE_STATE_COPY_DEST) {
+            D3D12_RESOURCE_BARRIER barrier = {};
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barrier.Transition.pResource = buffer->GetD3D12Resource();
+            barrier.Transition.StateBefore = currentState;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            d3dCmdList->ResourceBarrier(1, &barrier);
+        }
+
+        // Copy from upload buffer to default buffer
+        d3dCmdList->CopyBufferRegion(
+            buffer->GetD3D12Resource(), 0,
+            uploadAlloc.resource, uploadAlloc.offset,
+            desc.size
+        );
+
+        // Transition buffer to appropriate state based on usage
+        D3D12_RESOURCE_STATES finalState = D3D12_RESOURCE_STATE_COMMON;
+        if (desc.usage & EBufferUsage::Constant) {
+            finalState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        } else if (desc.usage & EBufferUsage::Vertex) {
+            finalState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+        } else if (desc.usage & EBufferUsage::Index) {
+            finalState = D3D12_RESOURCE_STATE_INDEX_BUFFER;
+        } else if (desc.usage & EBufferUsage::Structured) {
+            finalState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        } else if (desc.usage & EBufferUsage::UnorderedAccess) {
+            finalState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        }
+
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = buffer->GetD3D12Resource();
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+        barrier.Transition.StateAfter = finalState;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        d3dCmdList->ResourceBarrier(1, &barrier);
+        buffer->SetCurrentState(finalState);
     }
 
     return buffer;
@@ -431,8 +537,92 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
 
     // Upload initial data if provided
     if (subresources && numSubresources > 0 && heapProps.Type == D3D12_HEAP_TYPE_DEFAULT) {
-        // TODO: Implement texture upload using upload manager
-        CFFLog::Warning("[DX12RenderContext] Texture initial data upload not fully implemented");
+        // Get command list for upload
+        CDX12CommandList* cmdList = m_commandList.get();
+        ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetNativeCommandList();
+
+        // Get texture resource and desc for footprint calculation
+        ID3D12Resource* dstResource = texture->GetD3D12Resource();
+        D3D12_RESOURCE_DESC dstDesc = dstResource->GetDesc();
+
+        // Calculate total required upload buffer size and footprints
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(numSubresources);
+        std::vector<UINT> numRows(numSubresources);
+        std::vector<UINT64> rowSizeInBytes(numSubresources);
+        UINT64 totalSize = 0;
+
+        device->GetCopyableFootprints(
+            &dstDesc,
+            0,                      // FirstSubresource
+            numSubresources,        // NumSubresources
+            0,                      // BaseOffset (will be adjusted per allocation)
+            footprints.data(),
+            numRows.data(),
+            rowSizeInBytes.data(),
+            &totalSize
+        );
+
+        // Allocate upload buffer
+        auto& uploadMgr = CDX12UploadManager::Instance();
+        UploadAllocation uploadAlloc = uploadMgr.Allocate(totalSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+
+        if (!uploadAlloc.IsValid()) {
+            CFFLog::Error("[DX12RenderContext] Failed to allocate upload buffer for texture data");
+            return texture;  // Return texture without initial data
+        }
+
+        // Transition texture to COPY_DEST state
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = dstResource;
+        barrier.Transition.StateBefore = texture->GetCurrentState();
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        if (barrier.Transition.StateBefore != barrier.Transition.StateAfter) {
+            d3dCmdList->ResourceBarrier(1, &barrier);
+        }
+
+        // Copy each subresource
+        for (uint32_t i = 0; i < numSubresources; ++i) {
+            // Get original footprint offset (before adjustment)
+            UINT64 originalOffset = footprints[i].Offset;
+
+            // Adjust footprint offset relative to our allocation
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint = footprints[i];
+            footprint.Offset += uploadAlloc.offset;
+
+            // Copy source data to upload buffer
+            uint8_t* uploadDst = static_cast<uint8_t*>(uploadAlloc.cpuAddress) + originalOffset;
+            const uint8_t* srcData = static_cast<const uint8_t*>(subresources[i].pData);
+
+            for (UINT row = 0; row < numRows[i]; ++row) {
+                memcpy(
+                    uploadDst + row * footprint.Footprint.RowPitch,
+                    srcData + row * subresources[i].rowPitch,
+                    rowSizeInBytes[i]
+                );
+            }
+
+            // Set up copy locations
+            D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+            srcLoc.pResource = uploadAlloc.resource;
+            srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            srcLoc.PlacedFootprint = footprint;
+
+            D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+            dstLoc.pResource = dstResource;
+            dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dstLoc.SubresourceIndex = i;
+
+            d3dCmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+        }
+
+        // Transition texture back to common/shader resource state
+        D3D12_RESOURCE_STATES finalState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+        barrier.Transition.StateAfter = finalState;
+        d3dCmdList->ResourceBarrier(1, &barrier);
+        texture->SetCurrentState(finalState);
     }
 
     return texture;
@@ -701,9 +891,9 @@ ITexture* CDX12RenderContext::WrapExternalTexture(void* nativeTexture, const Tex
 // ============================================
 
 ITexture* CDX12RenderContext::GetBackbuffer() {
-    // For DX12, we return a wrapper around the current backbuffer
-    // This is simplified - would need proper per-frame backbuffer handling
-    return m_backbufferWrapper.get();
+    // Return the backbuffer wrapper for the current frame
+    uint32_t frameIndex = CDX12Context::Instance().GetFrameIndex();
+    return m_backbufferWrappers[frameIndex].get();
 }
 
 ITexture* CDX12RenderContext::GetDepthStencil() {
@@ -906,6 +1096,44 @@ void CDX12RenderContext::CreateDepthStencilBuffer() {
 
 void CDX12RenderContext::ReleaseDepthStencilBuffer() {
     m_depthStencilBuffer.reset();
+}
+
+// ============================================
+// Backbuffer Wrapper Management
+// ============================================
+
+void CDX12RenderContext::CreateBackbufferWrappers() {
+    auto& dx12Ctx = CDX12Context::Instance();
+    uint32_t width = dx12Ctx.GetWidth();
+    uint32_t height = dx12Ctx.GetHeight();
+
+    TextureDesc desc = TextureDesc::Texture2D(width, height, ETextureFormat::R8G8B8A8_UNORM, ETextureUsage::RenderTarget);
+
+    for (uint32_t i = 0; i < NUM_FRAMES_IN_FLIGHT; ++i) {
+        // Get backbuffer resource for this frame
+        ComPtr<ID3D12Resource> backbuffer;
+        HRESULT hr = dx12Ctx.GetSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backbuffer));
+        if (FAILED(hr)) {
+            CFFLog::Error("[DX12RenderContext] Failed to get swapchain buffer %d: %s", i, HRESULTToString(hr).c_str());
+            continue;
+        }
+
+        // Set debug name
+        wchar_t name[32];
+        swprintf(name, 32, L"Backbuffer%d", i);
+        backbuffer->SetName(name);
+
+        // Create wrapper (CDX12Texture takes ownership by AddRef)
+        m_backbufferWrappers[i] = std::make_unique<CDX12Texture>(backbuffer.Get(), desc, dx12Ctx.GetDevice());
+    }
+
+    CFFLog::Info("[DX12RenderContext] Created %d backbuffer wrappers (%dx%d)", NUM_FRAMES_IN_FLIGHT, width, height);
+}
+
+void CDX12RenderContext::ReleaseBackbufferWrappers() {
+    for (uint32_t i = 0; i < NUM_FRAMES_IN_FLIGHT; ++i) {
+        m_backbufferWrappers[i].reset();
+    }
 }
 
 } // namespace DX12

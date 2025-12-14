@@ -84,7 +84,8 @@ ITexture* CKTXLoader::LoadCubemapFromKTX2(const std::string& filepath) {
     desc.mipLevels = ktxTex->numLevels;
     desc.format = rhiFormat;
     desc.usage = ETextureUsage::ShaderResource;
-    desc.isCubemap = true;
+    desc.dimension = ETextureDimension::TexCube;
+    desc.isCubemap = true;  // Legacy compatibility
     desc.debugName = "KTXCubemap";
 
     ITexture* texture = ctx->CreateTextureWithData(desc, subresources.data(), (uint32_t)subresources.size());

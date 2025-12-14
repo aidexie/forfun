@@ -23,6 +23,7 @@ bool CRHIManager::Initialize(EBackend backend, void* nativeWindowHandle, uint32_
         return false;
     }
 
+    m_backend = backend;
     m_initialized = true;
     return true;
 }

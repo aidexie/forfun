@@ -14,18 +14,17 @@ CDX12Texture::CDX12Texture(ID3D12Resource* resource, const TextureDesc& desc, ID
     , m_desc(desc)
     , m_device(device)
 {
-    // Set initial state based on usage
-    if (desc.usage & ETextureUsage::DepthStencil) {
-        m_currentState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-    } else if (desc.usage & ETextureUsage::RenderTarget) {
-        m_currentState = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    } else if (desc.usage & ETextureUsage::Staging) {
+    // Initial state matches what was used in CreateCommittedResource
+    // For DEFAULT heap, DX12 creates resources in COMMON state
+    // Staging textures (UPLOAD/READBACK) have different initial states
+    if (desc.usage & ETextureUsage::Staging) {
         if (desc.cpuAccess == ECPUAccess::Read) {
             m_currentState = D3D12_RESOURCE_STATE_COPY_DEST;
         } else {
             m_currentState = D3D12_RESOURCE_STATE_GENERIC_READ;
         }
     } else {
+        // DEFAULT heap resources start in COMMON state
         m_currentState = D3D12_RESOURCE_STATE_COMMON;
     }
 }

@@ -162,6 +162,14 @@ void CDX12Context::EnableDebugLayer() {
     } else {
         CFFLog::Warning("[DX12Context] Failed to enable debug layer");
     }
+
+    // Enable DRED (Device Removed Extended Data) for better crash diagnostics
+    ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
+    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings)))) {
+        dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        CFFLog::Info("[DX12Context] DRED enabled for crash diagnostics");
+    }
 #endif
 }
 
@@ -335,11 +343,12 @@ bool CDX12Context::CreateRTVHeap() {
 }
 
 bool CDX12Context::CreateImGuiSrvHeap() {
-    // ImGui needs a shader-visible SRV heap for font textures
-    // We allocate a small heap just for ImGui (1 descriptor is enough for basic usage)
+    // ImGui needs a shader-visible SRV heap for font textures and viewport textures
+    // Slot 0: ImGui font texture
+    // Slot 1+: Viewport textures (allocated dynamically)
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    srvHeapDesc.NumDescriptors = 1;  // Just for ImGui font texture
+    srvHeapDesc.NumDescriptors = IMGUI_SRV_HEAP_SIZE;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     srvHeapDesc.NodeMask = 0;
 
@@ -350,9 +359,10 @@ bool CDX12Context::CreateImGuiSrvHeap() {
     }
 
     m_srvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    m_imguiSrvNextSlot = 1;  // Slot 0 reserved for font texture
 
     DX12_SET_DEBUG_NAME(m_imguiSrvHeap, "ImGuiSrvHeap");
-    CFFLog::Info("[DX12Context] ImGui SRV heap created");
+    CFFLog::Info("[DX12Context] ImGui SRV heap created (%u descriptors)", IMGUI_SRV_HEAP_SIZE);
     return true;
 }
 
@@ -362,6 +372,49 @@ D3D12_CPU_DESCRIPTOR_HANDLE CDX12Context::GetImGuiSrvCpuHandle() const {
 
 D3D12_GPU_DESCRIPTOR_HANDLE CDX12Context::GetImGuiSrvGpuHandle() const {
     return m_imguiSrvHeap->GetGPUDescriptorHandleForHeapStart();
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE CDX12Context::AllocateImGuiTextureDescriptor(ID3D12Resource* texture, DXGI_FORMAT format) {
+    if (!texture || !m_imguiSrvHeap) {
+        return D3D12_GPU_DESCRIPTOR_HANDLE{0};
+    }
+
+    if (m_imguiSrvNextSlot >= IMGUI_SRV_HEAP_SIZE) {
+        CFFLog::Error("[DX12Context] ImGui SRV heap full (max %u)", IMGUI_SRV_HEAP_SIZE);
+        return D3D12_GPU_DESCRIPTOR_HANDLE{0};
+    }
+
+    uint32_t slot = m_imguiSrvNextSlot++;
+    CFFLog::Info("[DX12Context] Allocated ImGui texture descriptor at slot %u", slot);
+    return UpdateImGuiTextureDescriptor(slot, texture, format);
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE CDX12Context::UpdateImGuiTextureDescriptor(uint32_t slot, ID3D12Resource* texture, DXGI_FORMAT format) {
+    if (!texture || !m_imguiSrvHeap || slot >= IMGUI_SRV_HEAP_SIZE || slot == 0) {
+        return D3D12_GPU_DESCRIPTOR_HANDLE{0};
+    }
+
+    // Get CPU handle at the specified slot
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = m_imguiSrvHeap->GetCPUDescriptorHandleForHeapStart();
+    cpuHandle.ptr += slot * m_srvDescriptorSize;
+
+    // Create SRV
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = format;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.PlaneSlice = 0;
+    srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+    m_device->CreateShaderResourceView(texture, &srvDesc, cpuHandle);
+
+    // Get GPU handle for the same slot
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = m_imguiSrvHeap->GetGPUDescriptorHandleForHeapStart();
+    gpuHandle.ptr += slot * m_srvDescriptorSize;
+
+    return gpuHandle;
 }
 
 void CDX12Context::CreateBackbufferRTVs() {
@@ -469,11 +522,9 @@ void CDX12Context::WaitForGPU() {
 }
 
 void CDX12Context::MoveToNextFrame() {
-    // Record the fence value for the current frame
-    m_frameFenceValues[m_frameIndex] = m_fenceValue;
-
-    // Signal the fence
-    SignalFence();
+    // Signal the fence and record the value for the current frame
+    uint64_t fenceValue = SignalFence();
+    m_frameFenceValues[m_frameIndex] = fenceValue;
 
     // Update frame index
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();

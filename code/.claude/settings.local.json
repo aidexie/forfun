@@ -19,7 +19,12 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:diligentgraphics.com)",
       "WebFetch(domain:developer.nvidia.com)",
-      "WebFetch(domain:alextardif.com)"
+      "WebFetch(domain:alextardif.com)",
+      "Bash(if exist E:forfunsourcecodestdout.txt type E:forfunsourcecodestdout.txt)",
+      "Bash(if exist E:forfunsourcecodestderr.txt type E:forfunsourcecodestderr.txt)",
+      "Bash(cmake:*)",
+      "Bash(./build/Debug/forfun.exe:*)",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

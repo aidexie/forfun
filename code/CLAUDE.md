@@ -320,7 +320,7 @@ REGISTER_COMPONENT(SPointLight)
 - Rendering Pipeline 架构
 - Color Space 规则
 
-### 快速参考
+ ### 快速参考
 
 **Color Space**:
 - Albedo/Emissive: `UNORM_SRGB`

@@ -61,10 +61,10 @@ bool CFFAssetLoader::LoadSkyboxAsset(const std::string& ffassetPath, SkyboxAsset
         outAsset.sourcePath = (basePath / j["source"].get<std::string>()).string();
     }
 
-    CFFLog::Info("FFAssetLoader: Loaded skybox asset from %s",ffassetPath);
-    CFFLog::Info("  - Environment: %s",outAsset.envPath);
-    CFFLog::Info("  - Irradiance: %s",outAsset.irrPath);
-    CFFLog::Info("  - Prefilter: %s",outAsset.prefilterPath);
+    CFFLog::Info("FFAssetLoader: Loaded skybox asset from %s", ffassetPath.c_str());
+    CFFLog::Info("  - Environment: %s", outAsset.envPath.c_str());
+    CFFLog::Info("  - Irradiance: %s", outAsset.irrPath.c_str());
+    CFFLog::Info("  - Prefilter: %s", outAsset.prefilterPath.c_str());
 
     return true;
 }

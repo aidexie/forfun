@@ -18,6 +18,9 @@ public:
     // Get the global render context
     IRenderContext* GetRenderContext() { return m_renderContext.get(); }
 
+    // Get the current backend type
+    EBackend GetBackend() const { return m_backend; }
+
     bool IsInitialized() const { return m_initialized; }
 
 private:
@@ -27,6 +30,7 @@ private:
     CRHIManager& operator=(const CRHIManager&) = delete;
 
     std::unique_ptr<IRenderContext> m_renderContext;
+    EBackend m_backend = EBackend::DX11;
     bool m_initialized = false;
 };
 
