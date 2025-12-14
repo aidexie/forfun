@@ -223,6 +223,10 @@ SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, u
     DXGI_FORMAT format = (m_desc.srvFormat != ETextureFormat::Unknown) ?
                          ToDXGIFormat(m_desc.srvFormat) : ToDXGIFormat(m_desc.format);
 
+    // In DX12, MipLevels = 0 is invalid. Use -1 (UINT_MAX) to indicate "all mips from MostDetailedMip"
+    // or use the actual mip count if numMips was 0
+    UINT srvMipLevels = (numMips == 0) ? static_cast<UINT>(-1) : numMips;
+
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = format;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -231,7 +235,7 @@ SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, u
         case ETextureDimension::Tex2D:
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
             srvDesc.Texture2D.MostDetailedMip = mipLevel;
-            srvDesc.Texture2D.MipLevels = numMips;
+            srvDesc.Texture2D.MipLevels = srvMipLevels;
             srvDesc.Texture2D.PlaneSlice = 0;
             srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
             break;
@@ -239,7 +243,7 @@ SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, u
         case ETextureDimension::Tex2DArray:
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
             srvDesc.Texture2DArray.MostDetailedMip = mipLevel;
-            srvDesc.Texture2DArray.MipLevels = numMips;
+            srvDesc.Texture2DArray.MipLevels = srvMipLevels;
             srvDesc.Texture2DArray.FirstArraySlice = arraySlice;
             srvDesc.Texture2DArray.ArraySize = numSlices;
             srvDesc.Texture2DArray.PlaneSlice = 0;
@@ -249,21 +253,21 @@ SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, u
         case ETextureDimension::Tex3D:
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
             srvDesc.Texture3D.MostDetailedMip = mipLevel;
-            srvDesc.Texture3D.MipLevels = numMips;
+            srvDesc.Texture3D.MipLevels = srvMipLevels;
             srvDesc.Texture3D.ResourceMinLODClamp = 0.0f;
             break;
 
         case ETextureDimension::TexCube:
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
             srvDesc.TextureCube.MostDetailedMip = mipLevel;
-            srvDesc.TextureCube.MipLevels = numMips;
+            srvDesc.TextureCube.MipLevels = srvMipLevels;
             srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
             break;
 
         case ETextureDimension::TexCubeArray:
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
             srvDesc.TextureCubeArray.MostDetailedMip = mipLevel;
-            srvDesc.TextureCubeArray.MipLevels = numMips;
+            srvDesc.TextureCubeArray.MipLevels = srvMipLevels;
             srvDesc.TextureCubeArray.First2DArrayFace = arraySlice;
             srvDesc.TextureCubeArray.NumCubes = numSlices / 6;
             srvDesc.TextureCubeArray.ResourceMinLODClamp = 0.0f;

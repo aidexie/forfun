@@ -435,7 +435,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // For DX11, load here
     if (g_renderConfig.backend == RHI::EBackend::DX11) {
         if (!activeTest) {
-            std::string scenePath = FFPath::GetAbsolutePath("scenes/simple.scene");
+            std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;
         }

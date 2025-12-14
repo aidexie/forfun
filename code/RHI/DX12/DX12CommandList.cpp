@@ -57,9 +57,11 @@ void CDX12CommandList::Reset(ID3D12CommandAllocator* allocator) {
     m_currentPSO = nullptr;
     m_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;  // Force re-set on next draw
 
-    // Reset pending descriptor bindings
+    // Reset pending bindings
+    memset(m_pendingCBVs, 0, sizeof(m_pendingCBVs));
     memset(m_pendingSRVs, 0, sizeof(m_pendingSRVs));
     memset(m_pendingSamplers, 0, sizeof(m_pendingSamplers));
+    m_cbvDirty = false;
     m_srvDirty = false;
     m_samplerDirty = false;
 }
@@ -303,22 +305,14 @@ void CDX12CommandList::SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint
 }
 
 void CDX12CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) {
-    if (!buffer) return;
+    if (!buffer || slot >= MAX_CBV_SLOTS) return;
 
     CDX12Buffer* dx12Buffer = static_cast<CDX12Buffer*>(buffer);
-    EnsureDescriptorHeapsBound();
 
-    // Root parameter 0-6 are root CBVs (b0-b6)
-    // Using root CBV directly (no descriptor)
-    if (slot < 7) {
-        D3D12_GPU_VIRTUAL_ADDRESS address = dx12Buffer->GetGPUVirtualAddress();
-        if (stage == EShaderStage::Compute) {
-            m_commandList->SetComputeRootConstantBufferView(slot, address);
-        } else {
-            m_commandList->SetGraphicsRootConstantBufferView(slot, address);
-        }
-    }
-    // For slots >= 7, would need descriptor table (not implemented in fixed layout)
+    // Store for deferred binding (will be bound in BindPendingResources before draw)
+    // This allows SetConstantBuffer to be called before SetPipelineState
+    m_pendingCBVs[slot] = dx12Buffer->GetGPUVirtualAddress();
+    m_cbvDirty = true;
 }
 
 void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) {
@@ -418,25 +412,25 @@ void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint3
 // ============================================
 
 void CDX12CommandList::Draw(uint32_t vertexCount, uint32_t startVertex) {
-    BindPendingDescriptorTables();
+    BindPendingResources();
     FlushBarriers();
     m_commandList->DrawInstanced(vertexCount, 1, startVertex, 0);
 }
 
 void CDX12CommandList::DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) {
-    BindPendingDescriptorTables();
+    BindPendingResources();
     FlushBarriers();
     m_commandList->DrawIndexedInstanced(indexCount, 1, startIndex, baseVertex, 0);
 }
 
 void CDX12CommandList::DrawInstanced(uint32_t vertexCountPerInstance, uint32_t instanceCount, uint32_t startVertex, uint32_t startInstance) {
-    BindPendingDescriptorTables();
+    BindPendingResources();
     FlushBarriers();
     m_commandList->DrawInstanced(vertexCountPerInstance, instanceCount, startVertex, startInstance);
 }
 
 void CDX12CommandList::DrawIndexedInstanced(uint32_t indexCountPerInstance, uint32_t instanceCount, uint32_t startIndex, int32_t baseVertex, uint32_t startInstance) {
-    BindPendingDescriptorTables();
+    BindPendingResources();
     FlushBarriers();
     m_commandList->DrawIndexedInstanced(indexCountPerInstance, instanceCount, startIndex, baseVertex, startInstance);
 }
@@ -591,15 +585,25 @@ void CDX12CommandList::EndEvent() {
 }
 
 // ============================================
-// Descriptor Table Binding
+// Pending Resource Binding
 // ============================================
 
-void CDX12CommandList::BindPendingDescriptorTables() {
+void CDX12CommandList::BindPendingResources() {
     // Root signature layout (from DX12RenderContext::CreateRootSignatures):
     // Parameter 0-6: Root CBV b0-b6
     // Parameter 7: SRV Descriptor Table t0-t24
     // Parameter 8: UAV Descriptor Table u0-u7
     // Parameter 9: Sampler Descriptor Table s0-s7
+
+    // Bind CBVs (root constant buffer views)
+    if (m_cbvDirty) {
+        for (uint32_t i = 0; i < MAX_CBV_SLOTS; ++i) {
+            if (m_pendingCBVs[i] != 0) {
+                m_commandList->SetGraphicsRootConstantBufferView(i, m_pendingCBVs[i]);
+            }
+        }
+        m_cbvDirty = false;
+    }
 
     // Bind SRV table if any SRV is set
     if (m_srvDirty) {

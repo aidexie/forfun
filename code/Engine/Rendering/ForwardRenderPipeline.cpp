@@ -78,7 +78,8 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // 2. Shadow Pass (if enabled)
     // ============================================
     const CShadowPass::Output* shadowData = nullptr;
-    if (ctx.showFlags.Shadows) {
+    // Shadow Pass disabled for DX12 until debugging is complete
+    if (!dx12MinimalMode && ctx.showFlags.Shadows) {
         // Find DirectionalLight in scene
         SDirectionalLight* dirLight = nullptr;
         for (auto& objPtr : ctx.scene.GetWorld().Objects()) {
@@ -110,20 +111,12 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 4. Scene Rendering (Opaque + Transparent + Skybox)
     // ============================================
-    if (!dx12MinimalMode) {
+    {
         RHI::CScopedDebugEvent evt(cmdList, L"Scene Rendering");
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
                               m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
                               shadowData);
-    } else {
-        // DX12 Minimal Mode: Only render Skybox for now
-        // (Scene objects are skipped until DX12 SceneRenderer is fully working)
-        RHI::CScopedDebugEvent evt(cmdList, L"Skybox (DX12)");
-        RHI::ITexture* hdrRTs[] = { m_offHDR.get() };
-        cmdList->SetRenderTargets(1, hdrRTs, m_offDepth.get());
-        ctx.scene.GetSkybox().Render(ctx.camera.GetViewMatrix(),
-                                     ctx.camera.GetProjectionMatrix());
     }
 
     // ============================================

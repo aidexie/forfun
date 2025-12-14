@@ -356,6 +356,10 @@ void CSceneRenderer::Render(
     XMMATRIX proj = camera.GetProjectionMatrix();
     XMVECTOR eye = XMLoadFloat3(&camera.position);
 
+    // DX12 minimal mode: enable features incrementally
+    // TODO: Remove this flag once all DX12 features are working
+    const bool dx12Mode = (CRHIManager::Instance().GetBackend() == EBackend::DX12);
+
     // Find DirectionalLight
     SDirectionalLight* dirLight = nullptr;
     for (auto& objPtr : scene.GetWorld().Objects()) {
@@ -383,51 +387,58 @@ void CSceneRenderer::Render(
         cmdList->SetSampler(EShaderStage::Pixel, 1, shadowData->shadowSampler);
     }
 
-    // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
-    auto& probeManager = scene.GetProbeManager();
-    probeManager.Bind(cmdList);
+    // Skip advanced features in DX12 mode for now
+    if (!dx12Mode) {
+        // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
+        auto& probeManager = scene.GetProbeManager();
+        probeManager.Bind(cmdList);
 
-    // Bind Light Probes (t15, b5)
-    auto& lightProbeManager = scene.GetLightProbeManager();
-    lightProbeManager.Bind(cmdList);
+        // Bind Light Probes (t15, b5)
+        auto& lightProbeManager = scene.GetLightProbeManager();
+        lightProbeManager.Bind(cmdList);
 
-    // Bind Volumetric Lightmap (t20-t24, b6)
-    auto& volumetricLightmap = scene.GetVolumetricLightmap();
-    volumetricLightmap.Bind(cmdList);
+        // Bind Volumetric Lightmap (t20-t24, b6)
+        auto& volumetricLightmap = scene.GetVolumetricLightmap();
+        volumetricLightmap.Bind(cmdList);
+    }
 
     // Bind sampler (s0)
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
-    // Clustered lighting setup
-    {
-        RHI::CScopedDebugEvent evt(cmdList, L"clustered Lighting");
-        m_clusteredLighting.Resize(w, h);
-        m_clusteredLighting.BuildClusterGrid(cmdList, proj, camera.nearZ, camera.farZ);
-        m_clusteredLighting.CullLights(cmdList, &scene, view);
-    }
-    // Update clustered params constant buffer (b3)
-    CB_ClusteredParams clusteredParams{};
-    clusteredParams.nearZ = camera.nearZ;
-    clusteredParams.farZ = camera.farZ;
-    clusteredParams.numClustersX = m_clusteredLighting.GetNumClustersX();
-    clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
-    clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
+    // Skip clustered lighting in DX12 mode for now
+    if (!dx12Mode) {
+        // Clustered lighting setup
+        {
+            RHI::CScopedDebugEvent evt(cmdList, L"clustered Lighting");
+            m_clusteredLighting.Resize(w, h);
+            m_clusteredLighting.BuildClusterGrid(cmdList, proj, camera.nearZ, camera.farZ);
+            m_clusteredLighting.CullLights(cmdList, &scene, view);
+        }
+        // Update clustered params constant buffer (b3)
+        CB_ClusteredParams clusteredParams{};
+        clusteredParams.nearZ = camera.nearZ;
+        clusteredParams.farZ = camera.farZ;
+        clusteredParams.numClustersX = m_clusteredLighting.GetNumClustersX();
+        clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
+        clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
 
-    void* mappedCluster = m_cbClusteredParams->Map();
-    if (mappedCluster) {
-        memcpy(mappedCluster, &clusteredParams, sizeof(CB_ClusteredParams));
-        m_cbClusteredParams->Unmap();
+        void* mappedCluster = m_cbClusteredParams->Map();
+        if (mappedCluster) {
+            memcpy(mappedCluster, &clusteredParams, sizeof(CB_ClusteredParams));
+            m_cbClusteredParams->Unmap();
+        }
+        cmdList->SetConstantBuffer(EShaderStage::Pixel, 3, m_cbClusteredParams.get());
+        m_clusteredLighting.BindToMainPass(cmdList);
     }
-    cmdList->SetConstantBuffer(EShaderStage::Pixel, 3, m_cbClusteredParams.get());
-    m_clusteredLighting.BindToMainPass(cmdList);
 
     // Collect render items
     std::vector<RenderItem> opaqueItems;
     std::vector<RenderItem> transparentItems;
+    auto& probeManager = scene.GetProbeManager();
     collectRenderItems(scene, eye, opaqueItems, transparentItems, &probeManager);
 
     // Render Opaque
-    { 
+    {
         RHI::CScopedDebugEvent evt(cmdList, L"Opaque Pass");
         cmdList->SetPipelineState(m_psoOpaque.get());
         cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
@@ -435,18 +446,21 @@ void CSceneRenderer::Render(
     }
 
     // Render Skybox
-    { 
+    {
         RHI::CScopedDebugEvent evt(cmdList, L"Skybox");
         CScene::Instance().GetSkybox().Render(view, proj);
     }
 
-    // Render Transparent
-    {
-        RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
-        cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
-        cmdList->SetPipelineState(m_psoTransparent.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-        renderItems(cmdList, transparentItems, m_cbObj.get());
+    // Skip transparent pass in DX12 mode for now
+    if (!dx12Mode) {
+        // Render Transparent
+        {
+            RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
+            cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
+            cmdList->SetPipelineState(m_psoTransparent.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+            renderItems(cmdList, transparentItems, m_cbObj.get());
+        }
     }
 }
 

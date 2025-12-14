@@ -121,6 +121,12 @@ private:
     // Cached primitive topology
     D3D12_PRIMITIVE_TOPOLOGY m_currentTopology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
 
+    // Pending CBV bindings (GPU virtual addresses)
+    // These are bound as root CBVs before draw calls (after PSO is set)
+    static constexpr uint32_t MAX_CBV_SLOTS = 7;
+    D3D12_GPU_VIRTUAL_ADDRESS m_pendingCBVs[MAX_CBV_SLOTS] = {};
+    bool m_cbvDirty = false;
+
     // Pending SRV/Sampler bindings (GPU handles from shader-visible heap)
     // These are bound as descriptor tables before draw calls
     static constexpr uint32_t MAX_SRV_SLOTS = 25;
@@ -130,8 +136,8 @@ private:
     bool m_srvDirty = false;
     bool m_samplerDirty = false;
 
-    // Bind pending descriptor tables before draw
-    void BindPendingDescriptorTables();
+    // Bind pending resources before draw (requires PSO to be set first)
+    void BindPendingResources();
 };
 
 } // namespace DX12
