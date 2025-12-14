@@ -256,5 +256,11 @@ void CPostProcessPass::createPipelineState() {
     // Primitive topology
     psoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
 
+    // Render target format: LDR uses R8G8B8A8_UNORM_SRGB for gamma-correct output
+    psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
+
+    // No depth stencil for post-processing
+    psoDesc.depthStencilFormat = ETextureFormat::Unknown;
+
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }

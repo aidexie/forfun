@@ -69,7 +69,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     ensureOffscreen(ctx.width, ctx.height);
 
     // ============================================
-    // DX12 Minimal Test: Only clear, skip complex rendering
+    // DX12 Minimal Test: Skip complex scene rendering, but allow post-processing
     // TODO: Remove this flag once all features are working
     // ============================================
     const bool dx12MinimalMode = (RHI::CRHIManager::Instance().GetBackend() == RHI::EBackend::DX12);
@@ -121,13 +121,14 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 5. Post-Processing (HDR -> LDR)
     // ============================================
-    if (!dx12MinimalMode && ctx.showFlags.PostProcessing) {
+    // PostProcessing is enabled for both DX11 and DX12
+    // It does tone mapping from HDR RT to LDR RT
+    if (ctx.showFlags.PostProcessing) {
         RHI::CScopedDebugEvent evt(cmdList, L"Post-Processing");
         m_postProcess.Render(m_offHDR.get(), m_offLDR.get(),
                            ctx.width, ctx.height, 1.0f);
     } else {
-        // DX12 minimal mode: Just copy HDR to LDR (or clear LDR)
-        // For now, clear LDR with optimized clear color
+        // No post-processing: clear LDR with black
         RHI::ITexture* ldrRT = m_offLDR.get();
         cmdList->SetRenderTargets(1, &ldrRT, nullptr);
         const float ldrClearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };  // Match optimizedClearValue

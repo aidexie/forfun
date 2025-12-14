@@ -55,6 +55,7 @@ void CDX12CommandList::Reset(ID3D12CommandAllocator* allocator) {
     m_commandList->Reset(allocator, nullptr);
     m_descriptorHeapsBound = false;
     m_currentPSO = nullptr;
+    m_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;  // Force re-set on next draw
 }
 
 void CDX12CommandList::Close() {
