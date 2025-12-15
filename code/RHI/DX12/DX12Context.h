@@ -52,6 +52,9 @@ public:
     bool SupportsRaytracing() const { return m_supportsRaytracing; }
     bool SupportsMeshShaders() const { return m_supportsMeshShaders; }
 
+    // Debug: Flush and log any D3D12 debug messages
+    void FlushDebugMessages();
+
     // ImGui support - dedicated SRV heap for ImGui fonts/textures
     ID3D12DescriptorHeap* GetImGuiSrvHeap() const { return m_imguiSrvHeap.Get(); }
     D3D12_CPU_DESCRIPTOR_HANDLE GetImGuiSrvCpuHandle() const;

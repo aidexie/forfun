@@ -81,6 +81,10 @@ void CDX12CommandList::TransitionResource(CDX12Texture* texture, D3D12_RESOURCE_
     if (NeedsTransition(currentState, targetState)) {
         m_stateTracker.TransitionResourceExplicit(texture->GetD3D12Resource(), currentState, targetState);
         texture->SetCurrentState(targetState);
+#if 0  // Enable for state tracking debug
+        const char* debugName = texture->GetDesc().debugName ? texture->GetDesc().debugName : "unnamed";
+        CFFLog::Info("[StateTrack] Texture '%s': 0x%X -> 0x%X", debugName, currentState, targetState);
+#endif
     }
 }
 
@@ -349,22 +353,17 @@ void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITex
 
     EnsureDescriptorHeapsBound();
 
-    // Get the SRV - this is already in the shader-visible heap
+    // Get the SRV handle and calculate GPU handle
     D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = dx12Texture->GetOrCreateSRV();
 
-    // Get GPU handle from the shader-visible heap
-    // Since SRVs are allocated from the shader-visible CBV_SRV_UAV heap,
-    // we need to calculate the GPU handle from the CPU handle
     auto& heapMgr = CDX12DescriptorHeapManager::Instance();
     auto& heap = heapMgr.GetCBVSRVUAVHeap();
 
-    // Calculate index from CPU handle
     SIZE_T cpuHandlePtr = cpuHandle.ptr;
     SIZE_T heapStartPtr = heap.GetCPUStart().ptr;
     uint32_t descriptorSize = heap.GetDescriptorSize();
     uint32_t index = static_cast<uint32_t>((cpuHandlePtr - heapStartPtr) / descriptorSize);
 
-    // Calculate GPU handle
     D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = heap.GetGPUStart();
     gpuHandle.ptr += index * descriptorSize;
 
@@ -476,13 +475,21 @@ void CDX12CommandList::Dispatch(uint32_t threadGroupCountX, uint32_t threadGroup
 void CDX12CommandList::Barrier(IResource* resource, EResourceState stateBefore, EResourceState stateAfter) {
     if (!resource) return;
 
-    // Determine if it's a texture or buffer and transition
-    // This is a simplified implementation - actual would need type checking
-    D3D12_RESOURCE_STATES before = ToD3D12ResourceState(stateBefore);
     D3D12_RESOURCE_STATES after = ToD3D12ResourceState(stateAfter);
 
-    ID3D12Resource* d3dResource = static_cast<ID3D12Resource*>(resource->GetNativeHandle());
-    m_stateTracker.TransitionResource(d3dResource, after);
+    // Try to cast to texture first, then buffer, to update tracked state
+    // This ensures the resource's internal state tracking stays in sync
+    if (auto* texture = dynamic_cast<ITexture*>(resource)) {
+        CDX12Texture* dx12Tex = static_cast<CDX12Texture*>(texture);
+        TransitionResource(dx12Tex, after);
+    } else if (auto* buffer = dynamic_cast<IBuffer*>(resource)) {
+        CDX12Buffer* dx12Buf = static_cast<CDX12Buffer*>(buffer);
+        TransitionResource(dx12Buf, after);
+    } else {
+        // Fallback: use state tracker directly (won't update resource's tracked state)
+        ID3D12Resource* d3dResource = static_cast<ID3D12Resource*>(resource->GetNativeHandle());
+        m_stateTracker.TransitionResource(d3dResource, after);
+    }
 }
 
 void CDX12CommandList::UAVBarrier(IResource* resource) {

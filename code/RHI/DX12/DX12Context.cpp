@@ -55,6 +55,9 @@ bool CDX12Context::Initialize(HWND hwnd, uint32_t width, uint32_t height) {
         return false;
     }
 
+    // Note: Debug break on errors disabled to avoid conflicts with exception handling
+    // D3D12 debug messages still appear in VS Output window automatically
+
     // Check feature support
     CheckFeatureSupport();
 
@@ -169,6 +172,45 @@ void CDX12Context::EnableDebugLayer() {
         dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
         dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
         CFFLog::Info("[DX12Context] DRED enabled for crash diagnostics");
+    }
+#endif
+}
+
+void CDX12Context::FlushDebugMessages() {
+#ifdef _DEBUG
+    ComPtr<ID3D12InfoQueue> infoQueue;
+    if (SUCCEEDED(m_device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
+        UINT64 numMessages = infoQueue->GetNumStoredMessages();
+        for (UINT64 i = 0; i < numMessages; ++i) {
+            SIZE_T messageLength = 0;
+            infoQueue->GetMessage(i, nullptr, &messageLength);
+            if (messageLength > 0) {
+                std::vector<char> messageData(messageLength);
+                D3D12_MESSAGE* message = reinterpret_cast<D3D12_MESSAGE*>(messageData.data());
+                if (SUCCEEDED(infoQueue->GetMessage(i, message, &messageLength))) {
+                    const char* severityStr = "INFO";
+                    bool isError = false;
+                    switch (message->Severity) {
+                        case D3D12_MESSAGE_SEVERITY_CORRUPTION: severityStr = "CORRUPTION"; isError = true; break;
+                        case D3D12_MESSAGE_SEVERITY_ERROR: severityStr = "ERROR"; isError = true; break;
+                        case D3D12_MESSAGE_SEVERITY_WARNING: severityStr = "WARNING"; break;
+                        case D3D12_MESSAGE_SEVERITY_INFO: severityStr = "INFO"; break;
+                        case D3D12_MESSAGE_SEVERITY_MESSAGE: severityStr = "MESSAGE"; break;
+                    }
+
+                    // Output directly to debugger to avoid Poco issues
+                    char buffer[4096];
+                    snprintf(buffer, sizeof(buffer), "[D3D12 %s] %s\n", severityStr, message->pDescription);
+                    OutputDebugStringA(buffer);
+
+                    // Break on errors in debugger
+                    if (isError) {
+                        __debugbreak();
+                    }
+                }
+            }
+        }
+        infoQueue->ClearStoredMessages();
     }
 #endif
 }
