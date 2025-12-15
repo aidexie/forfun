@@ -287,11 +287,11 @@ void renderItems(
         cmdList->SetVertexBuffer(0, item.gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
         cmdList->SetIndexBuffer(item.gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
 
-        // Bind textures (t0=albedo, t1=normal, t6=metallicRoughness, t7=emissive)
+        // Bind textures (t0=albedo, t1=normal, t2=metallicRoughness, t3=emissive)
         cmdList->SetShaderResource(EShaderStage::Pixel, 0, item.albedoTex);
         cmdList->SetShaderResource(EShaderStage::Pixel, 1, item.normalTex);
-        cmdList->SetShaderResource(EShaderStage::Pixel, 6, item.metallicRoughnessTex);
-        cmdList->SetShaderResource(EShaderStage::Pixel, 7, item.emissiveTex);
+        cmdList->SetShaderResource(EShaderStage::Pixel, 2, item.metallicRoughnessTex);
+        cmdList->SetShaderResource(EShaderStage::Pixel, 3, item.emissiveTex);
 
         // Draw
         cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
@@ -372,9 +372,9 @@ void CSceneRenderer::Render(
     cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
     cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbFrame.get());
 
-    // Bind shadow resources (t2=shadowMap, s1=shadowSampler)
+    // Bind shadow resources (t4=shadowMap, s1=shadowSampler)
     if (shadowData && shadowData->shadowMapArray) {
-        cmdList->SetShaderResource(EShaderStage::Pixel, 2, shadowData->shadowMapArray);
+        cmdList->SetShaderResource(EShaderStage::Pixel, 4, shadowData->shadowMapArray);
     }
     if (shadowData && shadowData->shadowSampler) {
         cmdList->SetSampler(EShaderStage::Pixel, 1, shadowData->shadowSampler);

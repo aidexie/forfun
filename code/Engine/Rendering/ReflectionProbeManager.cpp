@@ -136,14 +136,14 @@ void CReflectionProbeManager::Bind(RHI::ICommandList* cmdList)
 {
     if (!m_initialized || !cmdList) return;
 
-    // t3: IrradianceArray
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 3, m_irradianceArray.get());
+    // t5: IrradianceArray
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 5, m_irradianceArray.get());
 
-    // t4: PrefilteredArray
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 4, m_prefilteredArray.get());
+    // t6: PrefilteredArray
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 6, m_prefilteredArray.get());
 
-    // t5: BRDF LUT
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 5, m_brdfLutTexture.get());
+    // t7: BRDF LUT
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 7, m_brdfLutTexture.get());
 
     // b4: CB_Probes
     cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 4, m_cbProbes.get());

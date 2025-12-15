@@ -5,14 +5,18 @@
 #include "LightProbe.hlsl"            // Light Probe SH support
 #include "VolumetricLightmap.hlsl"    // Volumetric Lightmap (Per-Pixel GI)
 
+// Material textures (per-object, contiguous t0-t3)
 Texture2D gAlbedo : register(t0);
 Texture2D gNormal : register(t1);
-Texture2DArray gShadowMaps : register(t2);  // CSM: Texture2DArray
-TextureCubeArray gIrradianceArray : register(t3);   // IBL: Irradiance (32x32, 8 probes)
-TextureCubeArray gPrefilteredArray : register(t4);  // IBL: Prefiltered (128x128, 8 probes)
-Texture2D gBrdfLUT : register(t5);  // IBL: BRDF lookup table
-Texture2D gMetallicRoughness : register(t6);  // G=Roughness, B=Metallic (glTF 2.0 standard)
-Texture2D gEmissiveMap : register(t7);  // Emissive texture (sRGB)
+Texture2D gMetallicRoughness : register(t2);  // G=Roughness, B=Metallic (glTF 2.0 standard)
+Texture2D gEmissiveMap : register(t3);  // Emissive texture (sRGB)
+
+// Global textures (t4-t7)
+Texture2DArray gShadowMaps : register(t4);  // CSM: Texture2DArray
+TextureCubeArray gIrradianceArray : register(t5);   // IBL: Irradiance (32x32, 8 probes)
+TextureCubeArray gPrefilteredArray : register(t6);  // IBL: Prefiltered (128x128, 8 probes)
+Texture2D gBrdfLUT : register(t7);  // IBL: BRDF lookup table
+
 SamplerState gSamp : register(s0);
 SamplerComparisonState gShadowSampler : register(s1);
 
