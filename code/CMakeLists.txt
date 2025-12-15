@@ -142,6 +142,8 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12Texture.cpp
     ${CODE_PATH}/RHI/DX12/DX12UploadManager.h
     ${CODE_PATH}/RHI/DX12/DX12UploadManager.cpp
+    ${CODE_PATH}/RHI/DX12/DX12DynamicBuffer.h
+    ${CODE_PATH}/RHI/DX12/DX12DynamicBuffer.cpp
     ${CODE_PATH}/RHI/DX12/DX12ResourceStateTracker.h
     ${CODE_PATH}/RHI/DX12/DX12ResourceStateTracker.cpp
     ${CODE_PATH}/RHI/DX12/DX12CommandList.h

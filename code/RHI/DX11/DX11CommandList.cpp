@@ -22,8 +22,14 @@ static void DebugDrawLog(const wchar_t* eventName, const char* drawType, void* p
 namespace RHI {
 namespace DX11 {
 
-CDX11CommandList::CDX11CommandList(ID3D11DeviceContext* context)
+// Align size to 16 bytes for constant buffers
+static size_t AlignCBSize(size_t size) {
+    return (size + 15) & ~15;
+}
+
+CDX11CommandList::CDX11CommandList(ID3D11DeviceContext* context, ID3D11Device* device)
     : m_context(context)
+    , m_device(device)
 {
     // Query for annotation interface for debug events
     if (m_context) {
@@ -36,6 +42,40 @@ CDX11CommandList::~CDX11CommandList() {
         m_annotation->Release();
         m_annotation = nullptr;
     }
+}
+
+void CDX11CommandList::ResetFrame() {
+    // Reset all pool indices for the new frame
+    for (auto& pair : m_dynamicCBPools) {
+        pair.second.nextIndex = 0;
+    }
+}
+
+ID3D11Buffer* CDX11CommandList::AcquireDynamicCB(size_t size) {
+    size_t alignedSize = AlignCBSize(size);
+    auto& pool = m_dynamicCBPools[alignedSize];
+
+    // If we have a buffer available, use it
+    if (pool.nextIndex < pool.buffers.size()) {
+        return pool.buffers[pool.nextIndex++].Get();
+    }
+
+    // Need to create a new buffer
+    D3D11_BUFFER_DESC desc = {};
+    desc.ByteWidth = static_cast<UINT>(alignedSize);
+    desc.Usage = D3D11_USAGE_DYNAMIC;
+    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+    Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
+    HRESULT hr = m_device->CreateBuffer(&desc, nullptr, &buffer);
+    if (FAILED(hr)) {
+        return nullptr;
+    }
+
+    pool.buffers.push_back(buffer);
+    pool.nextIndex++;
+    return buffer.Get();
 }
 
 void CDX11CommandList::SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) {
@@ -222,6 +262,46 @@ void CDX11CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuf
             m_context->DSSetConstantBuffers(slot, 1, &d3dBuffer);
             break;
     }
+}
+
+bool CDX11CommandList::SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) {
+    if (!data || size == 0) return false;
+
+    // Get a dynamic constant buffer from the pool
+    ID3D11Buffer* buffer = AcquireDynamicCB(size);
+    if (!buffer) return false;
+
+    // Map, copy data, unmap
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    HRESULT hr = m_context->Map(buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    if (FAILED(hr)) return false;
+
+    memcpy(mapped.pData, data, size);
+    m_context->Unmap(buffer, 0);
+
+    // Bind the buffer
+    switch (stage) {
+        case EShaderStage::Vertex:
+            m_context->VSSetConstantBuffers(slot, 1, &buffer);
+            break;
+        case EShaderStage::Pixel:
+            m_context->PSSetConstantBuffers(slot, 1, &buffer);
+            break;
+        case EShaderStage::Compute:
+            m_context->CSSetConstantBuffers(slot, 1, &buffer);
+            break;
+        case EShaderStage::Geometry:
+            m_context->GSSetConstantBuffers(slot, 1, &buffer);
+            break;
+        case EShaderStage::Hull:
+            m_context->HSSetConstantBuffers(slot, 1, &buffer);
+            break;
+        case EShaderStage::Domain:
+            m_context->DSSetConstantBuffers(slot, 1, &buffer);
+            break;
+    }
+
+    return true;
 }
 
 void CDX11CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) {

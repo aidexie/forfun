@@ -2,6 +2,7 @@
 
 #include "DX12Common.h"
 #include "DX12ResourceStateTracker.h"
+#include "DX12DynamicBuffer.h"
 #include "../ICommandList.h"
 
 // ============================================
@@ -60,6 +61,7 @@ public:
     void SetVertexBuffer(uint32_t slot, IBuffer* buffer, uint32_t stride, uint32_t offset = 0) override;
     void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0) override;
     void SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
+    bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) override;
     void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) override;
     void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
     void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) override;
@@ -138,6 +140,13 @@ private:
 
     // Bind pending resources before draw (requires PSO to be set first)
     void BindPendingResources();
+
+    // Dynamic constant buffer ring (owned by RenderContext, set during initialization)
+    CDX12DynamicBufferRing* m_dynamicBuffer = nullptr;
+
+public:
+    // Set dynamic buffer ring (called by RenderContext)
+    void SetDynamicBufferRing(CDX12DynamicBufferRing* ring) { m_dynamicBuffer = ring; }
 };
 
 } // namespace DX12

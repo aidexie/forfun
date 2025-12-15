@@ -315,6 +315,31 @@ void CDX12CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuf
     m_cbvDirty = true;
 }
 
+bool CDX12CommandList::SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) {
+    if (!data || size == 0 || slot >= MAX_CBV_SLOTS) return false;
+
+    if (!m_dynamicBuffer) {
+        CFFLog::Error("[DX12CommandList] SetConstantBufferData called but dynamic buffer ring not set!");
+        return false;
+    }
+
+    // Allocate from ring buffer
+    SDynamicAllocation alloc = m_dynamicBuffer->Allocate(size, CB_ALIGNMENT);
+    if (!alloc.IsValid()) {
+        CFFLog::Error("[DX12CommandList] Failed to allocate %zu bytes from dynamic buffer", size);
+        return false;
+    }
+
+    // Copy data to the allocated region
+    memcpy(alloc.cpuAddress, data, size);
+
+    // Bind the GPU address
+    m_pendingCBVs[slot] = alloc.gpuAddress;
+    m_cbvDirty = true;
+
+    return true;
+}
+
 void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) {
     if (!texture || slot >= MAX_SRV_SLOTS) return;
 

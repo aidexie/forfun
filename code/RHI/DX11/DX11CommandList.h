@@ -2,6 +2,9 @@
 #include "../ICommandList.h"
 #include "DX11Resources.h"
 #include <d3d11.h>
+#include <vector>
+#include <unordered_map>
+#include <wrl/client.h>
 
 // Forward declaration
 struct ID3DUserDefinedAnnotation;
@@ -11,8 +14,11 @@ namespace DX11 {
 
 class CDX11CommandList : public ICommandList {
 public:
-    CDX11CommandList(ID3D11DeviceContext* context);
+    CDX11CommandList(ID3D11DeviceContext* context, ID3D11Device* device);
     ~CDX11CommandList() override;
+
+    // Reset per-frame state (call at BeginFrame)
+    void ResetFrame();
 
     // Render Target Operations
     void SetRenderTargets(uint32_t numRTs, ITexture* const* renderTargets, ITexture* depthStencil) override;
@@ -32,6 +38,7 @@ public:
     void SetVertexBuffer(uint32_t slot, IBuffer* buffer, uint32_t stride, uint32_t offset) override;
     void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset) override;
     void SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
+    bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) override;
     void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) override;
     void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
     void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) override;
@@ -74,11 +81,23 @@ public:
 
 private:
     ID3D11DeviceContext* m_context;  // Non-owning
+    ID3D11Device* m_device;          // Non-owning, for creating dynamic CBs
     ID3DUserDefinedAnnotation* m_annotation = nullptr;  // Owned, for debug events
 
     // Debug tracking
     const wchar_t* m_currentEventName = nullptr;  // Current debug event name for error tracking
     IPipelineState* m_currentPSO = nullptr;  // Current PSO for validation
+
+    // Dynamic constant buffer pool for SetConstantBufferData
+    // Each size bucket has its own pool of buffers
+    struct DynamicCBPool {
+        std::vector<Microsoft::WRL::ComPtr<ID3D11Buffer>> buffers;
+        size_t nextIndex = 0;
+    };
+    std::unordered_map<size_t, DynamicCBPool> m_dynamicCBPools;  // Key = aligned size
+
+    // Get or create a dynamic constant buffer of the given size
+    ID3D11Buffer* AcquireDynamicCB(size_t size);
 };
 
 } // namespace DX11

@@ -168,9 +168,9 @@ void updateFrameConstants(
     }
 }
 
-// 更新物体常量 via RHI Map/Unmap
+// 更新物体常量 via SetConstantBufferData (unified API for both DX11 and DX12)
 void updateObjectConstants(
-    IBuffer* cbObj,
+    ICommandList* cmdList,
     const RenderItem& item)
 {
     CB_Object co{};
@@ -186,11 +186,9 @@ void updateObjectConstants(
     co.alphaCutoff = item.material->alphaCutoff;
     co.probeIndex = item.probeIndex;
 
-    void* mapped = cbObj->Map();
-    if (mapped) {
-        memcpy(mapped, &co, sizeof(CB_Object));
-        cbObj->Unmap();
-    }
+    // Use unified SetConstantBufferData API - works on both DX11 and DX12
+    cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &co, sizeof(CB_Object));
+    cmdList->SetConstantBufferData(EShaderStage::Pixel, 1, &co, sizeof(CB_Object));
 }
 
 // 收集并分类渲染项
@@ -280,11 +278,10 @@ void collectRenderItems(
 // 渲染物体列表 (统一处理 opaque 和 transparent)
 void renderItems(
     ICommandList* cmdList,
-    const std::vector<RenderItem>& items,
-    IBuffer* cbObj)
+    const std::vector<RenderItem>& items)
 {
     for (auto& item : items) {
-        updateObjectConstants(cbObj, item);
+        updateObjectConstants(cmdList, item);
 
         // Bind vertex/index buffers
         cmdList->SetVertexBuffer(0, item.gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
@@ -375,10 +372,6 @@ void CSceneRenderer::Render(
     cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
     cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbFrame.get());
 
-    // Bind object constant buffer (b1)
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 1, m_cbObj.get());
-    cmdList->SetConstantBuffer(EShaderStage::Pixel, 1, m_cbObj.get());
-
     // Bind shadow resources (t2=shadowMap, s1=shadowSampler)
     if (shadowData && shadowData->shadowMapArray) {
         cmdList->SetShaderResource(EShaderStage::Pixel, 2, shadowData->shadowMapArray);
@@ -442,7 +435,7 @@ void CSceneRenderer::Render(
         RHI::CScopedDebugEvent evt(cmdList, L"Opaque Pass");
         cmdList->SetPipelineState(m_psoOpaque.get());
         cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-        renderItems(cmdList, opaqueItems, m_cbObj.get());
+        renderItems(cmdList, opaqueItems);
     }
 
     // Render Skybox
@@ -459,7 +452,7 @@ void CSceneRenderer::Render(
             cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
             cmdList->SetPipelineState(m_psoTransparent.get());
             cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-            renderItems(cmdList, transparentItems, m_cbObj.get());
+            renderItems(cmdList, transparentItems);
         }
     }
 }

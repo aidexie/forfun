@@ -29,7 +29,7 @@ bool CDX11RenderContext::Initialize(void* nativeWindowHandle, uint32_t width, ui
     }
 
     // Create command list wrapper
-    m_commandList = std::make_unique<CDX11CommandList>(ctx.GetContext());
+    m_commandList = std::make_unique<CDX11CommandList>(ctx.GetContext(), ctx.GetDevice());
 
     // Wrap backbuffer - need to get actual texture from swap chain
     IDXGISwapChain* swapChain = ctx.GetSwapChain();
@@ -95,7 +95,8 @@ void CDX11RenderContext::OnResize(uint32_t width, uint32_t height) {
 }
 
 void CDX11RenderContext::BeginFrame() {
-    // DX11 doesn't need explicit frame begin
+    // Reset dynamic constant buffer pool indices
+    m_commandList->ResetFrame();
 }
 
 void CDX11RenderContext::EndFrame() {

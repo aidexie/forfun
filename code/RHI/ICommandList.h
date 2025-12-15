@@ -71,6 +71,14 @@ public:
     // Set constant buffer
     virtual void SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) = 0;
 
+    // Set constant buffer data directly (for per-draw data in DX12)
+    // This allocates from a ring buffer and binds the data inline
+    // In DX11, this falls back to Map/Unmap on the provided buffer
+    // data: pointer to constant data
+    // size: size of data in bytes
+    // Returns true if successful
+    virtual bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) = 0;
+
     // Set shader resource (texture or structured buffer)
     virtual void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) = 0;
     virtual void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) = 0;

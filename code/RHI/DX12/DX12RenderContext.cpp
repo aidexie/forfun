@@ -73,6 +73,17 @@ bool CDX12RenderContext::Initialize(void* nativeWindowHandle, uint32_t width, ui
     // Create depth stencil buffer
     CreateDepthStencilBuffer();
 
+    // Create dynamic constant buffer ring
+    // 4MB per frame should be enough for ~16000 draws with 256-byte CBs
+    m_dynamicBufferRing = std::make_unique<CDX12DynamicBufferRing>();
+    if (!m_dynamicBufferRing->Initialize(device, 4 * 1024 * 1024, NUM_FRAMES_IN_FLIGHT)) {
+        CFFLog::Error("[DX12RenderContext] Failed to initialize dynamic buffer ring");
+        return false;
+    }
+
+    // Set dynamic buffer ring on command list
+    m_commandList->SetDynamicBufferRing(m_dynamicBufferRing.get());
+
     CFFLog::Info("[DX12RenderContext] Initialized successfully");
     return true;
 }
@@ -82,6 +93,7 @@ void CDX12RenderContext::Shutdown() {
     //CDX12Context::Instance().WaitForGPU();
 
     // Release resources
+    m_dynamicBufferRing.reset();
     m_depthStencilBuffer.reset();
     ReleaseBackbufferWrappers();
     m_commandList.reset();
@@ -126,6 +138,10 @@ void CDX12RenderContext::BeginFrame() {
         return;
     }
 
+    // Advance dynamic buffer ring to current frame's region
+    uint32_t frameIndex = CDX12Context::Instance().GetFrameIndex();
+    m_dynamicBufferRing->BeginFrame(frameIndex);
+
     // Reset command list with current frame's allocator
     m_commandList->Reset(CDX12Context::Instance().GetCurrentCommandAllocator());
 
@@ -140,7 +156,6 @@ void CDX12RenderContext::BeginFrame() {
     m_commandList->GetNativeCommandList()->ResourceBarrier(1, &barrier);
 
     // Update backbuffer wrapper's tracked state to match
-    uint32_t frameIndex = CDX12Context::Instance().GetFrameIndex();
     if (m_backbufferWrappers[frameIndex]) {
         m_backbufferWrappers[frameIndex]->SetCurrentState(D3D12_RESOURCE_STATE_RENDER_TARGET);
     }

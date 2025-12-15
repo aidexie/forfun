@@ -3,6 +3,7 @@
 #include "DX12Common.h"
 #include "DX12DescriptorHeap.h"
 #include "DX12CommandList.h"
+#include "DX12DynamicBuffer.h"
 #include "../IRenderContext.h"
 
 // ============================================
@@ -94,6 +95,9 @@ private:
 
     // Depth stencil buffer
     std::unique_ptr<class CDX12Texture> m_depthStencilBuffer;
+
+    // Dynamic constant buffer ring for per-draw data
+    std::unique_ptr<CDX12DynamicBufferRing> m_dynamicBufferRing;
 
     // Frame state
     bool m_frameInProgress = false;
