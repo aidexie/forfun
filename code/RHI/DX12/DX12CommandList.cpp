@@ -60,7 +60,7 @@ void CDX12CommandList::Reset(ID3D12CommandAllocator* allocator) {
     // Reset pending bindings
     memset(m_pendingCBVs, 0, sizeof(m_pendingCBVs));
     memset(m_pendingSRVCpuHandles, 0, sizeof(m_pendingSRVCpuHandles));
-    memset(m_pendingSamplers, 0, sizeof(m_pendingSamplers));
+    memset(m_pendingSamplerCpuHandles, 0, sizeof(m_pendingSamplerCpuHandles));
     m_cbvDirty = false;
     m_srvDirty = false;
     m_samplerDirty = false;
@@ -106,8 +106,8 @@ void CDX12CommandList::EnsureDescriptorHeapsBound() {
 
     auto& heapMgr = CDX12DescriptorHeapManager::Instance();
     ID3D12DescriptorHeap* heaps[] = {
-        heapMgr.GetSRVStagingRing().GetHeap(),  // SRV staging ring's shader-visible heap
-        heapMgr.GetSamplerHeap().GetHeap()
+        heapMgr.GetSRVStagingRing().GetHeap(),     // SRV staging ring's shader-visible heap
+        heapMgr.GetSamplerStagingRing().GetHeap()  // Sampler staging ring's shader-visible heap
     };
     m_commandList->SetDescriptorHeaps(2, heaps);
     m_descriptorHeapsBound = true;
@@ -379,8 +379,8 @@ void CDX12CommandList::SetSampler(EShaderStage stage, uint32_t slot, ISampler* s
 
     CDX12Sampler* dx12Sampler = static_cast<CDX12Sampler*>(sampler);
 
-    // Samplers are already allocated in the shader-visible sampler heap
-    m_pendingSamplers[slot] = dx12Sampler->GetGPUHandle();
+    // Store CPU handle for deferred binding (will be copied to staging region in BindPendingResources)
+    m_pendingSamplerCpuHandles[slot] = dx12Sampler->GetCPUHandle();
     m_samplerDirty = true;
 }
 
@@ -663,16 +663,44 @@ void CDX12CommandList::BindPendingResources() {
             } else {
                 CFFLog::Error("[DX12CommandList] Failed to allocate SRV staging descriptors");
             }
-            memset(m_pendingSRVCpuHandles, 0, sizeof(m_pendingSRVCpuHandles));
+            //memset(m_pendingSRVCpuHandles, 0, sizeof(m_pendingSRVCpuHandles));
         }
         m_srvDirty = false;
     }
 
-    // Bind Sampler table if any sampler is set
-    // Samplers are already in shader-visible heap, just bind slot 0 as table base
+    // Bind Sampler table - copy from CPU heap to contiguous staging region
     if (m_samplerDirty) {
-        if (m_pendingSamplers[0].ptr != 0) {
-            m_commandList->SetGraphicsRootDescriptorTable(9, m_pendingSamplers[0]);
+        // Count how many samplers are actually bound
+        uint32_t maxBoundSlot = 0;
+        for (uint32_t i = 0; i < MAX_SAMPLER_SLOTS; ++i) {
+            if (m_pendingSamplerCpuHandles[i].ptr != 0) {
+                maxBoundSlot = i + 1;
+            }
+        }
+
+        if (maxBoundSlot > 0) {
+            // Allocate contiguous block from sampler staging ring
+            auto& samplerStagingRing = heapMgr.GetSamplerStagingRing();
+            SDescriptorHandle staging = samplerStagingRing.AllocateContiguous(maxBoundSlot);
+
+            if (staging.IsValid()) {
+                uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
+                // Copy each bound sampler to the staging region
+                for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
+                    if (m_pendingSamplerCpuHandles[i].ptr != 0) {
+                        device->CopyDescriptorsSimple(1, dest, m_pendingSamplerCpuHandles[i],
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+                    }
+                    // Note: Unbound slots will have garbage, but shader won't read them if slot is unused
+                }
+
+                // Bind the contiguous staging region as the sampler descriptor table
+                m_commandList->SetGraphicsRootDescriptorTable(9, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] Failed to allocate Sampler staging descriptors");
+            }
         }
         m_samplerDirty = false;
     }

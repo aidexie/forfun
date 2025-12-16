@@ -242,7 +242,9 @@ SDescriptorHandle CDX12DescriptorHeap::GetHandle(uint32_t index) const {
 // CDX12DescriptorStagingRing Implementation
 // ============================================
 
-bool CDX12DescriptorStagingRing::Initialize(ID3D12Device* device, uint32_t descriptorsPerFrame, uint32_t frameCount) {
+bool CDX12DescriptorStagingRing::Initialize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type,
+                                            uint32_t descriptorsPerFrame, uint32_t frameCount,
+                                            const char* debugName) {
     if (!device || descriptorsPerFrame == 0 || frameCount == 0) {
         CFFLog::Error("[DX12DescriptorStagingRing] Invalid parameters");
         return false;
@@ -251,11 +253,11 @@ bool CDX12DescriptorStagingRing::Initialize(ID3D12Device* device, uint32_t descr
     // Create our own shader-visible heap
     uint32_t totalDescriptors = descriptorsPerFrame * frameCount;
     if (!m_heap.Initialize(device,
-            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            type,
             totalDescriptors,
             true,  // shader visible
-            "SRV_Staging_Heap")) {
-        CFFLog::Error("[DX12DescriptorStagingRing] Failed to create staging heap");
+            debugName)) {
+        CFFLog::Error("[DX12DescriptorStagingRing] Failed to create staging heap: %s", debugName);
         return false;
     }
 
@@ -264,8 +266,8 @@ bool CDX12DescriptorStagingRing::Initialize(ID3D12Device* device, uint32_t descr
     m_currentFrame = 0;
     m_currentOffset = 0;
 
-    CFFLog::Info("[DX12DescriptorStagingRing] Initialized: perFrame=%u, frames=%u, total=%u",
-        descriptorsPerFrame, frameCount, totalDescriptors);
+    CFFLog::Info("[DX12DescriptorStagingRing] %s: perFrame=%u, frames=%u, total=%u",
+        debugName, descriptorsPerFrame, frameCount, totalDescriptors);
 
     return true;
 }
@@ -340,13 +342,13 @@ bool CDX12DescriptorHeapManager::Initialize(ID3D12Device* device) {
         return false;
     }
 
-    // Create Sampler heap (shader visible - samplers bind directly)
+    // Create Sampler heap (CPU only) - for persistent sampler storage (copy source)
     if (!m_samplerHeap.Initialize(device,
             D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
             SAMPLER_HEAP_SIZE,
-            true,  // shader visible
-            "Sampler_Heap")) {
-        CFFLog::Error("[DX12DescriptorHeapManager] Failed to create Sampler heap");
+            false,  // NOT shader visible - CPU only
+            "Sampler_Heap_CPU")) {
+        CFFLog::Error("[DX12DescriptorHeapManager] Failed to create Sampler CPU heap");
         return false;
     }
 
@@ -372,9 +374,21 @@ bool CDX12DescriptorHeapManager::Initialize(ID3D12Device* device) {
 
     // Initialize SRV staging ring (owns its own GPU shader-visible heap)
     if (!m_srvStagingRing.Initialize(device,
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
             SRV_STAGING_PER_FRAME,
-            NUM_FRAMES_IN_FLIGHT)) {
+            NUM_FRAMES_IN_FLIGHT,
+            "SRV_Staging_Heap")) {
         CFFLog::Error("[DX12DescriptorHeapManager] Failed to initialize SRV staging ring");
+        return false;
+    }
+
+    // Initialize Sampler staging ring (owns its own GPU shader-visible heap)
+    if (!m_samplerStagingRing.Initialize(device,
+            D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+            SAMPLER_STAGING_PER_FRAME,
+            NUM_FRAMES_IN_FLIGHT,
+            "Sampler_Staging_Heap")) {
+        CFFLog::Error("[DX12DescriptorHeapManager] Failed to initialize Sampler staging ring");
         return false;
     }
 
@@ -404,6 +418,7 @@ void CDX12DescriptorHeapManager::Shutdown() {
     m_rtvHeap.Shutdown();
     m_dsvHeap.Shutdown();
     m_srvStagingRing.Shutdown();
+    m_samplerStagingRing.Shutdown();
 
     m_initialized = false;
     CFFLog::Info("[DX12DescriptorHeapManager] Shutdown complete");
@@ -411,6 +426,7 @@ void CDX12DescriptorHeapManager::Shutdown() {
 
 void CDX12DescriptorHeapManager::BeginFrame(uint32_t frameIndex) {
     m_srvStagingRing.BeginFrame(frameIndex);
+    m_samplerStagingRing.BeginFrame(frameIndex);
 }
 
 } // namespace DX12

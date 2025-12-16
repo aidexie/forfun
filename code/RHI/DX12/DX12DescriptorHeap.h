@@ -126,9 +126,12 @@ public:
 
     // Initialize the staging ring with its own shader-visible heap
     // @param device - D3D12 device
+    // @param type - Heap type (CBV_SRV_UAV or SAMPLER)
     // @param descriptorsPerFrame - Number of descriptors per frame
     // @param frameCount - Number of frames in flight (typically 3)
-    bool Initialize(ID3D12Device* device, uint32_t descriptorsPerFrame, uint32_t frameCount);
+    // @param debugName - Debug name for the heap
+    bool Initialize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type,
+                    uint32_t descriptorsPerFrame, uint32_t frameCount, const char* debugName);
 
     // Shutdown and release resources
     void Shutdown();
@@ -198,8 +201,9 @@ public:
     void FreeRTV(const SDescriptorHandle& handle) { m_rtvHeap.Free(handle); }
     void FreeDSV(const SDescriptorHandle& handle) { m_dsvHeap.Free(handle); }
 
-    // Staging ring access (owns its own GPU shader-visible heap)
+    // Staging ring access (own their own GPU shader-visible heaps)
     CDX12DescriptorStagingRing& GetSRVStagingRing() { return m_srvStagingRing; }
+    CDX12DescriptorStagingRing& GetSamplerStagingRing() { return m_samplerStagingRing; }
 
     // Called at the start of each frame
     void BeginFrame(uint32_t frameIndex);
@@ -215,14 +219,13 @@ private:
 private:
     // CPU-only heaps (for persistent descriptor storage)
     CDX12DescriptorHeap m_cbvSrvUavHeap;  // CPU heap - persistent SRVs/UAVs/CBVs, copy source
+    CDX12DescriptorHeap m_samplerHeap;     // CPU heap - persistent samplers, copy source
     CDX12DescriptorHeap m_rtvHeap;         // Render target views
     CDX12DescriptorHeap m_dsvHeap;         // Depth stencil views
 
-    // Shader-visible heaps
-    CDX12DescriptorHeap m_samplerHeap;     // Sampler descriptors (shader-visible, direct bind)
-
-    // Staging ring for per-draw SRV binding (owns its own GPU heap)
+    // Staging rings for per-draw binding (own their own GPU shader-visible heaps)
     CDX12DescriptorStagingRing m_srvStagingRing;
+    CDX12DescriptorStagingRing m_samplerStagingRing;
 
     bool m_initialized = false;
 };
