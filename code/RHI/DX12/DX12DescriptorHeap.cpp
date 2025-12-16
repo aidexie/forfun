@@ -239,6 +239,81 @@ SDescriptorHandle CDX12DescriptorHeap::GetHandle(uint32_t index) const {
 }
 
 // ============================================
+// CDX12DescriptorStagingRing Implementation
+// ============================================
+
+bool CDX12DescriptorStagingRing::Initialize(ID3D12Device* device, uint32_t descriptorsPerFrame, uint32_t frameCount) {
+    if (!device || descriptorsPerFrame == 0 || frameCount == 0) {
+        CFFLog::Error("[DX12DescriptorStagingRing] Invalid parameters");
+        return false;
+    }
+
+    // Create our own shader-visible heap
+    uint32_t totalDescriptors = descriptorsPerFrame * frameCount;
+    if (!m_heap.Initialize(device,
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            totalDescriptors,
+            true,  // shader visible
+            "SRV_Staging_Heap")) {
+        CFFLog::Error("[DX12DescriptorStagingRing] Failed to create staging heap");
+        return false;
+    }
+
+    m_descriptorsPerFrame = descriptorsPerFrame;
+    m_frameCount = frameCount;
+    m_currentFrame = 0;
+    m_currentOffset = 0;
+
+    CFFLog::Info("[DX12DescriptorStagingRing] Initialized: perFrame=%u, frames=%u, total=%u",
+        descriptorsPerFrame, frameCount, totalDescriptors);
+
+    return true;
+}
+
+void CDX12DescriptorStagingRing::Shutdown() {
+    m_heap.Shutdown();
+    m_descriptorsPerFrame = 0;
+    m_frameCount = 0;
+    m_currentFrame = 0;
+    m_currentOffset = 0;
+}
+
+void CDX12DescriptorStagingRing::BeginFrame(uint32_t frameIndex) {
+    m_currentFrame = frameIndex % m_frameCount;
+    m_currentOffset = 0;
+}
+
+SDescriptorHandle CDX12DescriptorStagingRing::AllocateContiguous(uint32_t count) {
+    SDescriptorHandle handle;
+
+    if (count == 0) {
+        return handle;  // Invalid
+    }
+
+    if (m_currentOffset + count > m_descriptorsPerFrame) {
+        CFFLog::Error("[DX12DescriptorStagingRing] Out of staging space! Requested %u, remaining %u",
+            count, m_descriptorsPerFrame - m_currentOffset);
+        return handle;  // Invalid
+    }
+
+    // Calculate the actual index in the heap
+    uint32_t frameStart = m_currentFrame * m_descriptorsPerFrame;
+    uint32_t allocIndex = frameStart + m_currentOffset;
+
+    // Get handle from our owned heap
+    handle = m_heap.GetHandle(allocIndex);
+
+    // Advance offset
+    m_currentOffset += count;
+
+    return handle;
+}
+
+uint32_t CDX12DescriptorStagingRing::GetRemainingCapacity() const {
+    return m_descriptorsPerFrame - m_currentOffset;
+}
+
+// ============================================
 // CDX12DescriptorHeapManager Implementation
 // ============================================
 
@@ -255,17 +330,17 @@ bool CDX12DescriptorHeapManager::Initialize(ID3D12Device* device) {
 
     CFFLog::Info("[DX12DescriptorHeapManager] Initializing descriptor heaps...");
 
-    // Create CBV/SRV/UAV heap (shader visible)
+    // Create CBV/SRV/UAV heap (CPU only) - for persistent SRV/UAV/CBV storage (copy source)
     if (!m_cbvSrvUavHeap.Initialize(device,
             D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            CBV_SRV_UAV_HEAP_SIZE,
-            true,  // shader visible
-            "CBV_SRV_UAV_Heap")) {
-        CFFLog::Error("[DX12DescriptorHeapManager] Failed to create CBV_SRV_UAV heap");
+            CBV_SRV_UAV_HEAP_SIZE_CPU,
+            false,  // NOT shader visible - CPU only
+            "CBV_SRV_UAV_Heap_CPU")) {
+        CFFLog::Error("[DX12DescriptorHeapManager] Failed to create CBV_SRV_UAV CPU heap");
         return false;
     }
 
-    // Create Sampler heap (shader visible)
+    // Create Sampler heap (shader visible - samplers bind directly)
     if (!m_samplerHeap.Initialize(device,
             D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
             SAMPLER_HEAP_SIZE,
@@ -295,6 +370,14 @@ bool CDX12DescriptorHeapManager::Initialize(ID3D12Device* device) {
         return false;
     }
 
+    // Initialize SRV staging ring (owns its own GPU shader-visible heap)
+    if (!m_srvStagingRing.Initialize(device,
+            SRV_STAGING_PER_FRAME,
+            NUM_FRAMES_IN_FLIGHT)) {
+        CFFLog::Error("[DX12DescriptorHeapManager] Failed to initialize SRV staging ring");
+        return false;
+    }
+
     m_initialized = true;
     CFFLog::Info("[DX12DescriptorHeapManager] All descriptor heaps created successfully");
 
@@ -320,9 +403,14 @@ void CDX12DescriptorHeapManager::Shutdown() {
     m_samplerHeap.Shutdown();
     m_rtvHeap.Shutdown();
     m_dsvHeap.Shutdown();
+    m_srvStagingRing.Shutdown();
 
     m_initialized = false;
     CFFLog::Info("[DX12DescriptorHeapManager] Shutdown complete");
+}
+
+void CDX12DescriptorHeapManager::BeginFrame(uint32_t frameIndex) {
+    m_srvStagingRing.BeginFrame(frameIndex);
 }
 
 } // namespace DX12

@@ -345,8 +345,9 @@ void CSceneRenderer::Render(
     ITexture* rts[] = { hdrRT };
     cmdList->SetRenderTargets(1, rts, depthRT);
 
-    // Setup viewport via RHI
+    // Setup viewport and scissor rect (DX12 requires both)
     cmdList->SetViewport(0.0f, 0.0f, (float)w, (float)h, 0.0f, 1.0f);
+    cmdList->SetScissorRect(0, 0, w, h);
 
     // Camera matrices
     XMMATRIX view = camera.GetViewMatrix();
@@ -380,11 +381,11 @@ void CSceneRenderer::Render(
         cmdList->SetSampler(EShaderStage::Pixel, 1, shadowData->shadowSampler);
     }
 
-    // Skip advanced features in DX12 mode for now
     if (!dx12Mode) {
         // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
         auto& probeManager = scene.GetProbeManager();
         probeManager.Bind(cmdList);
+    // Skip advanced features in DX12 mode for now
 
         // Bind Light Probes (t15, b5)
         auto& lightProbeManager = scene.GetLightProbeManager();

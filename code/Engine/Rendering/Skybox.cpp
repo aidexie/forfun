@@ -473,8 +473,9 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         // Set render target to this face
         cmdList->SetRenderTargetSlice(m_envTexture.get(), face, nullptr);
 
-        // Set viewport
+        // Set viewport and scissor rect (DX12 requires both)
         cmdList->SetViewport(0, 0, (float)size, (float)size, 0.0f, 1.0f);
+        cmdList->SetScissorRect(0, 0, size, size);
 
         // Clear
         float clearColor[] = { 0, 0, 0, 1 };

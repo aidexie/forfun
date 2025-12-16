@@ -30,10 +30,13 @@ using Microsoft::WRL::ComPtr;
 constexpr uint32_t NUM_FRAMES_IN_FLIGHT = 3;
 
 // Descriptor heap sizes
-constexpr uint32_t CBV_SRV_UAV_HEAP_SIZE = 4096;
+constexpr uint32_t CBV_SRV_UAV_HEAP_SIZE_CPU = 2048;  // CPU-only heap for persistent SRVs/UAVs/CBVs
 constexpr uint32_t SAMPLER_HEAP_SIZE = 256;
 constexpr uint32_t RTV_HEAP_SIZE = 128;
 constexpr uint32_t DSV_HEAP_SIZE = 32;
+
+// Staging ring configuration (owns its own GPU shader-visible heap)
+constexpr uint32_t SRV_STAGING_PER_FRAME = 600;        // Descriptors per frame
 
 // ============================================
 // Error Handling

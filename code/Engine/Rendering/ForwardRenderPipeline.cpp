@@ -79,7 +79,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     const CShadowPass::Output* shadowData = nullptr;
     // Shadow Pass disabled for DX12 until debugging is complete
-    if (!dx12MinimalMode && ctx.showFlags.Shadows) {
+    if (ctx.showFlags.Shadows) {
         // Find DirectionalLight in scene
         SDirectionalLight* dirLight = nullptr;
         for (auto& objPtr : ctx.scene.GetWorld().Objects()) {

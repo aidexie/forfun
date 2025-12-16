@@ -234,8 +234,9 @@ RHI::ITexture* CIBLGenerator::GenerateIrradianceMap(RHI::ITexture* envMap, int o
         // Set render target to this face
         cmdList->SetRenderTargetSlice(m_irradianceTexture.get(), face, nullptr);
 
-        // Set viewport
+        // Set viewport and scissor rect (DX12 requires both)
         cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
+        cmdList->SetScissorRect(0, 0, outputSize, outputSize);
 
         // Update face index constant buffer
         int* faceData = (int*)m_cbFaceIndex->Map();
@@ -313,6 +314,7 @@ RHI::ITexture* CIBLGenerator::GeneratePreFilteredMap(RHI::ITexture* envMap, int 
     for (int face = 0; face < 6; ++face) {
         cmdList->SetRenderTargetSlice(m_preFilteredTexture.get(), face, nullptr);
         cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
+        cmdList->SetScissorRect(0, 0, outputSize, outputSize);
 
         // Update constant buffers
         int* faceData = (int*)m_cbFaceIndex->Map();
@@ -386,8 +388,9 @@ RHI::ITexture* CIBLGenerator::GenerateBrdfLut(int resolution) {
     RHI::ITexture* rts[] = { m_brdfLutTexture.get() };
     cmdList->SetRenderTargets(1, rts, nullptr);
 
-    // Set viewport
+    // Set viewport and scissor rect (DX12 requires both)
     cmdList->SetViewport(0, 0, (float)resolution, (float)resolution);
+    cmdList->SetScissorRect(0, 0, resolution, resolution);
 
     // Clear
     float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };

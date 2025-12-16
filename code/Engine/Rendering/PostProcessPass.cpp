@@ -85,8 +85,9 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     ITexture* renderTargets[] = { ldrOutput };
     cmdList->SetRenderTargets(1, renderTargets, nullptr);
 
-    // Set viewport
+    // Set viewport and scissor rect (DX12 requires both)
     cmdList->SetViewport(0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f);
+    cmdList->SetScissorRect(0, 0, width, height);
 
     // Set pipeline state (includes rasterizer, depth stencil, blend states)
     cmdList->SetPipelineState(m_pso.get());

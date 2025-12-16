@@ -113,6 +113,51 @@ private:
 };
 
 // ============================================
+// Descriptor Staging Ring
+// ============================================
+// Per-frame linear allocator for contiguous descriptor staging
+// Owns its own shader-visible heap for GPU binding
+// Used to copy scattered persistent descriptors into contiguous blocks for binding
+
+class CDX12DescriptorStagingRing {
+public:
+    CDX12DescriptorStagingRing() = default;
+    ~CDX12DescriptorStagingRing() = default;
+
+    // Initialize the staging ring with its own shader-visible heap
+    // @param device - D3D12 device
+    // @param descriptorsPerFrame - Number of descriptors per frame
+    // @param frameCount - Number of frames in flight (typically 3)
+    bool Initialize(ID3D12Device* device, uint32_t descriptorsPerFrame, uint32_t frameCount);
+
+    // Shutdown and release resources
+    void Shutdown();
+
+    // Called at the start of each frame to reset the allocation offset
+    void BeginFrame(uint32_t frameIndex);
+
+    // Allocate a contiguous block of descriptors
+    // Returns handle to first descriptor, or invalid handle if out of space
+    SDescriptorHandle AllocateContiguous(uint32_t count);
+
+    // Get current frame's remaining capacity
+    uint32_t GetRemainingCapacity() const;
+
+    // Get the owned heap (for SetDescriptorHeaps)
+    ID3D12DescriptorHeap* GetHeap() const { return m_heap.GetHeap(); }
+
+    // Get descriptor size for copy operations
+    uint32_t GetDescriptorSize() const { return m_heap.GetDescriptorSize(); }
+
+private:
+    CDX12DescriptorHeap m_heap;          // Owned shader-visible heap
+    uint32_t m_descriptorsPerFrame = 0;
+    uint32_t m_frameCount = 0;
+    uint32_t m_currentFrame = 0;
+    uint32_t m_currentOffset = 0;        // Current allocation offset within frame
+};
+
+// ============================================
 // Descriptor Heap Manager
 // ============================================
 // Manages all descriptor heaps for the application
@@ -141,6 +186,7 @@ public:
     const CDX12DescriptorHeap& GetDSVHeap() const { return m_dsvHeap; }
 
     // Convenience allocators
+    // CPU heap - for persistent SRV/UAV/CBV storage (copy source for staging)
     SDescriptorHandle AllocateCBVSRVUAV() { return m_cbvSrvUavHeap.Allocate(); }
     SDescriptorHandle AllocateSampler() { return m_samplerHeap.Allocate(); }
     SDescriptorHandle AllocateRTV() { return m_rtvHeap.Allocate(); }
@@ -152,6 +198,12 @@ public:
     void FreeRTV(const SDescriptorHandle& handle) { m_rtvHeap.Free(handle); }
     void FreeDSV(const SDescriptorHandle& handle) { m_dsvHeap.Free(handle); }
 
+    // Staging ring access (owns its own GPU shader-visible heap)
+    CDX12DescriptorStagingRing& GetSRVStagingRing() { return m_srvStagingRing; }
+
+    // Called at the start of each frame
+    void BeginFrame(uint32_t frameIndex);
+
 private:
     CDX12DescriptorHeapManager() = default;
     ~CDX12DescriptorHeapManager() = default;
@@ -161,13 +213,16 @@ private:
     CDX12DescriptorHeapManager& operator=(const CDX12DescriptorHeapManager&) = delete;
 
 private:
-    // GPU-visible heaps (for shader binding)
-    CDX12DescriptorHeap m_cbvSrvUavHeap;  // CBV, SRV, UAV descriptors
-    CDX12DescriptorHeap m_samplerHeap;     // Sampler descriptors
-
-    // CPU-only heaps (for render target and depth stencil)
+    // CPU-only heaps (for persistent descriptor storage)
+    CDX12DescriptorHeap m_cbvSrvUavHeap;  // CPU heap - persistent SRVs/UAVs/CBVs, copy source
     CDX12DescriptorHeap m_rtvHeap;         // Render target views
     CDX12DescriptorHeap m_dsvHeap;         // Depth stencil views
+
+    // Shader-visible heaps
+    CDX12DescriptorHeap m_samplerHeap;     // Sampler descriptors (shader-visible, direct bind)
+
+    // Staging ring for per-draw SRV binding (owns its own GPU heap)
+    CDX12DescriptorStagingRing m_srvStagingRing;
 
     bool m_initialized = false;
 };

@@ -32,7 +32,7 @@ CDX12Texture::CDX12Texture(ID3D12Resource* resource, const TextureDesc& desc, ID
 CDX12Texture::~CDX12Texture() {
     auto& heapMgr = CDX12DescriptorHeapManager::Instance();
 
-    // Free default views
+    // Free default views - SRVs/UAVs are in CPU heap, RTV/DSV are in their own heaps
     if (m_defaultSRV.IsValid()) heapMgr.FreeCBVSRVUAV(m_defaultSRV);
     if (m_defaultRTV.IsValid()) heapMgr.FreeRTV(m_defaultRTV);
     if (m_defaultDSV.IsValid()) heapMgr.FreeDSV(m_defaultDSV);
@@ -214,6 +214,7 @@ SDescriptorHandle CDX12Texture::GetOrCreateUAV() {
 }
 
 SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, uint32_t arraySlice, uint32_t numSlices) {
+    // Allocate from CPU-only heap - will be copied to GPU staging at draw time
     SDescriptorHandle handle = CDX12DescriptorHeapManager::Instance().AllocateCBVSRVUAV();
     if (!handle.IsValid()) {
         CFFLog::Error("[CDX12Texture] Failed to allocate SRV descriptor");
@@ -349,6 +350,7 @@ SDescriptorHandle CDX12Texture::CreateDSV(uint32_t arraySlice) {
 }
 
 SDescriptorHandle CDX12Texture::CreateUAV(uint32_t mipLevel) {
+    // Allocate from CPU-only heap - will be copied to GPU staging at draw time
     SDescriptorHandle handle = CDX12DescriptorHeapManager::Instance().AllocateCBVSRVUAV();
     if (!handle.IsValid()) {
         CFFLog::Error("[CDX12Texture] Failed to allocate UAV descriptor");

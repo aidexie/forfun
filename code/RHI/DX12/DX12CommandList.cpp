@@ -59,7 +59,7 @@ void CDX12CommandList::Reset(ID3D12CommandAllocator* allocator) {
 
     // Reset pending bindings
     memset(m_pendingCBVs, 0, sizeof(m_pendingCBVs));
-    memset(m_pendingSRVs, 0, sizeof(m_pendingSRVs));
+    memset(m_pendingSRVCpuHandles, 0, sizeof(m_pendingSRVCpuHandles));
     memset(m_pendingSamplers, 0, sizeof(m_pendingSamplers));
     m_cbvDirty = false;
     m_srvDirty = false;
@@ -106,7 +106,7 @@ void CDX12CommandList::EnsureDescriptorHeapsBound() {
 
     auto& heapMgr = CDX12DescriptorHeapManager::Instance();
     ID3D12DescriptorHeap* heaps[] = {
-        heapMgr.GetCBVSRVUAVHeap().GetHeap(),
+        heapMgr.GetSRVStagingRing().GetHeap(),  // SRV staging ring's shader-visible heap
         heapMgr.GetSamplerHeap().GetHeap()
     };
     m_commandList->SetDescriptorHeaps(2, heaps);
@@ -353,11 +353,11 @@ void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITex
 
     EnsureDescriptorHeapsBound();
 
-    // Get full descriptor handle (has both CPU and GPU handles)
+    // Get SRV handle from CPU-only heap (this is the copy source)
     SDescriptorHandle srvHandle = dx12Texture->GetOrCreateSRV();
 
-    // Store GPU handle directly - no recalculation needed!
-    m_pendingSRVs[slot] = srvHandle.gpuHandle;
+    // Store CPU handle for later copy to staging region
+    m_pendingSRVCpuHandles[slot] = srvHandle.cpuHandle;
     m_srvDirty = true;
 }
 
@@ -627,20 +627,50 @@ void CDX12CommandList::BindPendingResources() {
         m_cbvDirty = false;
     }
 
-    // Bind SRV table if any SRV is set
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    auto device = CDX12Context::Instance().GetDevice();
+
+    // Bind SRV table - copy from CPU heap to contiguous staging region
     if (m_srvDirty) {
-        // Find the first valid SRV to use as table start
-        // For proper implementation, we would need to copy all SRVs to a contiguous range
-        // For now, bind slot 0's descriptor directly if it's valid
-        if (m_pendingSRVs[0].ptr != 0) {
-            m_commandList->SetGraphicsRootDescriptorTable(7, m_pendingSRVs[0]);
+        // Count how many SRVs are actually bound
+        uint32_t maxBoundSlot = 0;
+        for (uint32_t i = 0; i < MAX_SRV_SLOTS; ++i) {
+            if (m_pendingSRVCpuHandles[i].ptr != 0) {
+                maxBoundSlot = i + 1;
+            }
+        }
+
+        if (maxBoundSlot > 0) {
+            // Allocate contiguous block from staging ring
+            auto& stagingRing = heapMgr.GetSRVStagingRing();
+            SDescriptorHandle staging = stagingRing.AllocateContiguous(maxBoundSlot);
+
+            if (staging.IsValid()) {
+                uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+                // Copy each bound SRV to the staging region
+                for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
+                    if (m_pendingSRVCpuHandles[i].ptr != 0) {
+                        device->CopyDescriptorsSimple(1, dest, m_pendingSRVCpuHandles[i],
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    }
+                    // Note: Unbound slots will have garbage, but shader won't read them if slot is unused
+                }
+
+                // Bind the contiguous staging region as the descriptor table
+                m_commandList->SetGraphicsRootDescriptorTable(7, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] Failed to allocate SRV staging descriptors");
+            }
+            memset(m_pendingSRVCpuHandles, 0, sizeof(m_pendingSRVCpuHandles));
         }
         m_srvDirty = false;
     }
 
     // Bind Sampler table if any sampler is set
+    // Samplers are already in shader-visible heap, just bind slot 0 as table base
     if (m_samplerDirty) {
-        // Same approach - bind slot 0's descriptor directly
         if (m_pendingSamplers[0].ptr != 0) {
             m_commandList->SetGraphicsRootDescriptorTable(9, m_pendingSamplers[0]);
         }

@@ -129,11 +129,11 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS m_pendingCBVs[MAX_CBV_SLOTS] = {};
     bool m_cbvDirty = false;
 
-    // Pending SRV/Sampler bindings (GPU handles from shader-visible heap)
-    // These are bound as descriptor tables before draw calls
+    // Pending SRV bindings (CPU handles from non-shader-visible heap)
+    // These are copied to a contiguous staging region before binding
     static constexpr uint32_t MAX_SRV_SLOTS = 25;
     static constexpr uint32_t MAX_SAMPLER_SLOTS = 8;
-    D3D12_GPU_DESCRIPTOR_HANDLE m_pendingSRVs[MAX_SRV_SLOTS] = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_pendingSRVCpuHandles[MAX_SRV_SLOTS] = {};
     D3D12_GPU_DESCRIPTOR_HANDLE m_pendingSamplers[MAX_SAMPLER_SLOTS] = {};
     bool m_srvDirty = false;
     bool m_samplerDirty = false;

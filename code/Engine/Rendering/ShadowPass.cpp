@@ -414,12 +414,12 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     cmdList->SetPipelineState(m_pso.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
 
-    // Bind constant buffers via RHI
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbLightSpace.get());
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 1, m_cbObject.get());
+    // Note: Constant buffers are bound per-draw using SetConstantBufferData
+    // This allocates from a dynamic ring buffer, giving each draw its own memory
 
-    // Set viewport
+    // Set viewport and scissor rect (DX12 requires both)
     cmdList->SetViewport(0.0f, 0.0f, (float)shadowMapSize, (float)shadowMapSize, 0.0f, 1.0f);
+    cmdList->SetScissorRect(0, 0, shadowMapSize, shadowMapSize);
 
     // Render each cascade
     for (int cascadeIndex = 0; cascadeIndex < cascadeCount; ++cascadeIndex) {
@@ -432,14 +432,10 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
         float cascadeFar = splits[cascadeIndex + 1];
         XMMATRIX lightSpaceVP = calculateTightLightMatrix(subFrustumCorners, light, cascadeFar);
 
-        // Update light space constant buffer via RHI Map/Unmap
+        // Update light space constant buffer using dynamic allocation (DX12 compatible)
         CB_LightSpace cbLight;
         cbLight.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
-        void* mappedLight = m_cbLightSpace->Map();
-        if (mappedLight) {
-            memcpy(mappedLight, &cbLight, sizeof(CB_LightSpace));
-            m_cbLightSpace->Unmap();
-        }
+        cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cbLight, sizeof(CB_LightSpace));
 
         // Bind this cascade's DSV via RHI
         cmdList->SetDepthStencilOnly(m_shadowMapArray.get(), cascadeIndex);
@@ -466,14 +462,10 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
             for (auto& gpuMesh : meshRenderer->meshes) {
                 if (!gpuMesh) continue;
 
-                // Update object constant buffer via RHI Map/Unmap
+                // Update object constant buffer using dynamic allocation (DX12 compatible)
                 CB_Object cbObj;
                 cbObj.world = XMMatrixTranspose(worldMatrix);
-                void* mappedObj = m_cbObject->Map();
-                if (mappedObj) {
-                    memcpy(mappedObj, &cbObj, sizeof(CB_Object));
-                    m_cbObject->Unmap();
-                }
+                cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &cbObj, sizeof(CB_Object));
 
                 // Bind vertex/index buffers via RHI
                 cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
