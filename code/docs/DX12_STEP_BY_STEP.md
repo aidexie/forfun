@@ -100,7 +100,7 @@
 
 ---
 
-### Phase 6: 3D 渲染 ✅ 部分完成
+### Phase 6: 3D 渲染 ✅ 完成
 
 **目标**：ForwardRenderPipeline.Render() 正常工作
 
@@ -109,11 +109,11 @@
 - [x] PostProcess Pass（Tone mapping）
 - [x] Skybox 渲染
 - [x] Opaque Pass 渲染（基础物体）
+- [x] Shadow Pass 渲染（CSM）
+- [x] IBL 绑定（Irradiance + Prefiltered + BRDF LUT）
 
 **待完成**：
-- [ ] Shadow Pass 渲染（需要调试）
 - [ ] Transparent Pass 渲染
-- [ ] Probe/IBL 绑定
 - [ ] Clustered Lighting
 - [ ] Debug Lines
 
@@ -156,9 +156,9 @@ BindPendingResources() {
 
 ---
 
-### Phase 8: Descriptor Table 重构 ⏳ 进行中
+### Phase 8: Descriptor Table 重构 ✅ 完成
 
-**目标**：修复 SRV Descriptor Table 绑定问题，实现正确的纹理绑定
+**目标**：修复 SRV/Sampler Descriptor Table 绑定问题，实现正确的纹理和采样器绑定
 
 **背景问题**：
 当前代码将散落在 heap 中的 SRV 直接绑定为 descriptor table：
@@ -170,7 +170,7 @@ SetGraphicsRootDescriptorTable(7, m_pendingSRVs[0]);  // GPU 期望连续内存
 
 GPU 期望 `basePtr + slot * descriptorSize` 是连续的，但实际每个 SRV 分配在 heap 的随机位置。
 
-**完成的工作 (2025-12-16)**：
+**完成的工作**：
 
 1. **SRV/UAV 返回类型重构** ✅
    - `CDX12Texture::GetOrCreateSRV()` → 返回 `SDescriptorHandle`（含 CPU + GPU handle）
@@ -184,12 +184,17 @@ GPU 期望 `basePtr + slot * descriptorSize` 是连续的，但实际每个 SRV 
    - MainPass.ps.hlsl 纹理从 `[0,1,6,7]` 重组为 `[0,1,2,3]`
    - 便于未来 descriptor table 连续绑定
 
-3. **设计调研** ✅ (见下方 Descriptor Table 设计文档)
+3. **SRV Staging Ring 实现** ✅
+   - CPU-only heap 存储持久 SRV（copy source）
+   - GPU shader-visible staging ring 用于 per-draw 连续绑定
+   - `SetShaderResource` 存储 CPU handle
+   - `BindPendingResources` 时 copy 到 staging 并绑定
 
-**待完成**：
-- [ ] 实现 `CDX12DescriptorStagingRing`（Per-Frame Descriptor 线性分配器）
-- [ ] 修改 `BindPendingResources()` 使用 staging copy
-- [ ] 验证多纹理绑定正确性
+4. **Sampler Staging Ring 实现** ✅
+   - CPU-only heap 存储持久 sampler（copy source）
+   - GPU shader-visible staging ring 用于 per-draw 连续绑定
+   - `SetSampler` 存储 CPU handle
+   - `BindPendingResources` 时 copy 到 staging 并绑定
 
 ---
 
@@ -265,25 +270,55 @@ device->CopyDescriptorsSimple(1, stagingBase.cpuHandle[3], iblSRV.cpuHandle, typ
 SetGraphicsRootDescriptorTable(7, stagingBase.gpuHandle);
 ```
 
-**CDX12DescriptorStagingRing 设计**：
+**CDX12DescriptorStagingRing 实现**：
 ```cpp
 class CDX12DescriptorStagingRing {
 public:
-    bool Initialize(ID3D12Device* device, uint32_t descriptorsPerFrame, uint32_t frameCount);
+    // 泛化支持 CBV_SRV_UAV 和 SAMPLER 两种 heap type
+    bool Initialize(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type,
+                    uint32_t descriptorsPerFrame, uint32_t frameCount, const char* debugName);
     void BeginFrame(uint32_t frameIndex);
 
     // 分配 N 个连续 descriptor，返回第一个的 handle
     SDescriptorHandle AllocateContiguous(uint32_t count);
 
-    // 获取指定偏移的 CPU handle（用于 CopyDescriptorsSimple 目标）
-    D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(uint32_t offsetFromBase);
+    // 获取 heap（用于 SetDescriptorHeaps）
+    ID3D12DescriptorHeap* GetHeap() const;
 
 private:
-    // 使用 GPU heap 中的一段连续区域
-    SDescriptorHandle m_frameRegions[3];  // 每帧独立区域
-    uint32_t m_currentOffset;
+    CDX12DescriptorHeap m_heap;  // 自己的 shader-visible heap
     uint32_t m_descriptorsPerFrame;
+    uint32_t m_currentFrame;
+    uint32_t m_currentOffset;
 };
+```
+
+**绑定流程（BindPendingResources）**：
+```cpp
+// SRV 绑定
+if (m_srvDirty) {
+    // 1. 分配连续 staging 区域
+    SDescriptorHandle staging = stagingRing.AllocateContiguous(maxBoundSlot);
+
+    // 2. Copy 散落的 SRV 到连续区域
+    for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+        device->CopyDescriptorsSimple(1, staging.cpuHandle[i],
+                                      m_pendingSRVCpuHandles[i], type);
+    }
+
+    // 3. 绑定连续区域
+    SetGraphicsRootDescriptorTable(7, staging.gpuHandle);
+}
+
+// Sampler 绑定（同样模式）
+if (m_samplerDirty) {
+    SDescriptorHandle staging = samplerStagingRing.AllocateContiguous(maxBoundSlot);
+    for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+        device->CopyDescriptorsSimple(1, staging.cpuHandle[i],
+                                      m_pendingSamplerCpuHandles[i], type);
+    }
+    SetGraphicsRootDescriptorTable(9, staging.gpuHandle);
+}
 ```
 
 ### 关键点
@@ -328,15 +363,26 @@ private:
 **状态**：警告但不阻塞，纹理只有 mip 0
 **解决方案**：实现 compute shader 版本的 mipmap 生成
 
-### 6. Shadow Pass ⚠️ 需要调试
-**问题**：Shadow Pass 有多个问题，暂时禁用
-**状态**：DX12 模式下跳过
-**解决方案**：需要单独调试 depth-only rendering
+### 6. Shadow Pass ✅ 已解决
+**问题**：Shadow Pass 有多个问题（constant buffer 同步、scissor rect）
+**解决方案**：
+- 使用 `SetConstantBufferData` 从 dynamic ring buffer 分配（解决 CB 同步）
+- 添加 `SetScissorRect` 调用（DX12 强制要求）
 
-### 7. Descriptor Table 绑定 ⚠️ 进行中
-**问题**：SRV descriptor table 绑定时，各纹理的 SRV 分散在 heap 不同位置，但 GPU 期望连续内存
-**状态**：设计完成，实现进行中
-**解决方案**：CDX12DescriptorStagingRing - 在绑定时 copy 到连续 staging 区域
+### 7. Descriptor Table 绑定 ✅ 已解决
+**问题**：SRV/Sampler descriptor table 绑定时，各 descriptor 分散在 heap 不同位置，但 GPU 期望连续内存
+**解决方案**：
+- `CDX12DescriptorStagingRing` - Per-frame linear allocator
+- SRV 和 Sampler 各自有独立的 staging ring
+- 绑定时 copy 到连续 staging 区域
+
+### 8. Shadow Jitter (Camera Movement) ⚠️ 待解决
+**问题**：DX12 下快速移动相机时阴影抖动，DX11 正常
+**原因**：`CShadowPass::m_output` 是单实例，多帧共享。Frame N+1 更新 `lightSpaceVPs` 时，Frame N 的 GPU 工作可能还在读取
+**解决方案**：
+- 选项 1：Per-frame output buffers（推荐）
+- 选项 2：在 frame 开始时 copy output 到 per-frame constant buffer
+- 选项 3：直接将 shadow matrices 存入 dynamic ring buffer
 
 ---
 
@@ -414,4 +460,4 @@ cmdList->ResourceBarrier(1, &barrier);
 
 ---
 
-*Last Updated: 2025-12-16*
+*Last Updated: 2025-12-17*
