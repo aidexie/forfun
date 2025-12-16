@@ -353,21 +353,11 @@ void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITex
 
     EnsureDescriptorHeapsBound();
 
-    // Get the SRV handle and calculate GPU handle
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = dx12Texture->GetOrCreateSRV();
+    // Get full descriptor handle (has both CPU and GPU handles)
+    SDescriptorHandle srvHandle = dx12Texture->GetOrCreateSRV();
 
-    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
-    auto& heap = heapMgr.GetCBVSRVUAVHeap();
-
-    SIZE_T cpuHandlePtr = cpuHandle.ptr;
-    SIZE_T heapStartPtr = heap.GetCPUStart().ptr;
-    uint32_t descriptorSize = heap.GetDescriptorSize();
-    uint32_t index = static_cast<uint32_t>((cpuHandlePtr - heapStartPtr) / descriptorSize);
-
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = heap.GetGPUStart();
-    gpuHandle.ptr += index * descriptorSize;
-
-    m_pendingSRVs[slot] = gpuHandle;
+    // Store GPU handle directly - no recalculation needed!
+    m_pendingSRVs[slot] = srvHandle.gpuHandle;
     m_srvDirty = true;
 }
 
@@ -425,10 +415,10 @@ void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint3
     EnsureDescriptorHeapsBound();
 
     // ClearUnorderedAccessViewUint requires both CPU and GPU descriptor handles
-    D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = dx12Buffer->GetUAV();
+    SDescriptorHandle uavHandle = dx12Buffer->GetUAV();
     // Would need to copy to shader-visible heap and get GPU handle
     // This is a simplified implementation
-    // m_commandList->ClearUnorderedAccessViewUint(gpuHandle, cpuHandle, dx12Buffer->GetD3D12Resource(), values, 0, nullptr);
+    // m_commandList->ClearUnorderedAccessViewUint(uavHandle.gpuHandle, uavHandle.cpuHandle, dx12Buffer->GetD3D12Resource(), values, 0, nullptr);
 }
 
 // ============================================

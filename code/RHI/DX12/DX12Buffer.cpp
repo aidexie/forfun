@@ -77,18 +77,18 @@ D3D12_CPU_DESCRIPTOR_HANDLE CDX12Buffer::GetCBV() {
     return m_cbvHandle.cpuHandle;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE CDX12Buffer::GetSRV() {
+SDescriptorHandle CDX12Buffer::GetSRV() {
     if (!m_srvHandle.IsValid()) {
         CreateSRV();
     }
-    return m_srvHandle.cpuHandle;
+    return m_srvHandle;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE CDX12Buffer::GetUAV() {
+SDescriptorHandle CDX12Buffer::GetUAV() {
     if (!m_uavHandle.IsValid()) {
         CreateUAV();
     }
-    return m_uavHandle.cpuHandle;
+    return m_uavHandle;
 }
 
 void CDX12Buffer::CreateCBV() {

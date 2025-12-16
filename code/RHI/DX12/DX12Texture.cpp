@@ -144,7 +144,7 @@ void CDX12Texture::Unmap(uint32_t arraySlice, uint32_t mipLevel) {
     m_resource->Unmap(subresource, &writtenRange);
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE CDX12Texture::GetOrCreateSRV() {
+SDescriptorHandle CDX12Texture::GetOrCreateSRV() {
     if (!m_defaultSRV.IsValid()) {
         uint32_t numSlices = m_desc.arraySize;
         if (m_desc.dimension == ETextureDimension::TexCube) {
@@ -154,19 +154,19 @@ D3D12_CPU_DESCRIPTOR_HANDLE CDX12Texture::GetOrCreateSRV() {
         }
         m_defaultSRV = CreateSRV(0, m_desc.mipLevels, 0, numSlices);
     }
-    return m_defaultSRV.cpuHandle;
+    return m_defaultSRV;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE CDX12Texture::GetOrCreateSRVSlice(uint32_t arraySlice, uint32_t mipLevel) {
+SDescriptorHandle CDX12Texture::GetOrCreateSRVSlice(uint32_t arraySlice, uint32_t mipLevel) {
     ViewKey key = { mipLevel, arraySlice };
     auto it = m_srvCache.find(key);
     if (it != m_srvCache.end()) {
-        return it->second.cpuHandle;
+        return it->second;
     }
 
     SDescriptorHandle handle = CreateSRV(mipLevel, 1, arraySlice, 1);
     m_srvCache[key] = handle;
-    return handle.cpuHandle;
+    return handle;
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE CDX12Texture::GetOrCreateRTV() {
@@ -206,11 +206,11 @@ D3D12_CPU_DESCRIPTOR_HANDLE CDX12Texture::GetOrCreateDSVSlice(uint32_t arraySlic
     return handle.cpuHandle;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE CDX12Texture::GetOrCreateUAV() {
+SDescriptorHandle CDX12Texture::GetOrCreateUAV() {
     if (!m_defaultUAV.IsValid()) {
         m_defaultUAV = CreateUAV(0);
     }
-    return m_defaultUAV.cpuHandle;
+    return m_defaultUAV;
 }
 
 SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, uint32_t arraySlice, uint32_t numSlices) {

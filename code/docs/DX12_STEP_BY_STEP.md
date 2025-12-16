@@ -156,7 +156,44 @@ BindPendingResources() {
 
 ---
 
-### Phase 8: 完整编辑器 ⏳ 进行中
+### Phase 8: Descriptor Table 重构 ⏳ 进行中
+
+**目标**：修复 SRV Descriptor Table 绑定问题，实现正确的纹理绑定
+
+**背景问题**：
+当前代码将散落在 heap 中的 SRV 直接绑定为 descriptor table：
+```cpp
+// 当前错误实现：
+m_pendingSRVs[slot] = texture->GetOrCreateSRV().gpuHandle;  // 散落的！
+SetGraphicsRootDescriptorTable(7, m_pendingSRVs[0]);  // GPU 期望连续内存
+```
+
+GPU 期望 `basePtr + slot * descriptorSize` 是连续的，但实际每个 SRV 分配在 heap 的随机位置。
+
+**完成的工作 (2025-12-16)**：
+
+1. **SRV/UAV 返回类型重构** ✅
+   - `CDX12Texture::GetOrCreateSRV()` → 返回 `SDescriptorHandle`（含 CPU + GPU handle）
+   - `CDX12Texture::GetOrCreateSRVSlice()` → 返回 `SDescriptorHandle`
+   - `CDX12Texture::GetOrCreateUAV()` → 返回 `SDescriptorHandle`
+   - `CDX12Buffer::GetSRV()` → 返回 `SDescriptorHandle`
+   - `CDX12Buffer::GetUAV()` → 返回 `SDescriptorHandle`
+   - 消除了多处冗余的 index → GPU handle 重新计算
+
+2. **纹理槽位重组** ✅
+   - MainPass.ps.hlsl 纹理从 `[0,1,6,7]` 重组为 `[0,1,2,3]`
+   - 便于未来 descriptor table 连续绑定
+
+3. **设计调研** ✅ (见下方 Descriptor Table 设计文档)
+
+**待完成**：
+- [ ] 实现 `CDX12DescriptorStagingRing`（Per-Frame Descriptor 线性分配器）
+- [ ] 修改 `BindPendingResources()` 使用 staging copy
+- [ ] 验证多纹理绑定正确性
+
+---
+
+### Phase 9: 完整编辑器 🔜 待开始
 
 **目标**：所有编辑器功能正常
 
@@ -166,6 +203,105 @@ BindPendingResources() {
 - [ ] 相机控制
 - [ ] IBL Baking
 - [ ] Reflection Probe Baking
+
+---
+
+## Descriptor Table 设计文档
+
+### 问题分析
+
+**D3D12 Descriptor Table 工作原理**：
+```
+Shader 期望:              GPU Heap 实际情况:
+┌──────────────┐         ┌──────────────┐
+│ t0 @ offset 0│         │ sampler      │ index 0
+├──────────────┤         ├──────────────┤
+│ t1 @ offset 1│         │ shadowmap    │ index 1
+├──────────────┤         ├──────────────┤
+│ t2 @ offset 2│         │ irradiance   │ index 2
+├──────────────┤         ├──────────────┤
+│ t3 @ offset 3│         │ albedo tex   │ index 47  ← 不连续！
+└──────────────┘         └──────────────┘
+
+SetGraphicsRootDescriptorTable(base) → GPU 计算: base + slot * size
+如果 base 是 index 0，则 t3 会读取 index 3，而不是 index 47！
+```
+
+### 业界方案对比
+
+| 引擎 | 方案 | 特点 |
+|------|------|------|
+| **UE5** | FD3D12DescriptorCache + CopyDescriptors | CPU heap 暂存 → 绑定时 copy 到 GPU heap |
+| **NVRHI** | 不可变 BindingSet | 创建时预分配连续 descriptor block，绑定时无需 copy |
+| **Diligent** | CPUDescriptorHeap + DynamicSuballocationsManager | 5 类协作，静态/动态分开管理 |
+
+### 选定方案：Per-Draw Descriptor Staging Ring
+
+与 `CDX12DynamicBufferRing`（用于 CBV 数据）相同的模式：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              GPU Shader-Visible Heap                        │
+├─────────────────────────────────────────────────────────────┤
+│ [Persistent Descriptors]      │  [Per-Frame Staging Ring]  │
+│  - Free-list 分配              │  Frame 0: 1024 slots       │
+│  - 每个纹理的 SRV 在此          │  Frame 1: 1024 slots       │
+│  - 无序、散落                   │  Frame 2: 1024 slots       │
+└───────────────────────────────┴────────────────────────────┘
+```
+
+**绑定流程**：
+```cpp
+// 1. 从 staging ring 分配连续 N 个 descriptor
+SDescriptorHandle stagingBase = m_stagingRing.AllocateContiguous(4);
+
+// 2. Copy 散落的 descriptor 到连续区域
+device->CopyDescriptorsSimple(1, stagingBase.cpuHandle[0], albedoSRV.cpuHandle, type);
+device->CopyDescriptorsSimple(1, stagingBase.cpuHandle[1], normalSRV.cpuHandle, type);
+device->CopyDescriptorsSimple(1, stagingBase.cpuHandle[2], shadowSRV.cpuHandle, type);
+device->CopyDescriptorsSimple(1, stagingBase.cpuHandle[3], iblSRV.cpuHandle, type);
+
+// 3. 绑定连续的 staging 区域
+SetGraphicsRootDescriptorTable(7, stagingBase.gpuHandle);
+```
+
+**CDX12DescriptorStagingRing 设计**：
+```cpp
+class CDX12DescriptorStagingRing {
+public:
+    bool Initialize(ID3D12Device* device, uint32_t descriptorsPerFrame, uint32_t frameCount);
+    void BeginFrame(uint32_t frameIndex);
+
+    // 分配 N 个连续 descriptor，返回第一个的 handle
+    SDescriptorHandle AllocateContiguous(uint32_t count);
+
+    // 获取指定偏移的 CPU handle（用于 CopyDescriptorsSimple 目标）
+    D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(uint32_t offsetFromBase);
+
+private:
+    // 使用 GPU heap 中的一段连续区域
+    SDescriptorHandle m_frameRegions[3];  // 每帧独立区域
+    uint32_t m_currentOffset;
+    uint32_t m_descriptorsPerFrame;
+};
+```
+
+### 关键点
+
+1. **CopyDescriptorsSimple 是 CPU 操作**
+   - 源和目标都必须有有效的 CPU handle
+   - 源 handle 来自 `SDescriptorHandle.cpuHandle`（创建 SRV 时保存的）
+   - 目标 handle 来自 staging ring 的连续区域
+
+2. **Per-Frame 隔离**
+   - 每帧使用独立的 staging 区域
+   - 无需等待 GPU，因为 Frame N 的区域在 Frame N+3 才会被重用
+   - 与 `CDX12DynamicBufferRing` 相同的生命周期管理
+
+3. **线性分配，无碎片**
+   - BeginFrame 重置 offset 到帧区域起始
+   - 每次 draw 前分配，永不释放单个 allocation
+   - 整个帧结束后整体重用
 
 ---
 
@@ -196,6 +332,11 @@ BindPendingResources() {
 **问题**：Shadow Pass 有多个问题，暂时禁用
 **状态**：DX12 模式下跳过
 **解决方案**：需要单独调试 depth-only rendering
+
+### 7. Descriptor Table 绑定 ⚠️ 进行中
+**问题**：SRV descriptor table 绑定时，各纹理的 SRV 分散在 heap 不同位置，但 GPU 期望连续内存
+**状态**：设计完成，实现进行中
+**解决方案**：CDX12DescriptorStagingRing - 在绑定时 copy 到连续 staging 区域
 
 ---
 
@@ -273,4 +414,4 @@ cmdList->ResourceBarrier(1, &barrier);
 
 ---
 
-*Last Updated: 2025-12-14*
+*Last Updated: 2025-12-16*

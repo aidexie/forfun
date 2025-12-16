@@ -46,9 +46,11 @@ public:
     void SetCurrentState(D3D12_RESOURCE_STATES state) { m_currentState = state; }
 
     // Descriptor handles (created on demand)
+    // CBV returns CPU handle (used with root descriptors, not descriptor tables)
     D3D12_CPU_DESCRIPTOR_HANDLE GetCBV();
-    D3D12_CPU_DESCRIPTOR_HANDLE GetSRV();
-    D3D12_CPU_DESCRIPTOR_HANDLE GetUAV();
+    // SRV/UAV return full handle for efficient descriptor table binding
+    SDescriptorHandle GetSRV();
+    SDescriptorHandle GetUAV();
 
     bool HasCBV() const { return m_cbvHandle.IsValid(); }
     bool HasSRV() const { return m_srvHandle.IsValid(); }
@@ -102,11 +104,11 @@ public:
     D3D12_RESOURCE_STATES GetCurrentState() const { return m_currentState; }
     void SetCurrentState(D3D12_RESOURCE_STATES state) { m_currentState = state; }
 
-    // Get default SRV (all mips, all slices)
-    D3D12_CPU_DESCRIPTOR_HANDLE GetOrCreateSRV();
+    // Get default SRV (all mips, all slices) - returns full handle for efficient binding
+    SDescriptorHandle GetOrCreateSRV();
 
-    // Get SRV for specific mip/slice
-    D3D12_CPU_DESCRIPTOR_HANDLE GetOrCreateSRVSlice(uint32_t arraySlice, uint32_t mipLevel = 0);
+    // Get SRV for specific mip/slice - returns full handle for efficient binding
+    SDescriptorHandle GetOrCreateSRVSlice(uint32_t arraySlice, uint32_t mipLevel = 0);
 
     // Get default RTV (mip 0, slice 0)
     D3D12_CPU_DESCRIPTOR_HANDLE GetOrCreateRTV();
@@ -120,8 +122,8 @@ public:
     // Get DSV for specific slice
     D3D12_CPU_DESCRIPTOR_HANDLE GetOrCreateDSVSlice(uint32_t arraySlice);
 
-    // Get default UAV (mip 0)
-    D3D12_CPU_DESCRIPTOR_HANDLE GetOrCreateUAV();
+    // Get default UAV (mip 0) - returns full handle for efficient binding
+    SDescriptorHandle GetOrCreateUAV();
 
     // Check if views exist
     bool HasSRV() const { return m_defaultSRV.IsValid(); }
