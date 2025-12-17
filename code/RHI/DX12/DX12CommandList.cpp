@@ -440,6 +440,27 @@ void CDX12CommandList::SetUnorderedAccessTexture(uint32_t slot, ITexture* textur
     m_uavDirty = true;
 }
 
+void CDX12CommandList::SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) {
+    if (slot >= MAX_UAV_SLOTS) return;
+
+    if (!texture) {
+        m_pendingUAVCpuHandles[slot] = {};
+        m_uavDirty = true;
+        return;
+    }
+
+    CDX12Texture* dx12Texture = static_cast<CDX12Texture*>(texture);
+    // Note: Resource barrier for specific mip is handled by caller (GenerateMipsPass)
+
+    EnsureDescriptorHeapsBound();
+
+    // Get UAV handle for specific mip level
+    SDescriptorHandle uavHandle = dx12Texture->GetOrCreateUAVSlice(mipLevel);
+
+    m_pendingUAVCpuHandles[slot] = uavHandle.cpuHandle;
+    m_uavDirty = true;
+}
+
 void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) {
     if (!buffer) return;
 

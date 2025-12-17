@@ -103,6 +103,27 @@ ID3D11UnorderedAccessView* CDX11Texture::GetOrCreateUAV() {
     return m_defaultUAV.Get();
 }
 
+ID3D11UnorderedAccessView* CDX11Texture::GetOrCreateUAVSlice(uint32_t mipLevel) {
+    // mipLevel 0 uses default UAV
+    if (mipLevel == 0) {
+        return GetOrCreateUAV();
+    }
+
+    // Check cache
+    auto it = m_uavCache.find(mipLevel);
+    if (it != m_uavCache.end()) {
+        return it->second.Get();
+    }
+
+    if (!m_device) return nullptr;
+
+    auto uav = createUAV(mipLevel);
+    if (uav) {
+        m_uavCache[mipLevel] = uav;
+    }
+    return uav.Get();
+}
+
 // ============================================
 // Legacy Setters
 // ============================================

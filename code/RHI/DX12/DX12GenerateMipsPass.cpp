@@ -169,7 +169,7 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
         }
     }
 
-    // Determine if source is SRGB (for correct gamma handling)
+    // Determine if source is SRGB (for correct gamma handling in output)
     bool isSRGB = (desc.srvFormat == ETextureFormat::R8G8B8A8_UNORM_SRGB ||
                    desc.srvFormat == ETextureFormat::B8G8R8A8_UNORM_SRGB ||
                    desc.format == ETextureFormat::R8G8B8A8_UNORM_SRGB ||
@@ -184,49 +184,11 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
     ID3D12Resource* d3dResource = dx12Texture->GetD3D12Resource();
     ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetD3D12CommandList();
 
-    // Create a UNORM SRV for GenerateMips (no automatic sRGB->linear conversion)
-    SDescriptorHandle unormSrvHandle = {};
-    {
-        unormSrvHandle = CDX12DescriptorHeapManager::Instance().AllocateCBVSRVUAV();
-        if (!unormSrvHandle.IsValid()) {
-            CFFLog::Error("[GenerateMipsPass] Failed to allocate UNORM SRV descriptor");
-            return;
-        }
-
-        // Determine UNORM format (strip SRGB suffix for explicit gamma handling)
-        DXGI_FORMAT srvFormat = (desc.srvFormat != ETextureFormat::Unknown) ?
-                                 ToDXGIFormat(desc.srvFormat) : ToDXGIFormat(desc.format);
-        DXGI_FORMAT unormFormat = srvFormat;
-        if (isSRGB) {
-            switch (srvFormat) {
-                case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: unormFormat = DXGI_FORMAT_R8G8B8A8_UNORM; break;
-                case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: unormFormat = DXGI_FORMAT_B8G8R8A8_UNORM; break;
-                default: break;
-            }
-        }
-
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = unormFormat;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-
-        if (is2D) {
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MostDetailedMip = 0;
-            srvDesc.Texture2D.MipLevels = desc.mipLevels;
-            srvDesc.Texture2D.PlaneSlice = 0;
-            srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-        } else {
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-            srvDesc.Texture2DArray.MostDetailedMip = 0;
-            srvDesc.Texture2DArray.MipLevels = desc.mipLevels;
-            srvDesc.Texture2DArray.FirstArraySlice = 0;
-            srvDesc.Texture2DArray.ArraySize = arraySize;
-            srvDesc.Texture2DArray.PlaneSlice = 0;
-            srvDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
-        }
-
-        CDX12Context::Instance().GetDevice()->CreateShaderResourceView(
-            d3dResource, &srvDesc, unormSrvHandle.cpuHandle);
+    // Use texture's default SRV (sRGB textures auto-convert to linear on read)
+    SDescriptorHandle srvHandle = dx12Texture->GetOrCreateSRV();
+    if (!srvHandle.IsValid()) {
+        CFFLog::Error("[GenerateMipsPass] Failed to get texture SRV");
+        return;
     }
 
     // Get the current state of the texture
@@ -289,12 +251,13 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
 
             cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
 
-            // Bind source SRV (UNORM format - shader handles gamma)
-            cmdList->SetPendingSRV(0, unormSrvHandle.cpuHandle);
+            // Bind source SRV (sRGB SRV auto-converts to linear on read)
+            // Note: Using SetPendingSRV directly because GenerateMipsPass manages
+            // per-subresource barriers manually and SetShaderResource would interfere
+            cmdList->SetPendingSRV(0, srvHandle.cpuHandle);
 
-            // Bind destination UAV
-            SDescriptorHandle uavHandle = dx12Texture->GetOrCreateUAVSlice(mip);
-            cmdList->SetPendingUAV(0, uavHandle.cpuHandle);
+            // Bind destination UAV for this mip level
+            cmdList->SetUnorderedAccessTextureMip(0, texture, mip);
 
             // Dispatch compute shader (numthreads 8,8,1)
             uint32_t groupsX = (dstWidth + 7) / 8;
@@ -347,7 +310,7 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
     dx12Texture->SetCurrentState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     // Clear UAV bindings
-    cmdList->SetPendingUAV(0, {});
+    cmdList->SetUnorderedAccessTextureMip(0, nullptr, 0);
 }
 
 } // namespace DX12

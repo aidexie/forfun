@@ -378,6 +378,15 @@ void CDX11CommandList::SetUnorderedAccessTexture(uint32_t slot, ITexture* textur
     m_context->CSSetUnorderedAccessViews(slot, 1, &uav, nullptr);
 }
 
+void CDX11CommandList::SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) {
+    ID3D11UnorderedAccessView* uav = nullptr;
+    if (texture) {
+        CDX11Texture* dx11Tex = static_cast<CDX11Texture*>(texture);
+        uav = dx11Tex->GetOrCreateUAVSlice(mipLevel);
+    }
+    m_context->CSSetUnorderedAccessViews(slot, 1, &uav, nullptr);
+}
+
 void CDX11CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) {
     if (!buffer) return;
 

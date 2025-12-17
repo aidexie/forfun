@@ -20,8 +20,12 @@ class CDX12Buffer;
 class CDX12Texture;
 class CDX12Sampler;
 class CDX12PipelineState;
+class CDX12GenerateMipsPass;
 
 class CDX12CommandList : public ICommandList {
+    // Friend classes for internal DX12 passes that need low-level access
+    friend class CDX12GenerateMipsPass;
+
 public:
     CDX12CommandList(CDX12RenderContext* context);
     ~CDX12CommandList() override;
@@ -68,6 +72,7 @@ public:
     void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) override;
     void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) override;
     void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) override;
+    void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) override;
     void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) override;
 
     // Draw Commands
@@ -153,11 +158,7 @@ private:
     // Dynamic constant buffer ring (owned by RenderContext, set during initialization)
     CDX12DynamicBufferRing* m_dynamicBuffer = nullptr;
 
-public:
-    // Set dynamic buffer ring (called by RenderContext)
-    void SetDynamicBufferRing(CDX12DynamicBufferRing* ring) { m_dynamicBuffer = ring; }
-
-    // Internal helpers for compute passes (used by GenerateMipsPass, etc.)
+    // Internal helpers for compute passes (accessed via friend class)
     ID3D12GraphicsCommandList* GetD3D12CommandList() { return m_commandList.Get(); }
     void SetPendingSRV(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
         if (slot < MAX_SRV_SLOTS) { m_pendingSRVCpuHandles[slot] = handle; m_srvDirty = true; }
@@ -165,6 +166,10 @@ public:
     void SetPendingUAV(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
         if (slot < MAX_UAV_SLOTS) { m_pendingUAVCpuHandles[slot] = handle; m_uavDirty = true; }
     }
+
+public:
+    // Set dynamic buffer ring (called by RenderContext)
+    void SetDynamicBufferRing(CDX12DynamicBufferRing* ring) { m_dynamicBuffer = ring; }
 };
 
 } // namespace DX12

@@ -87,6 +87,7 @@ public:
     // Set unordered access view (for compute shaders or pixel shader UAV)
     virtual void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) = 0;
     virtual void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) = 0;
+    virtual void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) = 0;
 
     // Clear UAV buffer with uint values (for resetting atomic counters, etc.)
     // values: array of 4 uint32_t values to clear with

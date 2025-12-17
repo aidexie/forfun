@@ -154,6 +154,9 @@ public:
     // Get default UAV (mip 0)
     ID3D11UnorderedAccessView* GetOrCreateUAV();
 
+    // Get UAV for specific mip level
+    ID3D11UnorderedAccessView* GetOrCreateUAVSlice(uint32_t mipLevel);
+
     // ============================================
     // Legacy setters (for CreateTexture during migration)
     // TODO: Remove these after full migration
@@ -220,6 +223,7 @@ private:
     mutable std::unordered_map<ViewKey, ComPtr<ID3D11ShaderResourceView>, ViewKeyHash> m_srvCache;
     mutable std::unordered_map<ViewKey, ComPtr<ID3D11RenderTargetView>, ViewKeyHash> m_rtvCache;
     mutable std::unordered_map<uint32_t, ComPtr<ID3D11DepthStencilView>> m_dsvCache;  // keyed by arraySlice
+    mutable std::unordered_map<uint32_t, ComPtr<ID3D11UnorderedAccessView>> m_uavCache;  // keyed by mipLevel
 };
 
 // ============================================
