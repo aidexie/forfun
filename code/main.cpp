@@ -271,7 +271,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     LARGE_INTEGER freq{}, prev{}, curr{};
     int frameCount = 0;
     // Initialization status flags
-    bool dx11Initialized = false;
+    bool dxInitialized = false;
     bool imguiInitialized = false;
     bool sceneInitialized = false;
     bool pipelineInitialized = false;
@@ -356,7 +356,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             exitCode = -2;
             goto cleanup;
         }
-        dx11Initialized = true;  // Renamed variable still tracks RHI init
+        dxInitialized = true;  // Renamed variable still tracks RHI init
         CFFLog::Info("RHI Manager initialized (%s backend)", backendName);
     }
 
@@ -431,17 +431,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         CFFLog::Info("ForwardRenderPipeline initialized");
     };
 
-    // 7) Load default scene (if not in test mode)
-    // NOTE: For DX12, scene loading is deferred to main loop (after command list is open)
-    // For DX11, load here
-    if (g_renderConfig.backend == RHI::EBackend::DX11) {
-        if (!activeTest) {
-            //std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
-            std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_step_by_step.scene");
-            CScene::Instance().LoadFromFile(scenePath);
-            defaultSceneLoaded = true;
-        }
-    }
+    // 7) Load default scene - deferred to main loop for both backends
+    // (DX12 requires command list to be open for certain operations)
 
     // 6) 主循环
     QueryPerformanceFrequency(&freq);
@@ -485,106 +476,110 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
 
         // ============================================
-        // DX12 Loop: Using RHI Layer
+        // Unified Render Loop (DX11 & DX12)
         // ============================================
+
+        // 1. RHI BeginFrame
+        rhiCtx->BeginFrame();
+
+        // 2. Deferred initialization (must be after command list is open for DX12)
+        if (!sceneInitialized) {
+            if (!CScene::Instance().Initialize()) {
+                CFFLog::Error("Failed to initialize CScene!");
+                PostQuitMessage(-4);
+                break;
+            }
+            sceneInitialized = true;
+        }
+
+        if (!pipelineInitialized) {
+            if (!g_pipeline.Initialize()) {
+                CFFLog::Error("Failed to initialize ForwardRenderPipeline!");
+                PostQuitMessage(-5);
+                break;
+            }
+            pipelineInitialized = true;
+            CFFLog::Info("ForwardRenderPipeline initialized");
+        }
+
+        // Load default scene (deferred for both backends)
+        if (!defaultSceneLoaded && !activeTest) {
+            std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
+            CScene::Instance().LoadFromFile(scenePath);
+            defaultSceneLoaded = true;
+        }
+
+        // 3. Get RHI CommandList
+        RHI::ICommandList* cmdList = rhiCtx->GetCommandList();
+
+        // 4. Render 3D scene
+        {
+            // Get viewport size
+            ImVec2 vpSize = Panels::GetViewportLastSize();
+            UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : rhiCtx->GetWidth();
+            UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : rhiCtx->GetHeight();
+
+            // Update editor camera
+            CCamera& editorCamera = CScene::Instance().GetEditorCamera();
+            float aspect = (vpH > 0) ? (float)vpW / (float)vpH : 1.0f;
+            editorCamera.aspectRatio = aspect;
+            CEditorContext::Instance().Update(dt, editorCamera);
+
+            // Collect debug lines
+            g_pipeline.GetDebugLinePass().BeginFrame();
+            CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
+
+            // Render through pipeline
+            {
+                RHI::CScopedDebugEvent evtScene(cmdList, L"Forward Pipeline");
+                CRenderPipeline::RenderContext renderCtx{
+                    editorCamera, CScene::Instance(), vpW, vpH, dt, FShowFlags::Editor()
+                };
+                g_pipeline.Render(renderCtx);
+            }
+        }
+
+        // 5. Bind backbuffer for UI rendering
+        {
+            RHI::ITexture* backbuffer = rhiCtx->GetBackbuffer();
+            RHI::ITexture* depthStencil = rhiCtx->GetDepthStencil();
+            cmdList->SetRenderTargets(1, &backbuffer, depthStencil);
+            cmdList->SetViewport(0, 0, (float)rhiCtx->GetWidth(), (float)rhiCtx->GetHeight());
+            cmdList->SetScissorRect(0, 0, rhiCtx->GetWidth(), rhiCtx->GetHeight());
+
+            const float clearColor[4] = { 0.1f, 0.1f, 0.12f, 1.0f };
+            cmdList->ClearRenderTarget(backbuffer, clearColor);
+            if (depthStencil) {
+                cmdList->ClearDepthStencil(depthStencil, true, 1.0f, true, 0);
+            }
+        }
+
+        // 6. ImGui NewFrame
+        ImGui_ImplWin32_NewFrame();
         if (g_renderConfig.backend == RHI::EBackend::DX12) {
-            auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
-
-            // 1. RHI BeginFrame (resets command list, transitions backbuffer)
-            rhiCtx->BeginFrame();
-
-            // 1.5 Deferred initialization (must be after command list is open)
-            if (!sceneInitialized) {
-                if (!CScene::Instance().Initialize()) {
-                    CFFLog::Error("Failed to initialize CScene!");
-                    PostQuitMessage(-4);
-                    break;
-                }
-                sceneInitialized = true;
-            }
-
-            if (!pipelineInitialized) {
-                if (!g_pipeline.Initialize()) {
-                    CFFLog::Error("Failed to initialize ForwardRenderPipeline!");
-                    PostQuitMessage(-5);
-                    break;
-                }
-                pipelineInitialized = true;
-                CFFLog::Info("ForwardRenderPipeline initialized");
-            }
-
-            // Load default scene (deferred for DX12)
-            if (!defaultSceneLoaded && !activeTest) {
-                std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
-                CScene::Instance().LoadFromFile(scenePath);
-                defaultSceneLoaded = true;
-            }
-
-            // 2. Get RHI CommandList
-            RHI::ICommandList* cmdList = rhiCtx->GetCommandList();
-
-            // ============================================
-            // Phase 6.1: Test Offscreen RT creation + RHI clear
-            // ============================================
-            {
-                // Get viewport size (same logic as DX11)
-                ImVec2 vpSize = Panels::GetViewportLastSize();
-                UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : rhiCtx->GetWidth();
-                UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : rhiCtx->GetHeight();
-
-                // Update editor camera
-                CCamera& editorCamera = CScene::Instance().GetEditorCamera();
-                float aspect = (vpH > 0) ? (float)vpW / (float)vpH : 1.0f;
-                editorCamera.aspectRatio = aspect;
-                CEditorContext::Instance().Update(dt, editorCamera);
-
-                // Render 3D scene through pipeline
-                g_pipeline.GetDebugLinePass().BeginFrame();
-                CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
-
-                {
-                    RHI::CScopedDebugEvent evtScene(cmdList, L"Forward Pipeline");
-                    CRenderPipeline::RenderContext renderCtx{
-                        editorCamera, CScene::Instance(), vpW, vpH, dt, FShowFlags::Editor()
-                    };
-                    g_pipeline.Render(renderCtx);
-                }
-            }
-
-            // 3. Bind backbuffer for UI rendering
-            {
-                RHI::ITexture* backbuffer = rhiCtx->GetBackbuffer();
-                RHI::ITexture* depthStencil = rhiCtx->GetDepthStencil();
-                cmdList->SetRenderTargets(1, &backbuffer, depthStencil);
-                cmdList->SetViewport(0, 0, (float)rhiCtx->GetWidth(), (float)rhiCtx->GetHeight());
-                cmdList->SetScissorRect(0, 0, rhiCtx->GetWidth(), rhiCtx->GetHeight());
-
-                const float clearColor[4] = { 0.1f, 0.1f, 0.12f, 1.0f };
-                cmdList->ClearRenderTarget(backbuffer, clearColor);
-                if (depthStencil) {
-                    cmdList->ClearDepthStencil(depthStencil, true, 1.0f, true, 0);
-                }
-            }
-
-            // 4. ImGui NewFrame
             ImGui_ImplDX12_NewFrame();
-            ImGui_ImplWin32_NewFrame();
-            ImGui::NewFrame();
-            ImGuizmo::BeginFrame();
+        } else {
+            ImGui_ImplDX11_NewFrame();
+        }
+        ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
 
-            // 5. ImGui Panels
-            {
-                bool dockOpen = true;
-                Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_pipeline);
-                Panels::DrawHierarchy(CScene::Instance());
-                Panels::DrawInspector(CScene::Instance());
+        // 7. ImGui Panels
+        {
+            bool dockOpen = true;
+            Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_pipeline);
+            Panels::DrawHierarchy(CScene::Instance());
+            Panels::DrawInspector(CScene::Instance());
 
-                // DX12 Viewport: Need to allocate ImGui descriptor for offscreen texture
-                void* viewportSrv = nullptr;
-                unsigned int vpW = g_pipeline.GetOffscreenWidth();
-                unsigned int vpH = g_pipeline.GetOffscreenHeight();
+            // Viewport SRV handling (backend-specific)
+            void* viewportSrv = nullptr;
+            unsigned int vpW = g_pipeline.GetOffscreenWidth();
+            unsigned int vpH = g_pipeline.GetOffscreenHeight();
 
+            if (g_renderConfig.backend == RHI::EBackend::DX12) {
+                // DX12: Need to allocate ImGui descriptor for offscreen texture
                 if (vpW > 0 && vpH > 0) {
+                    auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
                     RHI::ITexture* ldrTexture = g_pipeline.GetOffscreenTextureRHI();
                     if (ldrTexture) {
                         ID3D12Resource* d3dResource = static_cast<ID3D12Resource*>(ldrTexture->GetNativeHandle());
@@ -594,7 +589,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                             D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = dx12Ctx.AllocateImGuiTextureDescriptor(
                                 d3dResource, DXGI_FORMAT_R8G8B8A8_UNORM);
                             g_dx12ViewportGpuHandle = gpuHandle.ptr;
-                            // Calculate slot from handle (slot 1 is first after font texture)
                             uint64_t basePtr = dx12Ctx.GetImGuiSrvGpuHandle().ptr;
                             g_dx12ViewportSlot = static_cast<uint32_t>((gpuHandle.ptr - basePtr) / dx12Ctx.GetSrvDescriptorSize());
                             g_dx12ViewportLastWidth = vpW;
@@ -611,106 +605,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                     }
                     viewportSrv = (void*)g_dx12ViewportGpuHandle;
                 }
-
-                Panels::DrawViewport(CScene::Instance(), CScene::Instance().GetEditorCamera(),
-                   viewportSrv, vpW, vpH, &g_pipeline);
-                Panels::DrawIrradianceDebug();
-                Panels::DrawHDRExportWindow();
-                Panels::DrawSceneLightSettings(&g_pipeline);
-                Panels::DrawMaterialEditor();
+            } else {
+                // DX11: Direct SRV pointer
+                viewportSrv = g_pipeline.GetOffscreenSRV();
             }
 
-            // 6. ImGui render
-            {
-                RHI::CScopedDebugEvent evtImGui(cmdList, L"ImGui Pass");
-                ImGui::Render();
+            Panels::DrawViewport(CScene::Instance(), CScene::Instance().GetEditorCamera(),
+               viewportSrv, vpW, vpH, &g_pipeline);
+            Panels::DrawIrradianceDebug();
+            Panels::DrawHDRExportWindow();
+            Panels::DrawSceneLightSettings(&g_pipeline);
+            Panels::DrawMaterialEditor();
+        }
 
-                // Set descriptor heap for ImGui (required before RenderDrawData)
+        // 8. ImGui Render
+        {
+            RHI::CScopedDebugEvent evtImGui(cmdList, L"ImGui Pass");
+            ImGui::Render();
+
+            if (g_renderConfig.backend == RHI::EBackend::DX12) {
+                // DX12: Set descriptor heap for ImGui before RenderDrawData
+                auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
                 ID3D12GraphicsCommandList* d3dCmdList = static_cast<ID3D12GraphicsCommandList*>(rhiCtx->GetNativeContext());
                 ID3D12DescriptorHeap* heaps[] = { dx12Ctx.GetImGuiSrvHeap() };
                 d3dCmdList->SetDescriptorHeaps(1, heaps);
-
                 ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), d3dCmdList);
+            } else {
+                ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
             }
-
-            // 7. EndFrame and Present
-            rhiCtx->EndFrame();
-            rhiCtx->Present(true);
         }
-        // ============================================
-        // DX11 Full Loop (unchanged)
-        // ============================================
-        else {
-            // 5.1 RHI BeginFrame
-            rhiCtx->BeginFrame();
 
-            // 5.2 ImGui 帧开始
-            ImGui_ImplWin32_NewFrame();
-            ImGui_ImplDX11_NewFrame();
-            ImGui::NewFrame();
-            ImGuizmo::BeginFrame();
-
-            // 5.3 渲染 3D 场景
-            ImVec2 vpSize = Panels::GetViewportLastSize();
-            UINT vpW = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.x : rhiCtx->GetWidth();
-            UINT vpH = (vpSize.x > 1.f && vpSize.y > 1.f) ? (UINT)vpSize.y : rhiCtx->GetHeight();
-
-            CCamera& editorCamera = CScene::Instance().GetEditorCamera();
-            float aspect = (vpH > 0) ? (float)vpW / (float)vpH : 1.0f;
-            editorCamera.aspectRatio = aspect;
-            CEditorContext::Instance().Update(dt, editorCamera);
-
-            g_pipeline.GetDebugLinePass().BeginFrame();
-            CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
-
-            {RHI::CScopedDebugEvent evtScene(rhiCtx->GetCommandList(), L"forward pipeline");
-            CRenderPipeline::RenderContext renderCtx{
-                editorCamera, CScene::Instance(), vpW, vpH, dt, FShowFlags::Editor()
-            };
-            g_pipeline.Render(renderCtx);
-            }
-
-            // Bind backbuffer for UI rendering
-            ID3D11DeviceContext* d3dCtx = static_cast<ID3D11DeviceContext*>(rhiCtx->GetNativeContext());
-            ID3D11RenderTargetView* rtv = static_cast<ID3D11RenderTargetView*>(RHI::GetNativeRTV(rhiCtx->GetBackbuffer()));
-            ID3D11DepthStencilView* dsv = static_cast<ID3D11DepthStencilView*>(RHI::GetNativeDSV(rhiCtx->GetDepthStencil()));
-            d3dCtx->OMSetRenderTargets(1, &rtv, dsv);
-
-            D3D11_VIEWPORT vp{};
-            vp.Width = (float)rhiCtx->GetWidth();
-            vp.Height = (float)rhiCtx->GetHeight();
-            vp.MinDepth = 0.0f;
-            vp.MaxDepth = 1.0f;
-            d3dCtx->RSSetViewports(1, &vp);
-
-            const float clearCol[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
-            d3dCtx->ClearRenderTargetView(rtv, clearCol);
-
-            // ImGui panels
-            {
-                bool dockOpen = true;
-                Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_pipeline);
-                Panels::DrawHierarchy(CScene::Instance());
-                Panels::DrawInspector(CScene::Instance());
-                Panels::DrawViewport(CScene::Instance(), CScene::Instance().GetEditorCamera(),
-                   g_pipeline.GetOffscreenSRV(), g_pipeline.GetOffscreenWidth(),
-                   g_pipeline.GetOffscreenHeight(), &g_pipeline);
-                Panels::DrawIrradianceDebug();
-                Panels::DrawHDRExportWindow();
-                Panels::DrawSceneLightSettings(&g_pipeline);
-                Panels::DrawMaterialEditor();
-            }
-
-            // 5.5 提交 ImGui
-            {RHI::CScopedDebugEvent evtScene(rhiCtx->GetCommandList(), L"imgui pass");
-            ImGui::Render();
-            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-            }
-
-            // 5.6 EndFrame and Present
-            rhiCtx->EndFrame();
-            rhiCtx->Present(true);
-        }
+        // 9. EndFrame and Present
+        rhiCtx->EndFrame();
+        rhiCtx->Present(true);
     }
 
     // Main loop finished normally
@@ -745,7 +672,7 @@ cleanup:
     CFFLog::Info("Shutting down TextureManager...");
     CTextureManager::Instance().Shutdown();
 
-    if (dx11Initialized) {
+    if (dxInitialized) {
         CFFLog::Info("Shutting down RHI...");
         RHI::CRHIManager::Instance().Shutdown();
     }
