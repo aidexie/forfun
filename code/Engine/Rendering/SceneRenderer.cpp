@@ -545,8 +545,6 @@ void CSceneRenderer::createPipeline()
     samplerDesc.addressV = ETextureAddressMode::Wrap;
     samplerDesc.addressW = ETextureAddressMode::Wrap;
     samplerDesc.minLOD = 0.0f;
-    // DX12 doesn't support GenerateMips yet, so disable mipmap sampling
-    bool dx12Mode = (ctx->GetBackend() == EBackend::DX12);
-    samplerDesc.maxLOD = dx12Mode ? 0.0f : 3.402823466e+38f;
+    samplerDesc.maxLOD = 3.402823466e+38f;
     m_sampler.reset(ctx->CreateSampler(samplerDesc));
 }

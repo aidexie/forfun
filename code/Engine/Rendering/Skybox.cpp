@@ -494,8 +494,8 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
     // Unbind render target
     cmdList->UnbindRenderTargets();
 
-    // Generate mipmaps
-    cmdList->GenerateMips(m_envTexture.get());
+    // // Generate mipmaps
+    // cmdList->GenerateMips(m_envTexture.get());
 
     CFFLog::Info("Skybox: Environment cubemap ready (%dx%d with mipmaps)", size, size);
 }

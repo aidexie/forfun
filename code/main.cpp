@@ -405,36 +405,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     CScene::Instance().GetEditorCamera().aspectRatio =
         static_cast<float>(g_renderConfig.windowWidth) / static_cast<float>(g_renderConfig.windowHeight);
 
+    // 6) CScene & ForwardRenderPipeline initialization
+    // Deferred to main loop for both backends (DX12 requires command list to be open)
 
-    // 6) CScene GPU resource initialization
-    // NOTE: For DX12, initialization is deferred to main loop (after command list is open)
-    // For DX11, initialize here
-    if (g_renderConfig.backend == RHI::EBackend::DX11) {
-        if (!CScene::Instance().Initialize()) {
-            CFFLog::Error("Failed to initialize CScene!");
-            exitCode = -4;
-            goto cleanup;
-        }
-        sceneInitialized = true;
-    }
-
-    // 6) ✅ ForwardRenderPipeline initialization
-    // NOTE: For DX12, initialization is deferred to main loop (after command list is open)
-    // For DX11, initialize here
-    if (g_renderConfig.backend == RHI::EBackend::DX11) {
-        if (!g_pipeline.Initialize()) {
-            CFFLog::Error("Failed to initialize ForwardRenderPipeline!");
-            exitCode = -5;
-            goto cleanup;
-        }
-        pipelineInitialized = true;
-        CFFLog::Info("ForwardRenderPipeline initialized");
-    };
-
-    // 7) Load default scene - deferred to main loop for both backends
-    // (DX12 requires command list to be open for certain operations)
-
-    // 6) 主循环
+    // 7) 主循环
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&prev);
 
@@ -454,25 +428,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         float dt = static_cast<float>(double(curr.QuadPart - prev.QuadPart) / double(freq.QuadPart));
         prev = curr;
 
-        // Execute test frame if in test mode
-        if (activeTest) {
-            testContext.ExecuteFrame(frameCount);
-
-            // Check if test is finished
-            if (testContext.IsFinished()) {
-                CFFLog::Info("=== Test Finished ===");
-                PostQuitMessage(testContext.testPassed ? 0 : 1);
-                break;
-            }
-
-            // Timeout protection
-            if (frameCount > 1000) {
-                CFFLog::Error("Test timeout after 1000 frames");
-                PostQuitMessage(1);
-                break;
-            }
-        }
-
         RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
 
         // ============================================
@@ -481,6 +436,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // 1. RHI BeginFrame
         rhiCtx->BeginFrame();
+        CTextureManager::Instance();
 
         // 2. Deferred initialization (must be after command list is open for DX12)
         if (!sceneInitialized) {
@@ -507,6 +463,28 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;
+        }
+
+        // Execute test frame if in test mode
+        if (activeTest)
+        {
+            testContext.ExecuteFrame(frameCount);
+
+            // Check if test is finished
+            if (testContext.IsFinished())
+            {
+                CFFLog::Info("=== Test Finished ===");
+                PostQuitMessage(testContext.testPassed ? 0 : 1);
+                break;
+            }
+
+            // Timeout protection
+            if (frameCount > 1000)
+            {
+                CFFLog::Error("Test timeout after 1000 frames");
+                PostQuitMessage(1);
+                break;
+            }
         }
 
         // 3. Get RHI CommandList

@@ -8,7 +8,7 @@
 #include <windows.h>
 #include <commdlg.h>
 
-static bool s_showWindow = false;  // Default: hidden (user opens via menu)
+static bool s_showWindow = true;  // Default: hidden (user opens via menu)
 static bool s_isBaking = false;    // Volumetric Lightmap baking state
 
 void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
