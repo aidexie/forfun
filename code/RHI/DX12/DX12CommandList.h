@@ -153,19 +153,18 @@ private:
     // Dynamic constant buffer ring (owned by RenderContext, set during initialization)
     CDX12DynamicBufferRing* m_dynamicBuffer = nullptr;
 
-    // GenerateMips resources (lazily initialized)
-    std::unique_ptr<IShader> m_generateMipsCS;      // For array/cubemap textures
-    std::unique_ptr<IShader> m_generateMips2DCS;    // For 2D textures
-    std::unique_ptr<IPipelineState> m_generateMipsPSO;
-    std::unique_ptr<IPipelineState> m_generateMips2DPSO;
-    std::unique_ptr<ISampler> m_generateMipsSampler;
-
-    // Initialize GenerateMips resources on first use
-    bool EnsureGenerateMipsResources();
-
 public:
     // Set dynamic buffer ring (called by RenderContext)
     void SetDynamicBufferRing(CDX12DynamicBufferRing* ring) { m_dynamicBuffer = ring; }
+
+    // Internal helpers for compute passes (used by GenerateMipsPass, etc.)
+    ID3D12GraphicsCommandList* GetD3D12CommandList() { return m_commandList.Get(); }
+    void SetPendingSRV(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
+        if (slot < MAX_SRV_SLOTS) { m_pendingSRVCpuHandles[slot] = handle; m_srvDirty = true; }
+    }
+    void SetPendingUAV(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
+        if (slot < MAX_UAV_SLOTS) { m_pendingUAVCpuHandles[slot] = handle; m_uavDirty = true; }
+    }
 };
 
 } // namespace DX12

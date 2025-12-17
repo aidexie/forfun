@@ -148,6 +148,8 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12ResourceStateTracker.cpp
     ${CODE_PATH}/RHI/DX12/DX12CommandList.h
     ${CODE_PATH}/RHI/DX12/DX12CommandList.cpp
+    ${CODE_PATH}/RHI/DX12/DX12GenerateMipsPass.h
+    ${CODE_PATH}/RHI/DX12/DX12GenerateMipsPass.cpp
     ${CODE_PATH}/RHI/DX12/DX12RenderContext.h
     ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
     ${CODE_PATH}/RHI/DX12/DX12PipelineState.h

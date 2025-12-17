@@ -4,6 +4,7 @@
 #include "DX12DescriptorHeap.h"
 #include "DX12CommandList.h"
 #include "DX12DynamicBuffer.h"
+#include "DX12GenerateMipsPass.h"
 #include "../IRenderContext.h"
 
 // ============================================
@@ -71,6 +72,9 @@ public:
     ID3D12RootSignature* GetGraphicsRootSignature() const { return m_graphicsRootSignature.Get(); }
     ID3D12RootSignature* GetComputeRootSignature() const { return m_computeRootSignature.Get(); }
 
+    // Access to internal passes
+    CDX12GenerateMipsPass& GetGenerateMipsPass() { return m_generateMipsPass; }
+
 private:
     // Root signature creation
     bool CreateRootSignatures();
@@ -98,6 +102,9 @@ private:
 
     // Dynamic constant buffer ring for per-draw data
     std::unique_ptr<CDX12DynamicBufferRing> m_dynamicBufferRing;
+
+    // GenerateMips compute pass
+    CDX12GenerateMipsPass m_generateMipsPass;
 
     // Frame state
     bool m_frameInProgress = false;

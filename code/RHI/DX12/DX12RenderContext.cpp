@@ -92,6 +92,9 @@ void CDX12RenderContext::Shutdown() {
     // Wait for GPU to finish
     //CDX12Context::Instance().WaitForGPU();
 
+    // Shutdown internal passes first (they hold GPU resources)
+    m_generateMipsPass.Shutdown();
+
     // Release resources
     m_dynamicBufferRing.reset();
     m_depthStencilBuffer.reset();
