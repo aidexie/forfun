@@ -14,14 +14,17 @@ bool CForwardRenderPipeline::Initialize()
     RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!rhiCtx) return false;
 
-    // 初始化各个 Pass
-    if (!m_shadowPass.Initialize()) {
-        CFFLog::Error("Failed to initialize ShadowPass");
-        return false;
-    }
+    // Initialize clustered lighting first (compute pass)
+    m_clusteredLighting.Initialize();
 
     if (!m_sceneRenderer.Initialize()) {
         CFFLog::Error("Failed to initialize SceneRenderer");
+        return false;
+    }
+
+    // 初始化各个 Pass
+    if (!m_shadowPass.Initialize()) {
+        CFFLog::Error("Failed to initialize ShadowPass");
         return false;
     }
 
@@ -75,7 +78,19 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     const bool dx12MinimalMode = (RHI::CRHIManager::Instance().GetBackend() == RHI::EBackend::DX12);
 
     // ============================================
-    // 2. Shadow Pass (if enabled)
+    // 2. Clustered Lighting Pass (compute - build grid, cull lights)
+    // ============================================
+    if (ctx.showFlags.ClusteredLighting) {
+        RHI::CScopedDebugEvent evt(cmdList, L"Clustered Lighting");
+        m_clusteredLighting.Resize(ctx.width, ctx.height);
+        m_clusteredLighting.BuildClusterGrid(cmdList,
+                                             ctx.camera.GetProjectionMatrix(),
+                                             ctx.camera.nearZ, ctx.camera.farZ);
+        m_clusteredLighting.CullLights(cmdList, &ctx.scene, ctx.camera.GetViewMatrix());
+    }
+
+    // ============================================
+    // 3. Shadow Pass (if enabled)
     // ============================================
     const CShadowPass::Output* shadowData = nullptr;
     // Shadow Pass disabled for DX12 until debugging is complete
@@ -97,7 +112,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 3. Clear HDR render target
+    // 4. Clear HDR render target
     // ============================================
     RHI::ITexture* hdrRT = m_offHDR.get();
     cmdList->SetRenderTargets(1, &hdrRT, m_offDepth.get());
@@ -109,18 +124,19 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     cmdList->ClearDepthStencil(m_offDepth.get(), true, 1.0f, true, 0);
 
     // ============================================
-    // 4. Scene Rendering (Opaque + Transparent + Skybox)
+    // 5. Scene Rendering (Opaque + Transparent + Skybox)
     // ============================================
     {
         RHI::CScopedDebugEvent evt(cmdList, L"Scene Rendering");
+        CClusteredLightingPass* clusteredPass = ctx.showFlags.ClusteredLighting ? &m_clusteredLighting : nullptr;
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
                               m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
-                              shadowData);
+                              shadowData, clusteredPass);
     }
 
     // ============================================
-    // 5. Post-Processing (HDR -> LDR)
+    // 6. Post-Processing (HDR -> LDR)
     // ============================================
     // PostProcessing is enabled for both DX11 and DX12
     // It does tone mapping from HDR RT to LDR RT
@@ -137,7 +153,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 6. Debug Lines (if enabled)
+    // 7. Debug Lines (if enabled)
     // ============================================
     if (!dx12MinimalMode && ctx.showFlags.DebugLines) {
         RHI::CScopedDebugEvent evt(cmdList, L"Debug Lines");
@@ -150,7 +166,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 7. Grid (if enabled)
+    // 8. Grid (if enabled)
     // ============================================
     if (!dx12MinimalMode && ctx.showFlags.Grid) {
         RHI::CScopedDebugEvent evt(cmdList, L"Grid");

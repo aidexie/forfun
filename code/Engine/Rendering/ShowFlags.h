@@ -22,6 +22,7 @@ struct FShowFlags
     bool Lighting = true;           // 是否渲染光照
     bool Shadows = true;            // 是否渲染阴影（CSM）
     bool IBL = true;                // 是否使用 IBL（Image-Based Lighting）
+    bool ClusteredLighting = true;  // 是否使用聚类光照（Point/Spot Lights）
 
     // Scene Elements
     bool Skybox = true;             // 是否渲染 Skybox
@@ -61,6 +62,7 @@ struct FShowFlags
         flags.Lighting = true;
         flags.Shadows = true;
         flags.IBL = true;
+        flags.ClusteredLighting = true; // ✅ 聚类光照
         flags.Skybox = true;
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
@@ -79,6 +81,7 @@ struct FShowFlags
         flags.Lighting = true;
         flags.Shadows = true;
         flags.IBL = true;
+        flags.ClusteredLighting = true; // ✅ 聚类光照
         flags.Skybox = true;
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
@@ -98,6 +101,7 @@ struct FShowFlags
         flags.Lighting = true;
         flags.Shadows = false;          // ❌ 预览不需要阴影
         flags.IBL = false;              // ❌ 预览不需要 IBL
+        flags.ClusteredLighting = false;// ❌ 预览不需要聚类光照
         flags.Skybox = true;
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
@@ -114,6 +118,7 @@ struct FShowFlags
         flags.Lighting = true;
         flags.Shadows = false;          // ❌ Reflection Probe 不用阴影（性能考虑）
         flags.IBL = true;               // ✅ Reflection Probe 需要 IBL
+        flags.ClusteredLighting = true; // ✅ 聚类光照（反射需要点光源/聚光灯）
         flags.Skybox = true;            // ✅ 反射需要天空盒
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
@@ -133,6 +138,7 @@ struct FShowFlags
         flags.Lighting = false;
         flags.Shadows = false;
         flags.IBL = false;
+        flags.ClusteredLighting = false;// ❌ 线框模式不需要聚类光照
         flags.Skybox = false;
         flags.OpaqueObjects = true;
         flags.TransparentObjects = false;

@@ -55,6 +55,16 @@ struct SGpuLight {
 // Legacy typedef for compatibility (will be removed)
 using SGpuPointLight = SGpuLight;
 
+// Constant buffer for pixel shader (b3)
+struct alignas(16) CB_ClusteredParams {
+    float nearZ;
+    float farZ;
+    uint32_t numClustersX;
+    uint32_t numClustersY;
+    uint32_t numClustersZ;
+    uint32_t _pad[3];
+};
+
 // Clustered Lighting Pass
 // Responsibilities:
 // 1. Build cluster grid (AABB for each cluster)
@@ -83,7 +93,7 @@ public:
                     const DirectX::XMMATRIX& view);
 
     // Bind cluster data to MainPass pixel shader
-    // Binds: g_ClusterData (t10), g_CompactLightList (t11), g_PointLights (t12)
+    // Binds: g_ClusterData (t8), g_CompactLightList (t9), g_Lights (t10)
     void BindToMainPass(RHI::ICommandList* cmdList);
 
     // Debug visualization
@@ -124,10 +134,6 @@ private:
     // Compute Shaders (RHI)
     RHI::ShaderPtr m_buildClusterGridCS;
     RHI::ShaderPtr m_cullLightsCS;
-
-    // Constant Buffers (RHI)
-    RHI::BufferPtr m_clusterCB;      // Projection params, near/far
-    RHI::BufferPtr m_lightCullingCB; // Light culling params
 
     // Debug visualization
     EDebugMode m_debugMode = EDebugMode::None;

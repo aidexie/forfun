@@ -163,33 +163,6 @@ void CClusteredLightingPass::CreateBuffers() {
         }
     }
 
-    // Cluster Constant Buffer
-    {
-        BufferDesc desc;
-        desc.size = sizeof(SClusterCB);
-        desc.usage = EBufferUsage::Constant;
-        desc.cpuAccess = ECPUAccess::Write;
-        desc.debugName = "ClusterCB";
-
-        m_clusterCB.reset(ctx->CreateBuffer(desc));
-        if (!m_clusterCB) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create cluster constant buffer");
-        }
-    }
-
-    // Light Culling Constant Buffer
-    {
-        BufferDesc desc;
-        desc.size = sizeof(SLightCullingCB);
-        desc.usage = EBufferUsage::Constant;
-        desc.cpuAccess = ECPUAccess::Write;
-        desc.debugName = "LightCullingCB";
-
-        m_lightCullingCB.reset(ctx->CreateBuffer(desc));
-        if (!m_lightCullingCB) {
-            CFFLog::Error("[ClusteredLightingPass] Failed to create light culling constant buffer");
-        }
-    }
 }
 
 void CClusteredLightingPass::CreateShaders() {
@@ -268,7 +241,7 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
     m_clusterGridDirty = false;
 
     // Build constant buffer data
-    SClusterCB cb = {};
+    SClusterCB cb{};
     XMMATRIX invProj = XMMatrixInverse(nullptr, projection);
     XMStoreFloat4x4(&cb.inverseProjection, XMMatrixTranspose(invProj));
     cb.nearZ = nearZ;
@@ -285,7 +258,7 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
     psoDesc.computeShader = m_buildClusterGridCS.get();
     PipelineStatePtr buildGridPSO(ctx->CreateComputePipelineState(psoDesc));
 
-    // Bind resources (use SetConstantBufferData for DX12 compatibility)
+    // Bind resources
     cmdList->SetPipelineState(buildGridPSO.get());
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(SClusterCB));
     cmdList->SetUnorderedAccess(0, m_clusterAABBBuffer.get());
@@ -307,8 +280,8 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
 
     // Unbind cluster buffers from pixel shader before using them as UAVs
     // This prevents D3D11 resource hazard warnings
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 10, nullptr);
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 11, nullptr);
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 8, nullptr);
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 9, nullptr);
 
     // Gather all lights (Point + Spot) from scene
     std::vector<SGpuLight> gpuLights;
@@ -397,13 +370,13 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
     const uint32_t zeroValues[4] = {0, 0, 0, 0};
     cmdList->ClearUnorderedAccessViewUint(m_globalCounterBuffer.get(), zeroValues);
 
-    // Build constant buffer for light culling (use SetConstantBufferData for DX12 compatibility)
-    SLightCullingCB cullCB = {};
-    XMStoreFloat4x4(&cullCB.view, XMMatrixTranspose(view));
-    cullCB.numLights = (uint32_t)gpuLights.size();
-    cullCB.numClustersX = m_numClustersX;
-    cullCB.numClustersY = m_numClustersY;
-    cullCB.numClustersZ = ClusteredConfig::DEPTH_SLICES;
+    // Build constant buffer data for light culling
+    SLightCullingCB cb{};
+    XMStoreFloat4x4(&cb.view, XMMatrixTranspose(view));
+    cb.numLights = (uint32_t)gpuLights.size();
+    cb.numClustersX = m_numClustersX;
+    cb.numClustersY = m_numClustersY;
+    cb.numClustersZ = ClusteredConfig::DEPTH_SLICES;
 
     // Create compute pipeline state for CullLights
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -413,7 +386,7 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
 
     // Bind resources
     cmdList->SetPipelineState(cullLightsPSO.get());
-    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cullCB, sizeof(SLightCullingCB));
+    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(SLightCullingCB));
     cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 0, m_pointLightBuffer.get());
     cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 1, m_clusterAABBBuffer.get());
     cmdList->SetUnorderedAccess(0, m_clusterDataBuffer.get());
@@ -436,10 +409,19 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
 void CClusteredLightingPass::BindToMainPass(ICommandList* cmdList) {
     if (!cmdList) return;
 
-    // Bind cluster data to pixel shader slots t10, t11, t12
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 10, m_clusterDataBuffer.get());
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 11, m_compactLightListBuffer.get());
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 12, m_pointLightBuffer.get());
+    // Bind clustered params constant buffer (b3)
+    CB_ClusteredParams clusteredParams{};
+    clusteredParams.nearZ = m_cachedNearZ;
+    clusteredParams.farZ = m_cachedFarZ;
+    clusteredParams.numClustersX = m_numClustersX;
+    clusteredParams.numClustersY = m_numClustersY;
+    clusteredParams.numClustersZ = GetNumClustersZ();
+    cmdList->SetConstantBufferData(EShaderStage::Pixel, 3, &clusteredParams, sizeof(CB_ClusteredParams));
+
+    // Bind cluster data to pixel shader slots t8, t9, t10 (contiguous after IBL at t5-t7)
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 8, m_clusterDataBuffer.get());
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 9, m_compactLightListBuffer.get());
+    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 10, m_pointLightBuffer.get());
 }
 
 void CClusteredLightingPass::RenderDebug(ICommandList* cmdList) {

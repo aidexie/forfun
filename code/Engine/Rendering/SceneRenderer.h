@@ -2,13 +2,13 @@
 #include <DirectXMath.h>
 #include <memory>
 #include <cstdint>
-#include "ClusteredLightingPass.h"
 #include "ShadowPass.h"
 #include "RHI/RHIResources.h"
 
 // Forward declarations
 class CScene;
 class CCamera;
+class CClusteredLightingPass;
 
 // ============================================
 // CSceneRenderer - 核心场景渲染器
@@ -48,6 +48,7 @@ public:
     // - w, h: 渲染分辨率
     // - dt: Delta time
     // - shadowData: 阴影数据（可选，nullptr = 无阴影）
+    // - clusteredLighting: 聚类光照 Pass（用于绑定光照数据）
     void Render(
         const CCamera& camera,
         CScene& scene,
@@ -55,11 +56,9 @@ public:
         RHI::ITexture* depthRT,
         uint32_t w, uint32_t h,
         float dt,
-        const CShadowPass::Output* shadowData
+        const CShadowPass::Output* shadowData,
+        CClusteredLightingPass* clusteredLighting
     );
-
-    // 访问内部 Pass（用于编辑器调试）
-    CClusteredLightingPass& GetClusteredLightingPass() { return m_clusteredLighting; }
 
 private:
     // Internal rendering stages
@@ -87,11 +86,7 @@ private:
     // Constant buffers
     std::unique_ptr<RHI::IBuffer> m_cbFrame;
     std::unique_ptr<RHI::IBuffer> m_cbObj;
-    std::unique_ptr<RHI::IBuffer> m_cbClusteredParams;
 
     // Samplers
     std::unique_ptr<RHI::ISampler> m_sampler;
-
-    // Clustered lighting
-    CClusteredLightingPass m_clusteredLighting;
 };

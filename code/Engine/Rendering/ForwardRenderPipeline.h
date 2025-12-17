@@ -5,6 +5,7 @@
 #include "PostProcessPass.h"
 #include "DebugLinePass.h"
 #include "GridPass.h"
+#include "ClusteredLightingPass.h"
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIHelpers.h"
 
@@ -14,11 +15,12 @@
 // 完整的 Forward 渲染流程实现
 //
 // 渲染顺序：
-// 1. Shadow Pass (if showFlags.Shadows)
-// 2. Scene Rendering (Opaque + Transparent + Skybox) → HDR RT
-// 3. Post-Processing (if showFlags.PostProcessing) → LDR RT
-// 4. Debug Lines (if showFlags.DebugLines) → LDR RT
-// 5. Grid (if showFlags.Grid) → LDR RT
+// 1. Clustered Lighting (compute - build grid, cull lights)
+// 2. Shadow Pass (if showFlags.Shadows)
+// 3. Scene Rendering (Opaque + Transparent + Skybox) → HDR RT
+// 4. Post-Processing (if showFlags.PostProcessing) → LDR RT
+// 5. Debug Lines (if showFlags.DebugLines) → LDR RT
+// 6. Grid (if showFlags.Grid) → LDR RT
 //
 // 使用场景：
 // - 编辑器 Scene View（完整功能）
@@ -53,6 +55,7 @@ public:
     // 访问内部 Pass（用于特殊需求）
     CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
     CSceneRenderer& GetSceneRenderer() { return m_sceneRenderer; }
+    CClusteredLightingPass& GetClusteredLightingPass() { return m_clusteredLighting; }
 
 private:
     // 确保离屏目标尺寸正确
@@ -61,6 +64,7 @@ private:
     // ============================================
     // 渲染 Pass
     // ============================================
+    CClusteredLightingPass m_clusteredLighting;
     CShadowPass m_shadowPass;
     CSceneRenderer m_sceneRenderer;
     CDebugLinePass m_debugLinePass;

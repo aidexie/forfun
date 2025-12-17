@@ -35,10 +35,10 @@ struct GpuLight {
     float2 padding;      // Align to 16 bytes
 };
 
-// Cluster data bound to t10, t11, t12
-StructuredBuffer<ClusterData> g_clusterData : register(t10);
-StructuredBuffer<uint> g_compactLightList : register(t11);
-StructuredBuffer<GpuLight> g_lights : register(t12);  // All lights (Point + Spot)
+// Cluster data bound to t8, t9, t10 (contiguous after IBL at t5-t7)
+StructuredBuffer<ClusterData> g_clusterData : register(t8);
+StructuredBuffer<uint> g_compactLightList : register(t9);
+StructuredBuffer<GpuLight> g_lights : register(t10);  // All lights (Point + Spot)
 
 // Additional cbuffer for cluster parameters (shared with MainPass)
 cbuffer ClusteredParams : register(b3) {

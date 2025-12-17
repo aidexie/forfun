@@ -219,7 +219,7 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
             const char* debugModes[] = { "None", "Light Count Heatmap", "Cluster AABB" };
 
             if (ImGui::Combo("Debug Mode", &debugModeIndex, debugModes, IM_ARRAYSIZE(debugModes))) {
-                auto& clusteredPass = pipeline->GetSceneRenderer().GetClusteredLightingPass();
+                auto& clusteredPass = pipeline->GetClusteredLightingPass();
                 switch (debugModeIndex) {
                     case 0: clusteredPass.SetDebugMode(CClusteredLightingPass::EDebugMode::None); break;
                     case 1: clusteredPass.SetDebugMode(CClusteredLightingPass::EDebugMode::LightCountHeatmap); break;

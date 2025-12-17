@@ -1,4 +1,5 @@
 #include "SceneRenderer.h"
+#include "ClusteredLightingPass.h"
 #include "ShadowPass.h"
 #include "ShowFlags.h"
 #include "ReflectionProbeManager.h"
@@ -90,15 +91,6 @@ struct alignas(16) CB_Object {
     float alphaCutoff;
     int probeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
     XMFLOAT2 _padObj;
-};
-
-struct alignas(16) CB_ClusteredParams {
-    float nearZ;
-    float farZ;
-    uint32_t numClustersX;
-    uint32_t numClustersY;
-    uint32_t numClustersZ;
-    uint32_t _pad[3];
 };
 
 // 更新帧常量 via RHI Map/Unmap
@@ -306,8 +298,6 @@ bool CSceneRenderer::Initialize()
 
     createPipeline();
 
-    m_clusteredLighting.Initialize();
-
     return true;
 }
 
@@ -315,7 +305,6 @@ void CSceneRenderer::Shutdown()
 {
     m_cbFrame.reset();
     m_cbObj.reset();
-    m_cbClusteredParams.reset();
     m_vs.reset();
     m_ps.reset();
     m_psoOpaque.reset();
@@ -330,7 +319,8 @@ void CSceneRenderer::Render(
     RHI::ITexture* depthRT,
     uint32_t w, uint32_t h,
     float dt,
-    const CShadowPass::Output* shadowData)
+    const CShadowPass::Output* shadowData,
+    CClusteredLightingPass* clusteredLighting)
 {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
@@ -391,25 +381,9 @@ void CSceneRenderer::Render(
     // Bind sampler (s0)
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
-    // Skip clustered lighting in DX12 mode for now
-    if (!dx12Mode) {
-        // Clustered lighting setup
-        {
-            RHI::CScopedDebugEvent evt(cmdList, L"clustered Lighting");
-            m_clusteredLighting.Resize(w, h);
-            m_clusteredLighting.BuildClusterGrid(cmdList, proj, camera.nearZ, camera.farZ);
-            m_clusteredLighting.CullLights(cmdList, &scene, view);
-        }
-        // Update clustered params constant buffer (b3)
-        CB_ClusteredParams clusteredParams{};
-        clusteredParams.nearZ = camera.nearZ;
-        clusteredParams.farZ = camera.farZ;
-        clusteredParams.numClustersX = m_clusteredLighting.GetNumClustersX();
-        clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
-        clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
-
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 3, &clusteredParams, sizeof(CB_ClusteredParams));
-        m_clusteredLighting.BindToMainPass(cmdList);
+    // Bind clustered lighting results (computed in ForwardRenderPipeline)
+    if (clusteredLighting) {
+        clusteredLighting->BindToMainPass(cmdList);
     }
 
     // Collect render items
@@ -569,12 +543,6 @@ void CSceneRenderer::createPipeline()
     cbObjDesc.usage = EBufferUsage::Constant;
     cbObjDesc.cpuAccess = ECPUAccess::Write;
     m_cbObj.reset(ctx->CreateBuffer(cbObjDesc, nullptr));
-
-    BufferDesc cbClusteredDesc;
-    cbClusteredDesc.size = sizeof(CB_ClusteredParams);
-    cbClusteredDesc.usage = EBufferUsage::Constant;
-    cbClusteredDesc.cpuAccess = ECPUAccess::Write;
-    m_cbClusteredParams.reset(ctx->CreateBuffer(cbClusteredDesc, nullptr));
 
     // ============================================
     // Sampler
