@@ -125,6 +125,9 @@ public:
     // Get default UAV (mip 0) - returns full handle for efficient binding
     SDescriptorHandle GetOrCreateUAV();
 
+    // Get UAV for specific mip level - returns full handle for efficient binding
+    SDescriptorHandle GetOrCreateUAVSlice(uint32_t mipLevel);
+
     // Check if views exist
     bool HasSRV() const { return m_defaultSRV.IsValid(); }
     bool HasRTV() const { return m_defaultRTV.IsValid(); }
@@ -172,6 +175,7 @@ private:
     std::unordered_map<ViewKey, SDescriptorHandle, ViewKeyHash> m_srvCache;
     std::unordered_map<ViewKey, SDescriptorHandle, ViewKeyHash> m_rtvCache;
     std::unordered_map<uint32_t, SDescriptorHandle> m_dsvCache;  // keyed by arraySlice
+    std::unordered_map<uint32_t, SDescriptorHandle> m_uavCache;  // keyed by mipLevel
 };
 
 // ============================================
@@ -240,6 +244,9 @@ private:
 
 // Convert RHI format to DXGI format
 DXGI_FORMAT ToDXGIFormat(ETextureFormat format);
+
+// Convert DXGI format to RHI format
+ETextureFormat FromDXGIFormat(DXGI_FORMAT format);
 
 // Convert RHI resource state to D3D12 resource state
 D3D12_RESOURCE_STATES ToD3D12ResourceState(EResourceState state);

@@ -163,11 +163,12 @@ void CClusteredLightingPass::CreateBuffers() {
     }
 
     // Global Counter Buffer (single uint for atomic operations) - needs UAV only
+    // Note: Use Raw buffer (not Structured) to allow ClearUnorderedAccessViewUint
     {
         BufferDesc desc;
         desc.size = sizeof(uint32_t);
-        desc.usage = EBufferUsage::Structured | EBufferUsage::UnorderedAccess;
-        desc.structureByteStride = sizeof(uint32_t);
+        desc.usage = EBufferUsage::UnorderedAccess;  // Raw UAV buffer, not Structured
+        desc.structureByteStride = 0;  // 0 = raw buffer (required for ClearUnorderedAccessViewUint)
         desc.debugName = "GlobalCounterBuffer";
 
         m_globalCounterBuffer.reset(ctx->CreateBuffer(desc));

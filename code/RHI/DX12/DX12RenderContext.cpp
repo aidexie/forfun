@@ -521,13 +521,53 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
     resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     resourceDesc.Flags = GetResourceFlags(desc.usage);
 
+    // GenerateMips support: Add UAV flag and handle SRGB format conversion
+    const bool needsGenerateMips = (desc.miscFlags & ETextureMiscFlags::GenerateMips);
+    DXGI_FORMAT srvFormat = resourceDesc.Format;  // Default: same as resource
+    DXGI_FORMAT uavFormat = resourceDesc.Format;  // Default: same as resource
+
+    if (needsGenerateMips) {
+        // Add UAV flag for mipmap generation via compute shader
+        resourceDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        // Handle SRGB formats: UAV doesn't support SRGB, so use TYPELESS resource
+        // with SRGB view for SRV and UNORM view for UAV
+        switch (resourceDesc.Format) {
+            case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+                resourceDesc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+                srvFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;  // SRV with sRGB for correct sampling
+                uavFormat = DXGI_FORMAT_R8G8B8A8_UNORM;       // UAV must be UNORM
+                break;
+            case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+                resourceDesc.Format = DXGI_FORMAT_B8G8R8A8_TYPELESS;
+                srvFormat = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+                uavFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+                break;
+            // Non-SRGB formats: use same format for SRV and UAV
+            case DXGI_FORMAT_R8G8B8A8_UNORM:
+            case DXGI_FORMAT_R16G16B16A16_FLOAT:
+            case DXGI_FORMAT_R32G32B32A32_FLOAT:
+                // These formats support UAV directly
+                break;
+            default:
+                CFFLog::Warning("[DX12] GenerateMips requested for unsupported format: %d", resourceDesc.Format);
+                break;
+        }
+    }
+
     D3D12_RESOURCE_STATES initialState = GetInitialResourceState(heapProps.Type, desc.usage);
 
     // Clear value for render targets / depth stencil
+    // NOTE: For TYPELESS resources (e.g., GenerateMips with SRGB), we must use a concrete format
     D3D12_CLEAR_VALUE* pClearValue = nullptr;
     D3D12_CLEAR_VALUE clearValue = {};
     if (desc.usage & ETextureUsage::RenderTarget) {
-        clearValue.Format = (desc.rtvFormat != ETextureFormat::Unknown) ? ToDXGIFormat(desc.rtvFormat) : resourceDesc.Format;
+        // For TYPELESS resources with GenerateMips, use the SRV format which is concrete
+        if (needsGenerateMips && srvFormat != resourceDesc.Format) {
+            clearValue.Format = srvFormat;  // Use concrete SRGB format
+        } else {
+            clearValue.Format = (desc.rtvFormat != ETextureFormat::Unknown) ? ToDXGIFormat(desc.rtvFormat) : resourceDesc.Format;
+        }
         clearValue.Color[0] = 0.0f;
         clearValue.Color[1] = 0.0f;
         clearValue.Color[2] = 0.0f;
@@ -561,8 +601,30 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
         resource->SetName(wname);
     }
 
-    // Create texture wrapper
-    CDX12Texture* texture = new CDX12Texture(resource.Get(), desc, device);
+    // Create texture wrapper with format overrides for GenerateMips
+    TextureDesc finalDesc = desc;
+    if (needsGenerateMips) {
+        // Update usage to reflect actual UAV capability
+        // (TextureLoader may only set RenderTarget for DX11 compatibility)
+        finalDesc.usage = finalDesc.usage | ETextureUsage::UnorderedAccess;
+
+        if (srvFormat != resourceDesc.Format) {
+            // Override SRV/UAV formats for TYPELESS resource
+            finalDesc.srvFormat = FromDXGIFormat(srvFormat);
+            finalDesc.uavFormat = FromDXGIFormat(uavFormat);
+        }
+    }
+
+    // If mipLevels was 0, DX12 auto-calculated the actual mip count
+    // Query the actual value from the created resource
+    if (desc.mipLevels == 0) {
+        D3D12_RESOURCE_DESC actualDesc = resource->GetDesc();
+        finalDesc.mipLevels = actualDesc.MipLevels;
+        CFFLog::Info("[DX12] Auto-calculated mip levels: %u (for %ux%u texture)",
+                     finalDesc.mipLevels, desc.width, desc.height);
+    }
+
+    CDX12Texture* texture = new CDX12Texture(resource.Get(), finalDesc, device);
     resource.Detach();
 
     // Upload initial data if provided

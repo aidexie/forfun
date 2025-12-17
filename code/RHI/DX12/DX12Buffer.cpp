@@ -144,13 +144,25 @@ void CDX12Buffer::CreateUAV() {
     }
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.Format = DXGI_FORMAT_UNKNOWN;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
     uavDesc.Buffer.FirstElement = 0;
-    uavDesc.Buffer.NumElements = m_desc.size / m_desc.structureByteStride;
-    uavDesc.Buffer.StructureByteStride = m_desc.structureByteStride;
     uavDesc.Buffer.CounterOffsetInBytes = 0;
-    uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+
+    if (m_desc.structureByteStride > 0) {
+        // Structured buffer UAV
+        uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+        uavDesc.Buffer.NumElements = m_desc.size / m_desc.structureByteStride;
+        uavDesc.Buffer.StructureByteStride = m_desc.structureByteStride;
+        uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+    } else {
+        // Raw buffer UAV (for ClearUnorderedAccessViewUint, etc.)
+        // Raw buffers use R32_TYPELESS format and RAW flag
+        // NumElements is count of 32-bit elements
+        uavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+        uavDesc.Buffer.NumElements = (m_desc.size + 3) / 4;  // Round up to 4-byte elements
+        uavDesc.Buffer.StructureByteStride = 0;
+        uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+    }
 
     m_device->CreateUnorderedAccessView(m_resource.Get(), nullptr, &uavDesc, m_uavHandle.cpuHandle);
 }
@@ -189,6 +201,39 @@ DXGI_FORMAT ToDXGIFormat(ETextureFormat format) {
         default:
             CFFLog::Warning("[DX12] Unknown texture format: %d", static_cast<int>(format));
             return DXGI_FORMAT_UNKNOWN;
+    }
+}
+
+ETextureFormat FromDXGIFormat(DXGI_FORMAT format) {
+    switch (format) {
+        case DXGI_FORMAT_UNKNOWN:               return ETextureFormat::Unknown;
+        case DXGI_FORMAT_R8_UNORM:              return ETextureFormat::R8_UNORM;
+        case DXGI_FORMAT_R8G8B8A8_UNORM:        return ETextureFormat::R8G8B8A8_UNORM;
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:   return ETextureFormat::R8G8B8A8_UNORM_SRGB;
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:     return ETextureFormat::R8G8B8A8_TYPELESS;
+        case DXGI_FORMAT_R16G16_FLOAT:          return ETextureFormat::R16G16_FLOAT;
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:    return ETextureFormat::R16G16B16A16_FLOAT;
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:    return ETextureFormat::R32G32B32A32_FLOAT;
+        case DXGI_FORMAT_B8G8R8A8_UNORM:        return ETextureFormat::B8G8R8A8_UNORM;
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:   return ETextureFormat::B8G8R8A8_UNORM_SRGB;
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:     return ETextureFormat::D24_UNORM_S8_UINT;
+        case DXGI_FORMAT_D32_FLOAT:             return ETextureFormat::D32_FLOAT;
+        case DXGI_FORMAT_R24G8_TYPELESS:        return ETextureFormat::R24G8_TYPELESS;
+        case DXGI_FORMAT_R32_TYPELESS:          return ETextureFormat::R32_TYPELESS;
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS: return ETextureFormat::R24_UNORM_X8_TYPELESS;
+        case DXGI_FORMAT_BC1_UNORM:             return ETextureFormat::BC1_UNORM;
+        case DXGI_FORMAT_BC1_UNORM_SRGB:        return ETextureFormat::BC1_UNORM_SRGB;
+        case DXGI_FORMAT_BC3_UNORM:             return ETextureFormat::BC3_UNORM;
+        case DXGI_FORMAT_BC3_UNORM_SRGB:        return ETextureFormat::BC3_UNORM_SRGB;
+        case DXGI_FORMAT_BC5_UNORM:             return ETextureFormat::BC5_UNORM;
+        case DXGI_FORMAT_BC7_UNORM:             return ETextureFormat::BC7_UNORM;
+        case DXGI_FORMAT_BC7_UNORM_SRGB:        return ETextureFormat::BC7_UNORM_SRGB;
+        case DXGI_FORMAT_R32_UINT:              return ETextureFormat::R32_UINT;
+        case DXGI_FORMAT_R32G32_UINT:           return ETextureFormat::R32G32_UINT;
+        case DXGI_FORMAT_R32G32B32A32_UINT:     return ETextureFormat::R32G32B32A32_UINT;
+        default:
+            CFFLog::Warning("[DX12] Unknown DXGI format: %d", static_cast<int>(format));
+            return ETextureFormat::Unknown;
     }
 }
 

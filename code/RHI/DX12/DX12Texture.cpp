@@ -213,6 +213,24 @@ SDescriptorHandle CDX12Texture::GetOrCreateUAV() {
     return m_defaultUAV;
 }
 
+SDescriptorHandle CDX12Texture::GetOrCreateUAVSlice(uint32_t mipLevel) {
+    // Mip 0 uses the default UAV
+    if (mipLevel == 0) {
+        return GetOrCreateUAV();
+    }
+
+    // Check cache for this mip level
+    auto it = m_uavCache.find(mipLevel);
+    if (it != m_uavCache.end()) {
+        return it->second;
+    }
+
+    // Create new UAV for this mip level
+    SDescriptorHandle handle = CreateUAV(mipLevel);
+    m_uavCache[mipLevel] = handle;
+    return handle;
+}
+
 SDescriptorHandle CDX12Texture::CreateSRV(uint32_t mipLevel, uint32_t numMips, uint32_t arraySlice, uint32_t numSlices) {
     // Allocate from CPU-only heap - will be copied to GPU staging at draw time
     SDescriptorHandle handle = CDX12DescriptorHeapManager::Instance().AllocateCBVSRVUAV();

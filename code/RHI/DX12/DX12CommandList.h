@@ -4,6 +4,8 @@
 #include "DX12ResourceStateTracker.h"
 #include "DX12DynamicBuffer.h"
 #include "../ICommandList.h"
+#include "../RHIResources.h"
+#include <memory>
 
 // ============================================
 // DX12 Command List Implementation
@@ -150,6 +152,16 @@ private:
 
     // Dynamic constant buffer ring (owned by RenderContext, set during initialization)
     CDX12DynamicBufferRing* m_dynamicBuffer = nullptr;
+
+    // GenerateMips resources (lazily initialized)
+    std::unique_ptr<IShader> m_generateMipsCS;      // For array/cubemap textures
+    std::unique_ptr<IShader> m_generateMips2DCS;    // For 2D textures
+    std::unique_ptr<IPipelineState> m_generateMipsPSO;
+    std::unique_ptr<IPipelineState> m_generateMips2DPSO;
+    std::unique_ptr<ISampler> m_generateMipsSampler;
+
+    // Initialize GenerateMips resources on first use
+    bool EnsureGenerateMipsResources();
 
 public:
     // Set dynamic buffer ring (called by RenderContext)

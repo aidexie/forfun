@@ -167,6 +167,9 @@ void CDebugLinePass::CreatePipelineState() {
     // Primitive topology
     psoDesc.primitiveTopology = EPrimitiveTopology::LineList;
 
+    // Render target format: LDR uses R8G8B8A8_UNORM_SRGB
+    psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
+
     m_pso.reset(renderContext->CreatePipelineState(psoDesc));
 }
 
