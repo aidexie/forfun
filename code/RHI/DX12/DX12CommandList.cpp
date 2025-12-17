@@ -308,17 +308,6 @@ void CDX12CommandList::SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint
     m_commandList->IASetIndexBuffer(&ibv);
 }
 
-void CDX12CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) {
-    if (!buffer || slot >= MAX_CBV_SLOTS) return;
-
-    CDX12Buffer* dx12Buffer = static_cast<CDX12Buffer*>(buffer);
-
-    // Store for deferred binding (will be bound in BindPendingResources before draw)
-    // This allows SetConstantBuffer to be called before SetPipelineState
-    m_pendingCBVs[slot] = dx12Buffer->GetGPUVirtualAddress();
-    m_cbvDirty = true;
-}
-
 bool CDX12CommandList::SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) {
     if (!data || size == 0 || slot >= MAX_CBV_SLOTS) return false;
 

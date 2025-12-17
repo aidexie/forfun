@@ -91,7 +91,7 @@ class ICommandList {
     // 资源绑定
     void SetVertexBuffer(uint32_t slot, IBuffer* buffer, uint32_t stride, uint32_t offset = 0);
     void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0);
-    void SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer);
+    bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size);
     void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture);
     void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer);
     void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler);
@@ -242,7 +242,7 @@ cmd->SetRenderTargets(1, rts, depthBuffer);
 
 // 绘制
 cmd->SetPipelineState(pso);
-cmd->SetConstantBuffer(RHI::EShaderStage::Vertex, 0, cbFrame.get());
+cmd->SetConstantBufferData(RHI::EShaderStage::Vertex, 0, &frameData, sizeof(frameData));
 cmd->SetShaderResource(RHI::EShaderStage::Pixel, 0, albedoTexture);
 cmd->DrawIndexed(indexCount);
 

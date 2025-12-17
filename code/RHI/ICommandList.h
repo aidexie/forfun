@@ -68,15 +68,6 @@ public:
     // Set index buffer
     virtual void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0) = 0;
 
-    // [DEPRECATED] Set constant buffer - DO NOT USE for per-frame/per-draw data
-    // Problem: In DX12, binding a buffer binds its GPU virtual address directly.
-    // If the buffer content changes every frame (via Map/Unmap), Frame N+1 may
-    // overwrite data while Frame N's GPU work is still reading from the same address.
-    // Use SetConstantBufferData() instead - it allocates from a per-frame ring buffer,
-    // ensuring each frame/draw gets isolated memory.
-    // TODO: Remove this function once all usages are migrated to SetConstantBufferData
-    virtual void SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) = 0;
-
     // Set constant buffer data directly (PREFERRED for per-frame/per-draw data)
     // This allocates from a per-frame ring buffer and binds the data inline
     // - DX12: Allocates from CDX12DynamicBufferRing, each call gets unique GPU address

@@ -239,31 +239,6 @@ void CDX11CommandList::SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint
     m_context->IASetIndexBuffer(d3dBuffer, ToDXGIFormat(format), offset);
 }
 
-void CDX11CommandList::SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) {
-    ID3D11Buffer* d3dBuffer = buffer ? static_cast<CDX11Buffer*>(buffer)->GetD3D11Buffer() : nullptr;
-
-    switch (stage) {
-        case EShaderStage::Vertex:
-            m_context->VSSetConstantBuffers(slot, 1, &d3dBuffer);
-            break;
-        case EShaderStage::Pixel:
-            m_context->PSSetConstantBuffers(slot, 1, &d3dBuffer);
-            break;
-        case EShaderStage::Compute:
-            m_context->CSSetConstantBuffers(slot, 1, &d3dBuffer);
-            break;
-        case EShaderStage::Geometry:
-            m_context->GSSetConstantBuffers(slot, 1, &d3dBuffer);
-            break;
-        case EShaderStage::Hull:
-            m_context->HSSetConstantBuffers(slot, 1, &d3dBuffer);
-            break;
-        case EShaderStage::Domain:
-            m_context->DSSetConstantBuffers(slot, 1, &d3dBuffer);
-            break;
-    }
-}
-
 bool CDX11CommandList::SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) {
     if (!data || size == 0) return false;
 

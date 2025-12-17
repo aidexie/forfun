@@ -37,7 +37,6 @@ public:
     // Resource Binding
     void SetVertexBuffer(uint32_t slot, IBuffer* buffer, uint32_t stride, uint32_t offset) override;
     void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset) override;
-    void SetConstantBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
     bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) override;
     void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) override;
     void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
