@@ -78,6 +78,7 @@ public:
 
     // Initialize with RHI (no longer needs device parameter)
     void Initialize();
+    void Shutdown();
     void Resize(uint32_t width, uint32_t height);
 
     // Build cluster grid (view-space AABBs for all clusters)

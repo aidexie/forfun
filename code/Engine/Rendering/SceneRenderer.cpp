@@ -339,10 +339,6 @@ void CSceneRenderer::Render(
     XMMATRIX proj = camera.GetProjectionMatrix();
     XMVECTOR eye = XMLoadFloat3(&camera.position);
 
-    // DX12 minimal mode: enable features incrementally
-    // TODO: Remove this flag once all DX12 features are working
-    const bool dx12Mode = (CRHIManager::Instance().GetBackend() == EBackend::DX12);
-
     // Find DirectionalLight
     SDirectionalLight* dirLight = nullptr;
     for (auto& objPtr : scene.GetWorld().Objects()) {
@@ -366,17 +362,10 @@ void CSceneRenderer::Render(
     // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
     auto& probeManager = scene.GetProbeManager();
     probeManager.Bind(cmdList);
-    // Skip advanced features in DX12 mode for now
-    if (!dx12Mode) {
 
-        // Bind Light Probes (t15, b5)
-        auto& lightProbeManager = scene.GetLightProbeManager();
-        lightProbeManager.Bind(cmdList);
-
-        // Bind Volumetric Lightmap (t20-t24, b6)
-        auto& volumetricLightmap = scene.GetVolumetricLightmap();
-        volumetricLightmap.Bind(cmdList);
-    }
+    // Bind Volumetric Lightmap (t20-t24, b6)
+    auto& volumetricLightmap = scene.GetVolumetricLightmap();
+    volumetricLightmap.Bind(cmdList);
 
     // Bind sampler (s0)
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());

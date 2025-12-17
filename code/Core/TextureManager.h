@@ -55,6 +55,11 @@ public:
      */
     void Clear();
 
+    /**
+     * Shutdown - release all resources (call before RHI shutdown)
+     */
+    void Shutdown();
+
 private:
     CTextureManager();
     ~CTextureManager() = default;

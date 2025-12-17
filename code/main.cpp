@@ -38,6 +38,7 @@
 #include "Scene.h"    // 面板的场景数据结构
 #include "Camera.h"   // CCamera（Viewport 面板用）
 #include "EditorContext.h"  // ✅ 编辑器交互管理（相机控制）
+#include "Core/TextureManager.h"  // Texture cache manager
 #include "Components/DirectionalLight.h"
 #include "DebugPaths.h"  // Debug output directories
 #include "FFLog.h"  // Logging system
@@ -436,7 +437,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     if (g_renderConfig.backend == RHI::EBackend::DX11) {
         if (!activeTest) {
             //std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
-            std::string scenePath = FFPath::GetAbsolutePath("scenes/simple.scene");
+            std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_step_by_step.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;
         }
@@ -514,7 +515,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
             // Load default scene (deferred for DX12)
             if (!defaultSceneLoaded && !activeTest) {
-                std::string scenePath = FFPath::GetAbsolutePath("scenes/simple.scene");
+                std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
                 CScene::Instance().LoadFromFile(scenePath);
                 defaultSceneLoaded = true;
             }
@@ -739,6 +740,10 @@ cleanup:
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
     }
+
+    // Shutdown singleton managers before RHI (they hold GPU resources)
+    CFFLog::Info("Shutting down TextureManager...");
+    CTextureManager::Instance().Shutdown();
 
     if (dx11Initialized) {
         CFFLog::Info("Shutting down RHI...");

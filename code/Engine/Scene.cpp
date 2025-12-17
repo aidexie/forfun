@@ -151,6 +151,7 @@ void CScene::ReloadLightProbesFromScene() {
 
 void CScene::Shutdown() {
     CFFLog::Info("Scene: Shutting down...");
+    m_volumetricLightmap.Shutdown();
     m_lightProbeManager.Shutdown();
     m_probeManager.Shutdown();
     m_skybox.Shutdown();

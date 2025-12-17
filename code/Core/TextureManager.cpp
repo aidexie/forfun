@@ -76,6 +76,14 @@ void CTextureManager::Clear() {
     CFFLog::Info("TextureManager cache cleared");
 }
 
+void CTextureManager::Shutdown() {
+    m_textures.clear();
+    m_defaultWhite.reset();
+    m_defaultNormal.reset();
+    m_defaultBlack.reset();
+    CFFLog::Info("TextureManager shutdown complete");
+}
+
 void CTextureManager::CreateDefaultTextures() {
     RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!rhiCtx) {

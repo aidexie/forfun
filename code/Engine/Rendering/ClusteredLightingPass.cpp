@@ -53,6 +53,20 @@ void CClusteredLightingPass::Initialize() {
     CFFLog::Info("[ClusteredLightingPass] Initialized successfully");
 }
 
+void CClusteredLightingPass::Shutdown() {
+    m_clusterAABBBuffer.reset();
+    m_clusterDataBuffer.reset();
+    m_compactLightListBuffer.reset();
+    m_pointLightBuffer.reset();
+    m_globalCounterBuffer.reset();
+    m_buildClusterGridCS.reset();
+    m_cullLightsCS.reset();
+    m_debugVS.reset();
+    m_debugHeatmapPS.reset();
+    m_debugAABBPS.reset();
+    m_initialized = false;
+}
+
 void CClusteredLightingPass::Resize(uint32_t width, uint32_t height) {
     // Check if size actually changed
     if (m_screenWidth == width && m_screenHeight == height) {

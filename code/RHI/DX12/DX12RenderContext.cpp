@@ -625,12 +625,20 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
             uint8_t* uploadDst = static_cast<uint8_t*>(uploadAlloc.cpuAddress) + originalOffset;
             const uint8_t* srcData = static_cast<const uint8_t*>(subresources[i].pData);
 
-            for (UINT row = 0; row < numRows[i]; ++row) {
-                memcpy(
-                    uploadDst + row * footprint.Footprint.RowPitch,
-                    srcData + row * subresources[i].rowPitch,
-                    rowSizeInBytes[i]
-                );
+            // For 3D textures, numRows = height * depth, but source data has slice boundaries
+            // We need to handle depth slices explicitly
+            UINT textureDepth = footprint.Footprint.Depth;
+            UINT rowsPerSlice = numRows[i] / textureDepth;  // = height for 3D textures
+            UINT64 dstSlicePitch = static_cast<UINT64>(footprint.Footprint.RowPitch) * rowsPerSlice;
+
+            for (UINT slice = 0; slice < textureDepth; ++slice) {
+                for (UINT row = 0; row < rowsPerSlice; ++row) {
+                    memcpy(
+                        uploadDst + slice * dstSlicePitch + row * footprint.Footprint.RowPitch,
+                        srcData + slice * subresources[i].slicePitch + row * subresources[i].rowPitch,
+                        rowSizeInBytes[i]
+                    );
+                }
             }
 
             // Set up copy locations

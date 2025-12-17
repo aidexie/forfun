@@ -38,6 +38,7 @@ bool CForwardRenderPipeline::Initialize()
 
 void CForwardRenderPipeline::Shutdown()
 {
+    m_clusteredLighting.Shutdown();
     m_shadowPass.Shutdown();
     m_sceneRenderer.Shutdown();
     m_postProcess.Shutdown();
