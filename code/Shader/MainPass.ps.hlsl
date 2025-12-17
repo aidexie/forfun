@@ -2,7 +2,6 @@
 // PBR rendering with CSM shadow mapping
 
 #include "ClusteredShading.hlsl"      // Clustered point light support
-#include "LightProbe.hlsl"            // Light Probe SH support
 #include "VolumetricLightmap.hlsl"    // Volumetric Lightmap (Per-Pixel GI)
 
 // Material textures (per-object, contiguous t0-t3)
@@ -251,7 +250,7 @@ float4 main(PSIn i) : SV_Target {
 
     // Shadow factor
     float shadowFactor = CalcShadowFactor(i.posWS, i.posLS0, i.posLS1, i.posLS2);
-
+    
     // Direct lighting (affected by shadow)
     float3 Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
     // return float4(F, 1.0); // TEMP: Return direct lighting only for testing

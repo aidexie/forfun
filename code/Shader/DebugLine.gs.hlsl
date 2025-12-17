@@ -1,7 +1,9 @@
 // DebugLine.gs.hlsl
 // Geometry Shader to expand lines into thick quads
 
-cbuffer CBPerFrame : register(b0) {
+// Use b1 to avoid slot conflict with VS (which uses b0 for viewProj)
+// DX12 uses unified CB slots across all stages, unlike DX11 per-stage slots
+cbuffer CBPerFrame : register(b1) {
     float2 gViewportSize;      // Viewport dimensions (width, height)
     float  gLineThickness;     // Line thickness in pixels
     float  gPadding;

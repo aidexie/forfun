@@ -73,12 +73,6 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     ensureOffscreen(ctx.width, ctx.height);
 
     // ============================================
-    // DX12 Minimal Test: Skip complex scene rendering, but allow post-processing
-    // TODO: Remove this flag once all features are working
-    // ============================================
-    const bool dx12MinimalMode = (RHI::CRHIManager::Instance().GetBackend() == RHI::EBackend::DX12);
-
-    // ============================================
     // 2. Clustered Lighting Pass (compute - build grid, cull lights)
     // ============================================
     if (ctx.showFlags.ClusteredLighting) {
@@ -156,7 +150,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 7. Debug Lines (if enabled)
     // ============================================
-    if (!dx12MinimalMode && ctx.showFlags.DebugLines) {
+    if (ctx.showFlags.DebugLines) {
         RHI::CScopedDebugEvent evt(cmdList, L"Debug Lines");
         // Rebind LDR RTV + HDR depth (Debug lines need depth test)
         RHI::ITexture* ldrRT = m_offLDR.get();
@@ -169,7 +163,7 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 8. Grid (if enabled)
     // ============================================
-    if (!dx12MinimalMode && ctx.showFlags.Grid) {
+    if (ctx.showFlags.Grid) {
         RHI::CScopedDebugEvent evt(cmdList, L"Grid");
         // Rebind LDR RTV + HDR depth (Grid needs depth test)
         RHI::ITexture* ldrRT = m_offLDR.get();

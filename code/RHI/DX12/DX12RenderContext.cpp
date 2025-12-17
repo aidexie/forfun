@@ -625,10 +625,10 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
             uint8_t* uploadDst = static_cast<uint8_t*>(uploadAlloc.cpuAddress) + originalOffset;
             const uint8_t* srcData = static_cast<const uint8_t*>(subresources[i].pData);
 
-            // For 3D textures, numRows = height * depth, but source data has slice boundaries
-            // We need to handle depth slices explicitly
+            // For 3D textures: numRows[i] = height (rows per slice), footprint.Footprint.Depth = depth
+            // For 2D textures: numRows[i] = height, footprint.Footprint.Depth = 1
             UINT textureDepth = footprint.Footprint.Depth;
-            UINT rowsPerSlice = numRows[i] / textureDepth;  // = height for 3D textures
+            UINT rowsPerSlice = numRows[i];  // numRows is already per-slice (= height)
             UINT64 dstSlicePitch = static_cast<UINT64>(footprint.Footprint.RowPitch) * rowsPerSlice;
 
             for (UINT slice = 0; slice < textureDepth; ++slice) {

@@ -38,14 +38,14 @@ cbuffer CB_VolumetricLightmap : register(b6)
 // ============================================
 // Resources
 // ============================================
-// t20: Indirection Texture (R32_UINT)
-// t21-23: Brick Atlas SH0/SH1/SH2 (R16G16B16A16_FLOAT)
-// t24: Brick Info Buffer
+// t11: Indirection Texture (R32_UINT)
+// t12-14: Brick Atlas SH0/SH1/SH2 (R16G16B16A16_FLOAT)
+// t15: Brick Info Buffer
 
-Texture3D<uint> g_IndirectionTexture : register(t20);
-Texture3D<float4> g_BrickAtlasSH0 : register(t21);
-Texture3D<float4> g_BrickAtlasSH1 : register(t22);
-Texture3D<float4> g_BrickAtlasSH2 : register(t23);
+Texture3D<uint> g_IndirectionTexture : register(t11);
+Texture3D<float4> g_BrickAtlasSH0 : register(t12);
+Texture3D<float4> g_BrickAtlasSH1 : register(t13);
+Texture3D<float4> g_BrickAtlasSH2 : register(t14);
 
 // Brick Info Structure (matches SBrickInfo in C++)
 struct BrickInfo
@@ -58,7 +58,7 @@ struct BrickInfo
     float _pad2;
 };
 
-StructuredBuffer<BrickInfo> g_BrickInfoBuffer : register(t24);
+StructuredBuffer<BrickInfo> g_BrickInfoBuffer : register(t15);
 
 // Sampler for trilinear interpolation
 SamplerState g_VLSampler : register(s2);

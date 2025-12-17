@@ -256,8 +256,9 @@ void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
     cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), stride, offset);
 
     // Use SetConstantBufferData for DX12 compatibility
+    // VS uses b0, GS uses b1 (DX12 has unified CB slots across stages)
     cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cbVS, sizeof(CBPerFrameVS));
-    cmdList->SetConstantBufferData(EShaderStage::Geometry, 0, &cbGS, sizeof(CBPerFrameGS));
+    cmdList->SetConstantBufferData(EShaderStage::Geometry, 1, &cbGS, sizeof(CBPerFrameGS));
 
     unsigned int vertexCount = static_cast<unsigned int>(m_dynamicLines.size());
     cmdList->Draw(vertexCount, 0);

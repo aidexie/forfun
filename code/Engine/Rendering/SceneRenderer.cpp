@@ -349,6 +349,7 @@ void CSceneRenderer::Render(
     // Update frame constants
     int diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
     auto cf = updateFrameConstants(m_cbFrame.get(), view, proj, camera.position, dirLight, shadowData, diffuseGIMode);
+    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cf, sizeof(cf));
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cf, sizeof(cf));
 
     // Bind shadow resources (t4=shadowMap, s1=shadowSampler)
@@ -400,6 +401,7 @@ void CSceneRenderer::Render(
         RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
 
         // Restore frame constants (b0) - Skybox overwrote it with its own CB
+        cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cf, sizeof(cf));
         cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cf, sizeof(cf));
 
         // Restore sampler (s0) - Skybox overwrote it

@@ -1034,11 +1034,11 @@ void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
     // 如果未启用或未烘焙，不绑定任何资源
     if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
         // 绑定空 SRV，避免 RTV/SRV 资源冲突
-        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, nullptr);
-        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, nullptr);
-        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, nullptr);
-        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, nullptr);
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 11, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 12, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 13, nullptr);
+        cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 14, nullptr);
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, nullptr);
         cmdList->SetSampler(RHI::EShaderStage::Pixel, 2, m_sampler.get());
         return;
     }
@@ -1067,24 +1067,24 @@ void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
 
     cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 6, &cb, sizeof(CB_VolumetricLightmap));
 
-    // 绑定纹理资源 (t20-t24)
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, m_indirectionTexture.get());
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, m_brickAtlasTexture[0].get());
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, m_brickAtlasTexture[1].get());
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, m_brickAtlasTexture[2].get());
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, m_brickInfoBuffer.get());
+    // 绑定纹理资源 (t11-t15)
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 11, m_indirectionTexture.get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 12, m_brickAtlasTexture[0].get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 13, m_brickAtlasTexture[1].get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 14, m_brickAtlasTexture[2].get());
+    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, m_brickInfoBuffer.get());
 
-    // 绑定采样器到 s3
+    // 绑定采样器到 s2
     cmdList->SetSampler(RHI::EShaderStage::Pixel, 2, m_sampler.get());
 }
 
 void CVolumetricLightmap::Unbind(RHI::ICommandList* cmdList)
 {
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, nullptr);
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 21, nullptr);
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, nullptr);
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, nullptr);
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 11, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 12, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 13, nullptr);
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 14, nullptr);
+    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, nullptr);
     // Note: SetConstantBufferData uses per-frame ring buffer, no need to unbind
 }
 

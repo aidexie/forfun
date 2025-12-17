@@ -36,8 +36,8 @@ constexpr uint32_t RTV_HEAP_SIZE = 128;
 constexpr uint32_t DSV_HEAP_SIZE = 32;
 
 // Staging ring configuration (owns its own GPU shader-visible heap)
-constexpr uint32_t SRV_STAGING_PER_FRAME = 600;        // SRV descriptors per frame
-constexpr uint32_t SAMPLER_STAGING_PER_FRAME = 64;     // Sampler descriptors per frame
+constexpr uint32_t SRV_STAGING_PER_FRAME = 2048;       // SRV descriptors per frame (increased for VL baking)
+constexpr uint32_t SAMPLER_STAGING_PER_FRAME = 128;    // Sampler descriptors per frame
 
 // ============================================
 // Error Handling
