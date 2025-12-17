@@ -102,7 +102,7 @@ struct alignas(16) CB_ClusteredParams {
 };
 
 // 更新帧常量 via RHI Map/Unmap
-void updateFrameConstants(
+CB_Frame updateFrameConstants(
     IBuffer* cbFrame,
     const XMMATRIX& view,
     const XMMATRIX& proj,
@@ -160,12 +160,7 @@ void updateFrameConstants(
 
     cf.camPosWS = camPos;
     cf.diffuseGIMode = diffuseGIMode;
-
-    void* mapped = cbFrame->Map();
-    if (mapped) {
-        memcpy(mapped, &cf, sizeof(CB_Frame));
-        cbFrame->Unmap();
-    }
+    return cf;
 }
 
 // 更新物体常量 via SetConstantBufferData (unified API for both DX11 and DX12)
@@ -367,11 +362,8 @@ void CSceneRenderer::Render(
 
     // Update frame constants
     int diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
-    updateFrameConstants(m_cbFrame.get(), view, proj, camera.position, dirLight, shadowData, diffuseGIMode);
-
-    // Bind frame constant buffer (b0)
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
-    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbFrame.get());
+    auto cf = updateFrameConstants(m_cbFrame.get(), view, proj, camera.position, dirLight, shadowData, diffuseGIMode);
+    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cf, sizeof(cf));
 
     // Bind shadow resources (t4=shadowMap, s1=shadowSampler)
     if (shadowData && shadowData->shadowMapArray) {
@@ -381,11 +373,11 @@ void CSceneRenderer::Render(
         cmdList->SetSampler(EShaderStage::Pixel, 1, shadowData->shadowSampler);
     }
 
-    if (!dx12Mode) {
-        // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
-        auto& probeManager = scene.GetProbeManager();
-        probeManager.Bind(cmdList);
+    // Bind BRDF LUT (t5) - modules use RHI::ICommandList*
+    auto& probeManager = scene.GetProbeManager();
+    probeManager.Bind(cmdList);
     // Skip advanced features in DX12 mode for now
+    if (!dx12Mode) {
 
         // Bind Light Probes (t15, b5)
         auto& lightProbeManager = scene.GetLightProbeManager();
@@ -428,7 +420,6 @@ void CSceneRenderer::Render(
     // Collect render items
     std::vector<RenderItem> opaqueItems;
     std::vector<RenderItem> transparentItems;
-    auto& probeManager = scene.GetProbeManager();
     collectRenderItems(scene, eye, opaqueItems, transparentItems, &probeManager);
 
     // Render Opaque
@@ -445,16 +436,23 @@ void CSceneRenderer::Render(
         CScene::Instance().GetSkybox().Render(view, proj);
     }
 
-    // Skip transparent pass in DX12 mode for now
-    if (!dx12Mode) {
-        // Render Transparent
-        {
-            RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
-            cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbFrame.get());
-            cmdList->SetPipelineState(m_psoTransparent.get());
-            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-            renderItems(cmdList, transparentItems);
-        }
+    // Render Transparent (after Skybox, need to restore state)
+    // Skybox overwrites: CB b0 (vertex), SRV t0, Sampler s0
+    {
+        RHI::CScopedDebugEvent evt(cmdList, L"Transparent Pass");
+
+        // Restore frame constants (b0) - Skybox overwrote it with its own CB
+        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cf, sizeof(cf));
+
+        // Restore sampler (s0) - Skybox overwrote it
+        cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
+
+        // Set transparent PSO and topology
+        cmdList->SetPipelineState(m_psoTransparent.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+
+        // renderItems will set per-object CB b1, SRV t0-t3
+        renderItems(cmdList, transparentItems);
     }
 }
 
