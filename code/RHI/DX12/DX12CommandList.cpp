@@ -56,14 +56,17 @@ void CDX12CommandList::Reset(ID3D12CommandAllocator* allocator) {
     m_descriptorHeapsBound = false;
     m_currentPSO = nullptr;
     m_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;  // Force re-set on next draw
+    m_isComputePSO = false;
 
     // Reset pending bindings
     memset(m_pendingCBVs, 0, sizeof(m_pendingCBVs));
     memset(m_pendingSRVCpuHandles, 0, sizeof(m_pendingSRVCpuHandles));
     memset(m_pendingSamplerCpuHandles, 0, sizeof(m_pendingSamplerCpuHandles));
+    memset(m_pendingUAVCpuHandles, 0, sizeof(m_pendingUAVCpuHandles));
     m_cbvDirty = false;
     m_srvDirty = false;
     m_samplerDirty = false;
+    m_uavDirty = false;
 }
 
 void CDX12CommandList::Close() {
@@ -223,10 +226,11 @@ void CDX12CommandList::SetPipelineState(IPipelineState* pso) {
     if (m_currentPSO == dx12PSO) return;
 
     m_currentPSO = dx12PSO;
+    m_isComputePSO = dx12PSO->IsCompute();
     m_commandList->SetPipelineState(dx12PSO->GetPSO());
 
     // Set root signature
-    if (dx12PSO->IsCompute()) {
+    if (m_isComputePSO) {
         m_commandList->SetComputeRootSignature(dx12PSO->GetRootSignature());
     } else {
         m_commandList->SetGraphicsRootSignature(dx12PSO->GetRootSignature());
@@ -351,14 +355,27 @@ void CDX12CommandList::SetShaderResource(EShaderStage stage, uint32_t slot, ITex
 }
 
 void CDX12CommandList::SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) {
-    if (!buffer) return;
+    if (slot >= MAX_SRV_SLOTS) return;
+
+    if (!buffer) {
+        // Unbind - clear the slot
+        m_pendingSRVCpuHandles[slot] = {};
+        m_srvDirty = true;
+        return;
+    }
 
     CDX12Buffer* dx12Buffer = static_cast<CDX12Buffer*>(buffer);
     TransitionResource(dx12Buffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     FlushBarriers();
 
     EnsureDescriptorHeapsBound();
-    // Similar to SetShaderResource - needs proper descriptor table binding
+
+    // Get SRV handle from CPU-only heap (this is the copy source)
+    SDescriptorHandle srvHandle = dx12Buffer->GetSRV();
+
+    // Store CPU handle for later copy to staging region
+    m_pendingSRVCpuHandles[slot] = srvHandle.cpuHandle;
+    m_srvDirty = true;
 }
 
 void CDX12CommandList::SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) {
@@ -374,24 +391,51 @@ void CDX12CommandList::SetSampler(EShaderStage stage, uint32_t slot, ISampler* s
 }
 
 void CDX12CommandList::SetUnorderedAccess(uint32_t slot, IBuffer* buffer) {
-    if (!buffer) return;
+    if (slot >= MAX_UAV_SLOTS) return;
+
+    if (!buffer) {
+        // Unbind - clear the slot
+        m_pendingUAVCpuHandles[slot] = {};
+        m_uavDirty = true;
+        return;
+    }
 
     CDX12Buffer* dx12Buffer = static_cast<CDX12Buffer*>(buffer);
     TransitionResource(dx12Buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     FlushBarriers();
 
     EnsureDescriptorHeapsBound();
-    // UAV binding via descriptor table
+
+    // Get UAV handle from CPU-only heap
+    SDescriptorHandle uavHandle = dx12Buffer->GetUAV();
+
+    // Store CPU handle for later copy to staging region
+    m_pendingUAVCpuHandles[slot] = uavHandle.cpuHandle;
+    m_uavDirty = true;
 }
 
 void CDX12CommandList::SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) {
-    if (!texture) return;
+    if (slot >= MAX_UAV_SLOTS) return;
+
+    if (!texture) {
+        // Unbind - clear the slot
+        m_pendingUAVCpuHandles[slot] = {};
+        m_uavDirty = true;
+        return;
+    }
 
     CDX12Texture* dx12Texture = static_cast<CDX12Texture*>(texture);
     TransitionResource(dx12Texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     FlushBarriers();
 
     EnsureDescriptorHeapsBound();
+
+    // Get UAV handle from texture
+    SDescriptorHandle uavHandle = dx12Texture->GetOrCreateUAV();
+
+    // Store CPU handle for later copy to staging region
+    m_pendingUAVCpuHandles[slot] = uavHandle.cpuHandle;
+    m_uavDirty = true;
 }
 
 void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) {
@@ -403,11 +447,36 @@ void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint3
 
     EnsureDescriptorHeapsBound();
 
-    // ClearUnorderedAccessViewUint requires both CPU and GPU descriptor handles
+    // ClearUnorderedAccessViewUint requires:
+    // 1. GPU descriptor handle in shader-visible heap (for GPU access)
+    // 2. CPU descriptor handle in non-shader-visible heap (for the actual UAV description)
+    // We need to copy the UAV to the staging ring to get a GPU handle
+
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    auto device = CDX12Context::Instance().GetDevice();
+
+    // Get CPU handle from buffer's UAV
     SDescriptorHandle uavHandle = dx12Buffer->GetUAV();
-    // Would need to copy to shader-visible heap and get GPU handle
-    // This is a simplified implementation
-    // m_commandList->ClearUnorderedAccessViewUint(uavHandle.gpuHandle, uavHandle.cpuHandle, dx12Buffer->GetD3D12Resource(), values, 0, nullptr);
+
+    // Allocate one descriptor from staging ring for GPU-visible handle
+    auto& stagingRing = heapMgr.GetSRVStagingRing();
+    SDescriptorHandle gpuHandle = stagingRing.AllocateContiguous(1);
+
+    if (!gpuHandle.IsValid()) {
+        CFFLog::Error("[DX12CommandList] ClearUnorderedAccessViewUint: Failed to allocate staging descriptor");
+        return;
+    }
+
+    // Copy the UAV to staging ring
+    device->CopyDescriptorsSimple(1, gpuHandle.cpuHandle, uavHandle.cpuHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    // Now call ClearUnorderedAccessViewUint with both handles
+    m_commandList->ClearUnorderedAccessViewUint(
+        gpuHandle.gpuHandle,      // GPU handle in shader-visible heap
+        uavHandle.cpuHandle,      // CPU handle with UAV description
+        dx12Buffer->GetD3D12Resource(),
+        values,
+        0, nullptr);
 }
 
 // ============================================
@@ -443,6 +512,7 @@ void CDX12CommandList::DrawIndexedInstanced(uint32_t indexCountPerInstance, uint
 // ============================================
 
 void CDX12CommandList::Dispatch(uint32_t threadGroupCountX, uint32_t threadGroupCountY, uint32_t threadGroupCountZ) {
+    BindPendingResourcesCompute();
     FlushBarriers();
     m_commandList->Dispatch(threadGroupCountX, threadGroupCountY, threadGroupCountZ);
 }
@@ -692,6 +762,91 @@ void CDX12CommandList::BindPendingResources() {
             }
         }
         m_samplerDirty = false;
+    }
+}
+
+void CDX12CommandList::BindPendingResourcesCompute() {
+    // Compute Root Signature layout (same as graphics):
+    // Parameter 0-6: Root CBV b0-b6
+    // Parameter 7: SRV Descriptor Table t0-t24
+    // Parameter 8: UAV Descriptor Table u0-u7
+    // Parameter 9: Sampler Descriptor Table s0-s7
+
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    auto device = CDX12Context::Instance().GetDevice();
+
+    // Bind CBVs (root constant buffer views) - use Compute version
+    if (m_cbvDirty) {
+        for (uint32_t i = 0; i < MAX_CBV_SLOTS; ++i) {
+            if (m_pendingCBVs[i] != 0) {
+                m_commandList->SetComputeRootConstantBufferView(i, m_pendingCBVs[i]);
+            }
+        }
+        m_cbvDirty = false;
+    }
+
+    // Bind SRV table (parameter 7) - copy from CPU heap to contiguous staging region
+    if (m_srvDirty) {
+        uint32_t maxBoundSlot = 0;
+        for (uint32_t i = 0; i < MAX_SRV_SLOTS; ++i) {
+            if (m_pendingSRVCpuHandles[i].ptr != 0) {
+                maxBoundSlot = i + 1;
+            }
+        }
+
+        if (maxBoundSlot > 0) {
+            auto& stagingRing = heapMgr.GetSRVStagingRing();
+            SDescriptorHandle staging = stagingRing.AllocateContiguous(maxBoundSlot);
+
+            if (staging.IsValid()) {
+                uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+                for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
+                    if (m_pendingSRVCpuHandles[i].ptr != 0) {
+                        device->CopyDescriptorsSimple(1, dest, m_pendingSRVCpuHandles[i],
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    }
+                }
+
+                m_commandList->SetComputeRootDescriptorTable(7, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] BindPendingResourcesCompute: Failed to allocate SRV staging descriptors");
+            }
+        }
+        m_srvDirty = false;
+    }
+
+    // Bind UAV table (parameter 8) - copy from CPU heap to contiguous staging region
+    if (m_uavDirty) {
+        uint32_t maxBoundSlot = 0;
+        for (uint32_t i = 0; i < MAX_UAV_SLOTS; ++i) {
+            if (m_pendingUAVCpuHandles[i].ptr != 0) {
+                maxBoundSlot = i + 1;
+            }
+        }
+
+        if (maxBoundSlot > 0) {
+            auto& stagingRing = heapMgr.GetSRVStagingRing();
+            SDescriptorHandle staging = stagingRing.AllocateContiguous(maxBoundSlot);
+
+            if (staging.IsValid()) {
+                uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+                for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
+                    if (m_pendingUAVCpuHandles[i].ptr != 0) {
+                        device->CopyDescriptorsSimple(1, dest, m_pendingUAVCpuHandles[i],
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    }
+                }
+
+                m_commandList->SetComputeRootDescriptorTable(8, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] BindPendingResourcesCompute: Failed to allocate UAV staging descriptors");
+            }
+        }
+        m_uavDirty = false;
     }
 }
 

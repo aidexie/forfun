@@ -132,13 +132,21 @@ private:
     // These are copied to a contiguous staging region before binding
     static constexpr uint32_t MAX_SRV_SLOTS = 25;
     static constexpr uint32_t MAX_SAMPLER_SLOTS = 8;
+    static constexpr uint32_t MAX_UAV_SLOTS = 8;
     D3D12_CPU_DESCRIPTOR_HANDLE m_pendingSRVCpuHandles[MAX_SRV_SLOTS] = {};
     D3D12_CPU_DESCRIPTOR_HANDLE m_pendingSamplerCpuHandles[MAX_SAMPLER_SLOTS] = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE m_pendingUAVCpuHandles[MAX_UAV_SLOTS] = {};
     bool m_srvDirty = false;
     bool m_samplerDirty = false;
+    bool m_uavDirty = false;
+
+    // Track if current PSO is compute (for choosing Graphics vs Compute root calls)
+    bool m_isComputePSO = false;
 
     // Bind pending resources before draw (requires PSO to be set first)
     void BindPendingResources();
+    // Bind pending resources for compute dispatch
+    void BindPendingResourcesCompute();
 
     // Dynamic constant buffer ring (owned by RenderContext, set during initialization)
     CDX12DynamicBufferRing* m_dynamicBuffer = nullptr;

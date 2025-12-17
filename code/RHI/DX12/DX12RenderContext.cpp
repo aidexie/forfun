@@ -142,6 +142,9 @@ void CDX12RenderContext::BeginFrame() {
     uint32_t frameIndex = CDX12Context::Instance().GetFrameIndex();
     m_dynamicBufferRing->BeginFrame(frameIndex);
 
+    // Reset descriptor staging rings for this frame
+    CDX12DescriptorHeapManager::Instance().BeginFrame(frameIndex);
+
     // Reset command list with current frame's allocator
     m_commandList->Reset(CDX12Context::Instance().GetCurrentCommandAllocator());
 
@@ -1058,34 +1061,41 @@ bool CDX12RenderContext::CreateRootSignatures() {
 
     DX12_SET_DEBUG_NAME(m_graphicsRootSignature, "GraphicsRootSignature");
 
-    // Compute Root Signature (similar but simpler)
-    D3D12_ROOT_PARAMETER computeParams[4] = {};
+    // Compute Root Signature (same layout as graphics for consistency)
+    // Parameter 0-6: Root CBV b0-b6
+    // Parameter 7: SRV Descriptor Table t0-t24
+    // Parameter 8: UAV Descriptor Table u0-u7
+    // Parameter 9: Sampler Descriptor Table s0-s7
+    D3D12_ROOT_PARAMETER computeParams[10] = {};
 
-    // CBV parameter
-    computeParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    computeParams[0].Descriptor.ShaderRegister = 0;
-    computeParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    // CBV parameters (b0-b6)
+    for (int i = 0; i < 7; ++i) {
+        computeParams[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        computeParams[i].Descriptor.ShaderRegister = i;
+        computeParams[i].Descriptor.RegisterSpace = 0;
+        computeParams[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    }
 
     // SRV table
-    computeParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    computeParams[1].DescriptorTable.NumDescriptorRanges = 1;
-    computeParams[1].DescriptorTable.pDescriptorRanges = &srvRange;
-    computeParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    computeParams[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    computeParams[7].DescriptorTable.NumDescriptorRanges = 1;
+    computeParams[7].DescriptorTable.pDescriptorRanges = &srvRange;
+    computeParams[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // UAV table
-    computeParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    computeParams[2].DescriptorTable.NumDescriptorRanges = 1;
-    computeParams[2].DescriptorTable.pDescriptorRanges = &uavRange;
-    computeParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    computeParams[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    computeParams[8].DescriptorTable.NumDescriptorRanges = 1;
+    computeParams[8].DescriptorTable.pDescriptorRanges = &uavRange;
+    computeParams[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Sampler table
-    computeParams[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    computeParams[3].DescriptorTable.NumDescriptorRanges = 1;
-    computeParams[3].DescriptorTable.pDescriptorRanges = &samplerRange;
-    computeParams[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    computeParams[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    computeParams[9].DescriptorTable.NumDescriptorRanges = 1;
+    computeParams[9].DescriptorTable.pDescriptorRanges = &samplerRange;
+    computeParams[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC computeRootSigDesc = {};
-    computeRootSigDesc.NumParameters = 4;
+    computeRootSigDesc.NumParameters = 10;
     computeRootSigDesc.pParameters = computeParams;
     computeRootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
