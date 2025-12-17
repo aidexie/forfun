@@ -1043,38 +1043,29 @@ void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
         return;
     }
 
-    // 更新 Constant Buffer
-    if (m_constantBuffer) {
-        void* mapped = m_constantBuffer->Map();
-        if (mapped) {
-            CB_VolumetricLightmap* cb = (CB_VolumetricLightmap*)mapped;
+    // Update and bind CB to b6 using SetConstantBufferData for DX12 compatibility
+    CB_VolumetricLightmap cb = {};
+    cb.volumeMin = m_config.volumeMin;
+    cb.volumeMax = m_config.volumeMax;
 
-            cb->volumeMin = m_config.volumeMin;
-            cb->volumeMax = m_config.volumeMax;
+    float invSizeX = 1.0f / (m_config.volumeMax.x - m_config.volumeMin.x);
+    float invSizeY = 1.0f / (m_config.volumeMax.y - m_config.volumeMin.y);
+    float invSizeZ = 1.0f / (m_config.volumeMax.z - m_config.volumeMin.z);
+    cb.volumeInvSize = {invSizeX, invSizeY, invSizeZ};
 
-            float invSizeX = 1.0f / (m_config.volumeMax.x - m_config.volumeMin.x);
-            float invSizeY = 1.0f / (m_config.volumeMax.y - m_config.volumeMin.y);
-            float invSizeZ = 1.0f / (m_config.volumeMax.z - m_config.volumeMin.z);
-            cb->volumeInvSize = {invSizeX, invSizeY, invSizeZ};
+    float indirInv = 1.0f / m_derived.indirectionResolution;
+    cb.indirectionInvSize = {indirInv, indirInv, indirInv};
 
-            float indirInv = 1.0f / m_derived.indirectionResolution;
-            cb->indirectionInvSize = {indirInv, indirInv, indirInv};
+    float atlasInv = 1.0f / m_derived.brickAtlasSize;
+    cb.brickAtlasInvSize = {atlasInv, atlasInv, atlasInv};
 
-            float atlasInv = 1.0f / m_derived.brickAtlasSize;
-            cb->brickAtlasInvSize = {atlasInv, atlasInv, atlasInv};
+    cb.indirectionResolution = m_derived.indirectionResolution;
+    cb.brickAtlasSize = m_derived.brickAtlasSize;
+    cb.maxLevel = m_derived.maxLevel;
+    cb.enabled = 1;
+    cb.brickCount = (int)m_bricks.size();
 
-            cb->indirectionResolution = m_derived.indirectionResolution;
-            cb->brickAtlasSize = m_derived.brickAtlasSize;
-            cb->maxLevel = m_derived.maxLevel;
-            cb->enabled = 1;
-            cb->brickCount = (int)m_bricks.size();
-
-            m_constantBuffer->Unmap();
-        }
-    }
-
-    // 绑定 CB 到 b6
-    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 6, m_constantBuffer.get());
+    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 6, &cb, sizeof(CB_VolumetricLightmap));
 
     // 绑定纹理资源 (t20-t24)
     cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 20, m_indirectionTexture.get());
@@ -1094,8 +1085,7 @@ void CVolumetricLightmap::Unbind(RHI::ICommandList* cmdList)
     cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 22, nullptr);
     cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 23, nullptr);
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 24, nullptr);
-
-    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 6, nullptr);
+    // Note: SetConstantBufferData uses per-frame ring buffer, no need to unbind
 }
 
 // ============================================

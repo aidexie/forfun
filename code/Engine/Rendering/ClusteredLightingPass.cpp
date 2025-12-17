@@ -267,23 +267,17 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
     m_cachedFarZ = farZ;
     m_clusterGridDirty = false;
 
-    // Update constant buffer
-    void* mapped = m_clusterCB->Map();
-    if (mapped) {
-        SClusterCB* cb = (SClusterCB*)mapped;
-
-        XMMATRIX invProj = XMMatrixInverse(nullptr, projection);
-        XMStoreFloat4x4(&cb->inverseProjection, XMMatrixTranspose(invProj));
-        cb->nearZ = nearZ;
-        cb->farZ = farZ;
-        cb->numClustersX = m_numClustersX;
-        cb->numClustersY = m_numClustersY;
-        cb->numClustersZ = ClusteredConfig::DEPTH_SLICES;
-        cb->screenWidth = m_screenWidth;
-        cb->screenHeight = m_screenHeight;
-
-        m_clusterCB->Unmap();
-    }
+    // Build constant buffer data
+    SClusterCB cb = {};
+    XMMATRIX invProj = XMMatrixInverse(nullptr, projection);
+    XMStoreFloat4x4(&cb.inverseProjection, XMMatrixTranspose(invProj));
+    cb.nearZ = nearZ;
+    cb.farZ = farZ;
+    cb.numClustersX = m_numClustersX;
+    cb.numClustersY = m_numClustersY;
+    cb.numClustersZ = ClusteredConfig::DEPTH_SLICES;
+    cb.screenWidth = m_screenWidth;
+    cb.screenHeight = m_screenHeight;
 
     // Create compute pipeline state for BuildClusterGrid
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -291,9 +285,9 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
     psoDesc.computeShader = m_buildClusterGridCS.get();
     PipelineStatePtr buildGridPSO(ctx->CreateComputePipelineState(psoDesc));
 
-    // Bind resources
+    // Bind resources (use SetConstantBufferData for DX12 compatibility)
     cmdList->SetPipelineState(buildGridPSO.get());
-    cmdList->SetConstantBuffer(EShaderStage::Compute, 0, m_clusterCB.get());
+    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(SClusterCB));
     cmdList->SetUnorderedAccess(0, m_clusterAABBBuffer.get());
 
     // Dispatch (one thread per cluster)
@@ -403,17 +397,13 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
     const uint32_t zeroValues[4] = {0, 0, 0, 0};
     cmdList->ClearUnorderedAccessViewUint(m_globalCounterBuffer.get(), zeroValues);
 
-    // Update constant buffer for light culling
-    mapped = m_lightCullingCB->Map();
-    if (mapped) {
-        SLightCullingCB* cb = (SLightCullingCB*)mapped;
-        XMStoreFloat4x4(&cb->view, XMMatrixTranspose(view));
-        cb->numLights = (uint32_t)gpuLights.size();
-        cb->numClustersX = m_numClustersX;
-        cb->numClustersY = m_numClustersY;
-        cb->numClustersZ = ClusteredConfig::DEPTH_SLICES;
-        m_lightCullingCB->Unmap();
-    }
+    // Build constant buffer for light culling (use SetConstantBufferData for DX12 compatibility)
+    SLightCullingCB cullCB = {};
+    XMStoreFloat4x4(&cullCB.view, XMMatrixTranspose(view));
+    cullCB.numLights = (uint32_t)gpuLights.size();
+    cullCB.numClustersX = m_numClustersX;
+    cullCB.numClustersY = m_numClustersY;
+    cullCB.numClustersZ = ClusteredConfig::DEPTH_SLICES;
 
     // Create compute pipeline state for CullLights
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -423,7 +413,7 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
 
     // Bind resources
     cmdList->SetPipelineState(cullLightsPSO.get());
-    cmdList->SetConstantBuffer(EShaderStage::Compute, 0, m_lightCullingCB.get());
+    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cullCB, sizeof(SLightCullingCB));
     cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 0, m_pointLightBuffer.get());
     cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 1, m_clusterAABBBuffer.get());
     cmdList->SetUnorderedAccess(0, m_clusterDataBuffer.get());

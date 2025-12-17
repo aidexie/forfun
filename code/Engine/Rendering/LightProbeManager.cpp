@@ -111,8 +111,8 @@ void CLightProbeManager::Bind(RHI::ICommandList* cmdList)
     // t15: LightProbeBuffer (StructuredBuffer)
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, m_probeBuffer.get());
 
-    // b5: CB_LightProbeParams
-    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 5, m_cbParams.get());
+    // b5: CB_LightProbeParams (use SetConstantBufferData for DX12 compatibility)
+    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 5, &m_params, sizeof(CB_LightProbeParams));
 }
 
 void CLightProbeManager::BlendProbesForPosition(

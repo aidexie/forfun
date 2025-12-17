@@ -408,12 +408,7 @@ void CSceneRenderer::Render(
         clusteredParams.numClustersY = m_clusteredLighting.GetNumClustersY();
         clusteredParams.numClustersZ = m_clusteredLighting.GetNumClustersZ();
 
-        void* mappedCluster = m_cbClusteredParams->Map();
-        if (mappedCluster) {
-            memcpy(mappedCluster, &clusteredParams, sizeof(CB_ClusteredParams));
-            m_cbClusteredParams->Unmap();
-        }
-        cmdList->SetConstantBuffer(EShaderStage::Pixel, 3, m_cbClusteredParams.get());
+        cmdList->SetConstantBufferData(EShaderStage::Pixel, 3, &clusteredParams, sizeof(CB_ClusteredParams));
         m_clusteredLighting.BindToMainPass(cmdList);
     }
 

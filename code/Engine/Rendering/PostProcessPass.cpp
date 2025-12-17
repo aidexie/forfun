@@ -75,12 +75,6 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     cb.exposure = exposure;
     cb._pad[0] = cb._pad[1] = cb._pad[2] = 0.0f;
 
-    void* mappedData = m_constantBuffer->Map();
-    if (mappedData) {
-        memcpy(mappedData, &cb, sizeof(CB_PostProcess));
-        m_constantBuffer->Unmap();
-    }
-
     // Set render target (no depth)
     ITexture* renderTargets[] = { ldrOutput };
     cmdList->SetRenderTargets(1, renderTargets, nullptr);
@@ -96,8 +90,8 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     // Set vertex buffer
     cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
 
-    // Set constant buffer and resources
-    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_constantBuffer.get());
+    // Set constant buffer and resources (use SetConstantBufferData for DX12 compatibility)
+    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_PostProcess));
     cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 

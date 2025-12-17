@@ -238,17 +238,13 @@ RHI::ITexture* CIBLGenerator::GenerateIrradianceMap(RHI::ITexture* envMap, int o
         cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
         cmdList->SetScissorRect(0, 0, outputSize, outputSize);
 
-        // Update face index constant buffer
-        int* faceData = (int*)m_cbFaceIndex->Map();
-        if (faceData) {
-            *faceData = face;
-            m_cbFaceIndex->Unmap();
-        }
+        // Update face index constant buffer (use SetConstantBufferData for DX12 compatibility)
+        struct { int faceIndex; int padding[3]; } faceData = { face, {0, 0, 0} };
 
         // Set shaders and resources
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 0, envMap);
         cmdList->SetSampler(RHI::EShaderStage::Pixel, 0, m_sampler.get());
-        cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 0, m_cbFaceIndex.get());
+        cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 0, &faceData, sizeof(faceData));
 
         // Create and set pipeline state
         RHI::PipelineStateDesc psoDesc;
@@ -316,25 +312,15 @@ RHI::ITexture* CIBLGenerator::GeneratePreFilteredMap(RHI::ITexture* envMap, int 
         cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
         cmdList->SetScissorRect(0, 0, outputSize, outputSize);
 
-        // Update constant buffers
-        int* faceData = (int*)m_cbFaceIndex->Map();
-        if (faceData) {
-            *faceData = face;
-            m_cbFaceIndex->Unmap();
-        }
-
-        float* roughnessData = (float*)m_cbRoughness->Map();
-        if (roughnessData) {
-            roughnessData[0] = 0.0f;  // Roughness for mip 0
-            roughnessData[1] = envResolution;
-            m_cbRoughness->Unmap();
-        }
+        // Build constant buffers (use SetConstantBufferData for DX12 compatibility)
+        struct { int faceIndex; int padding[3]; } faceData = { face, {0, 0, 0} };
+        struct { float roughness; float envResolution; float padding[2]; } roughnessData = { 0.0f, envResolution, {0.0f, 0.0f} };
 
         // Set shaders and resources
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 0, envMap);
         cmdList->SetSampler(RHI::EShaderStage::Pixel, 0, m_sampler.get());
-        cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 0, m_cbFaceIndex.get());
-        cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 1, m_cbRoughness.get());
+        cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 0, &faceData, sizeof(faceData));
+        cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 1, &roughnessData, sizeof(roughnessData));
 
         RHI::PipelineStateDesc psoDesc;
         psoDesc.vertexShader = m_fullscreenVS.get();

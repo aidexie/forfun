@@ -239,23 +239,11 @@ void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
     CBPerFrameVS cbVS;
     cbVS.viewProj = XMMatrixTranspose(viewProj);
 
-    void* mappedVS = m_cbPerFrameVS->Map();
-    if (mappedVS) {
-        memcpy(mappedVS, &cbVS, sizeof(CBPerFrameVS));
-        m_cbPerFrameVS->Unmap();
-    }
-
     // Update GS constant buffer
     CBPerFrameGS cbGS;
     cbGS.viewportSize = XMFLOAT2(static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
     cbGS.lineThickness = m_lineThickness;
     cbGS.padding = 0.0f;
-
-    void* mappedGS = m_cbPerFrameGS->Map();
-    if (mappedGS) {
-        memcpy(mappedGS, &cbGS, sizeof(CBPerFrameGS));
-        m_cbPerFrameGS->Unmap();
-    }
 
     // Get command list and render
     ICommandList* cmdList = renderContext->GetCommandList();
@@ -267,8 +255,9 @@ void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
     unsigned int offset = 0;
     cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), stride, offset);
 
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbPerFrameVS.get());
-    cmdList->SetConstantBuffer(EShaderStage::Geometry, 0, m_cbPerFrameGS.get());
+    // Use SetConstantBufferData for DX12 compatibility
+    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cbVS, sizeof(CBPerFrameVS));
+    cmdList->SetConstantBufferData(EShaderStage::Geometry, 0, &cbGS, sizeof(CBPerFrameGS));
 
     unsigned int vertexCount = static_cast<unsigned int>(m_dynamicLines.size());
     cmdList->Draw(vertexCount, 0);

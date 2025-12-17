@@ -166,13 +166,6 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
     cb.fadeEnd = m_fadeEnd;
     cb.padding = XMFLOAT3(0, 0, 0);
 
-    // Map and update constant buffer
-    void* mappedData = m_cbPerFrame->Map();
-    if (mappedData) {
-        memcpy(mappedData, &cb, sizeof(CBPerFrame));
-        m_cbPerFrame->Unmap();
-    }
-
     // Get command list
     ICommandList* cmdList = renderContext->GetCommandList();
 
@@ -180,9 +173,9 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
     cmdList->SetPipelineState(m_pso.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
 
-    // Bind constant buffer
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_cbPerFrame.get());
-    cmdList->SetConstantBuffer(EShaderStage::Pixel, 0, m_cbPerFrame.get());
+    // Bind constant buffer (use SetConstantBufferData for DX12 compatibility)
+    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cb, sizeof(CBPerFrame));
+    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CBPerFrame));
 
     // Draw full-screen quad (4 vertices, triangle strip)
     cmdList->Draw(4, 0);

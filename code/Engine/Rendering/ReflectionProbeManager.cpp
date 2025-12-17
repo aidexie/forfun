@@ -145,8 +145,8 @@ void CReflectionProbeManager::Bind(RHI::ICommandList* cmdList)
     // t7: BRDF LUT
     cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 7, m_brdfLutTexture.get());
 
-    // b4: CB_Probes
-    cmdList->SetConstantBuffer(RHI::EShaderStage::Pixel, 4, m_cbProbes.get());
+    // b4: CB_Probes (use SetConstantBufferData for DX12 compatibility)
+    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 4, &m_probeData, sizeof(CB_Probes));
 }
 
 int CReflectionProbeManager::SelectProbeForPosition(const DirectX::XMFLOAT3& worldPos) const

@@ -122,12 +122,6 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     CB_SkyboxTransform cb;
     cb.viewProj = XMMatrixTranspose(viewNoTranslation * proj);
 
-    void* mappedData = m_constantBuffer->Map();
-    if (mappedData) {
-        memcpy(mappedData, &cb, sizeof(CB_SkyboxTransform));
-        m_constantBuffer->Unmap();
-    }
-
     // Set pipeline state (includes rasterizer, depth stencil, blend states)
     cmdList->SetPipelineState(m_pso.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
@@ -136,8 +130,8 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(SkyboxVertex), 0);
     cmdList->SetIndexBuffer(m_indexBuffer.get(), EIndexFormat::UInt32, 0);
 
-    // Set constant buffer
-    cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, m_constantBuffer.get());
+    // Set constant buffer (use SetConstantBufferData for DX12 compatibility)
+    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cb, sizeof(CB_SkyboxTransform));
 
     // Set texture and sampler
     cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_envTexture.get());
@@ -483,18 +477,13 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
 
         // Update transform constant buffer
         XMMATRIX vp_mat = XMMatrixTranspose(captureViews[face] * captureProjection);
-        void* mappedCB = tempCB->Map();
-        if (mappedCB) {
-            memcpy(mappedCB, &vp_mat, sizeof(XMMATRIX));
-            tempCB->Unmap();
-        }
 
         // Set pipeline state and resources
         cmdList->SetPipelineState(convPso.get());
         cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
         cmdList->SetVertexBuffer(0, tempVB.get(), 12, 0);  // 12 = 3 floats * 4 bytes
         cmdList->SetIndexBuffer(tempIB.get(), EIndexFormat::UInt32, 0);
-        cmdList->SetConstantBuffer(EShaderStage::Vertex, 0, tempCB.get());
+        cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &vp_mat, sizeof(XMMATRIX));
         cmdList->SetShaderResource(EShaderStage::Pixel, 0, equirectTexture.get());
         cmdList->SetSampler(EShaderStage::Pixel, 0, convSampler.get());
 
