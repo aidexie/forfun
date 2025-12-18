@@ -90,6 +90,7 @@ inline bool CheckHR(HRESULT hr, const char* operation) {
 // In Release mode: just executes the expression
 
 // Forward declarations for debug helpers (implemented in DX12Debug.cpp)
+void DX12Debug_Shutdown();
 void DX12Debug_ClearMessages();
 void DX12Debug_PrintMessages(const char* expr, const char* file, int line);
 
@@ -118,6 +119,7 @@ void DX12Debug_PrintMessages(const char* expr, const char* file, int line);
 #define DX12_SET_DEBUG_NAME_INDEXED(obj, name, index) ((void)0)
 #define DX12_CHECK(expr) (expr)
 #define DX12_CHECK_VOID(expr) (expr)
+inline void DX12Debug_Shutdown() {}  // No-op in release
 #endif
 
 // ============================================

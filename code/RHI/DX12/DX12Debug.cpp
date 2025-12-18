@@ -28,6 +28,13 @@ namespace {
 namespace RHI {
 namespace DX12 {
 
+void DX12Debug_Shutdown() {
+    if (g_infoQueue) {
+        g_infoQueue->Release();
+        g_infoQueue = nullptr;
+    }
+}
+
 void DX12Debug_ClearMessages() {
     ID3D12InfoQueue* infoQueue = GetInfoQueue();
     if (infoQueue) {

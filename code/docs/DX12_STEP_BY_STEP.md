@@ -384,6 +384,15 @@ if (m_samplerDirty) {
 - 选项 2：在 frame 开始时 copy output 到 per-frame constant buffer
 - 选项 3：直接将 shadow matrices 存入 dynamic ring buffer
 
+### 9. Resource Deleted While Still In Use ✅ 已解决
+**问题**：临时资源（如 staging texture）在同一帧内创建并销毁，但 GPU 命令列表仍在引用它
+**错误信息**：`OBJECT_DELETED_WHILE_STILL_IN_USE`
+**解决方案**：
+- `CDX12DeferredDeletionQueue` - 延迟删除队列
+- 资源析构时不立即释放，而是入队等待 GPU fence
+- `MoveToNextFrame()` 时处理已完成的删除
+- 类似 UE5 的 `FD3D12DeferredDeletionQueue`
+
 ---
 
 ## DX12 核心概念笔记

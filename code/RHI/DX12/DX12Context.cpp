@@ -1,9 +1,67 @@
 #include "DX12Context.h"
 #include "DX12Common.h"
 #include "../../Core/FFLog.h"
+#include <algorithm>
 
 namespace RHI {
 namespace DX12 {
+
+// ============================================
+// Deferred Deletion Queue Implementation
+// ============================================
+
+void CDX12DeferredDeletionQueue::DeferredRelease(ID3D12Resource* resource, uint64_t fenceValue) {
+    if (!resource) return;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_pendingResources.push_back({resource, fenceValue});
+}
+
+void CDX12DeferredDeletionQueue::DeferredRelease(ID3D12DescriptorHeap* heap, uint64_t fenceValue) {
+    if (!heap) return;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_pendingHeaps.push_back({heap, fenceValue});
+}
+
+void CDX12DeferredDeletionQueue::ProcessCompleted(uint64_t completedFenceValue) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Remove resources whose fence has completed
+    size_t resourcesBefore = m_pendingResources.size();
+    m_pendingResources.erase(
+       std::remove_if(m_pendingResources.begin(), m_pendingResources.end(),
+           [completedFenceValue](const SPendingResource& p) {
+               return p.fenceValue < completedFenceValue;
+           }),
+       m_pendingResources.end());
+
+    // Remove heaps whose fence has completed
+    size_t heapsBefore = m_pendingHeaps.size();
+    m_pendingHeaps.erase(
+       std::remove_if(m_pendingHeaps.begin(), m_pendingHeaps.end(),
+           [completedFenceValue](const SPendingHeap& p) {
+               return p.fenceValue < completedFenceValue;
+           }),
+       m_pendingHeaps.end());
+
+    size_t released = (resourcesBefore - m_pendingResources.size()) + (heapsBefore - m_pendingHeaps.size());
+    if (released > 0) {
+       CFFLog::Info("[DX12] Deferred deletion: released %zu resources (fence %llu)", released, completedFenceValue);
+    }
+}
+
+void CDX12DeferredDeletionQueue::ReleaseAll() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    size_t total = m_pendingResources.size() + m_pendingHeaps.size();
+    m_pendingResources.clear();
+    m_pendingHeaps.clear();
+
+    if (total > 0) {
+        CFFLog::Info("[DX12] Deferred deletion: force released %zu resources at shutdown", total);
+    }
+}
 
 // ============================================
 // Singleton Instance
@@ -118,6 +176,9 @@ void CDX12Context::Shutdown() {
     // Wait for GPU to finish all work
     WaitForGPU();
 
+    // Release all deferred deletions now that GPU is idle
+    m_deletionQueue.ReleaseAll();
+
     // Close fence event
     if (m_fenceEvent) {
         CloseHandle(m_fenceEvent);
@@ -138,6 +199,7 @@ void CDX12Context::Shutdown() {
     m_rtvHeap.Reset();
     m_swapChain.Reset();
     m_commandQueue.Reset();
+    DX12Debug_Shutdown();
     m_device.Reset();
     m_factory.Reset();
 
@@ -573,6 +635,10 @@ void CDX12Context::MoveToNextFrame() {
 
     // Wait if the next frame's resources are still in use
     WaitForFenceValue(m_frameFenceValues[m_frameIndex]);
+
+    // Process deferred deletions now that we know this fence value is complete
+    uint64_t completedValue = m_fence->GetCompletedValue();
+    m_deletionQueue.ProcessCompleted(completedValue);
 }
 
 // ============================================
@@ -617,6 +683,22 @@ void CDX12Context::OnResize(uint32_t width, uint32_t height) {
     // Reset fence values
     for (uint32_t i = 0; i < NUM_FRAMES_IN_FLIGHT; i++) {
         m_frameFenceValues[i] = m_fenceValue;
+    }
+}
+
+// ============================================
+// Deferred Deletion Wrappers
+// ============================================
+
+void CDX12Context::DeferredRelease(ID3D12Resource* resource) {
+    if (resource) {
+        m_deletionQueue.DeferredRelease(resource, m_fenceValue);
+    }
+}
+
+void CDX12Context::DeferredRelease(ID3D12DescriptorHeap* heap) {
+    if (heap) {
+        m_deletionQueue.DeferredRelease(heap, m_fenceValue);
     }
 }
 

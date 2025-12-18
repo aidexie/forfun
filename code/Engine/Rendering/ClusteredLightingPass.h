@@ -136,6 +136,10 @@ private:
     RHI::ShaderPtr m_buildClusterGridCS;
     RHI::ShaderPtr m_cullLightsCS;
 
+    // Compute Pipeline States (cached to avoid per-frame creation)
+    RHI::PipelineStatePtr m_buildClusterGridPSO;
+    RHI::PipelineStatePtr m_cullLightsPSO;
+
     // Debug visualization
     EDebugMode m_debugMode = EDebugMode::None;
     RHI::ShaderPtr m_debugVS;

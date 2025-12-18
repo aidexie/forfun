@@ -1,5 +1,6 @@
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
+#include "DX12Context.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -36,6 +37,12 @@ CDX12Buffer::~CDX12Buffer() {
     }
     if (m_uavHandle.IsValid()) {
         heapMgr.FreeCBVSRVUAV(m_uavHandle);
+    }
+
+    // Defer release of the D3D12 resource until GPU is done using it
+    // This prevents "resource deleted while still in use" errors
+    if (m_resource) {
+        CDX12Context::Instance().DeferredRelease(m_resource.Get());
     }
 }
 

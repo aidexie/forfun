@@ -2,6 +2,8 @@
 
 #include "DX12Common.h"
 #include <Windows.h>
+#include <vector>
+#include <mutex>
 
 // ============================================
 // DX12 Context (Singleton)
@@ -11,6 +13,46 @@
 
 namespace RHI {
 namespace DX12 {
+
+// ============================================
+// Deferred Deletion Queue
+// ============================================
+// Holds resources until GPU finishes using them.
+// Similar to UE5's FD3D12DeferredDeletionQueue.
+
+class CDX12DeferredDeletionQueue {
+public:
+    // Queue a resource for deferred deletion
+    // The resource will be released when the GPU passes the specified fence value
+    void DeferredRelease(ID3D12Resource* resource, uint64_t fenceValue);
+
+    // Queue a descriptor heap for deferred deletion
+    void DeferredRelease(ID3D12DescriptorHeap* heap, uint64_t fenceValue);
+
+    // Process completed deletions - call at frame start
+    void ProcessCompleted(uint64_t completedFenceValue);
+
+    // Force release all resources - call at shutdown
+    void ReleaseAll();
+
+    // Get pending count for debugging
+    size_t GetPendingCount() const { return m_pendingResources.size() + m_pendingHeaps.size(); }
+
+private:
+    struct SPendingResource {
+        ComPtr<ID3D12Resource> resource;
+        uint64_t fenceValue;
+    };
+
+    struct SPendingHeap {
+        ComPtr<ID3D12DescriptorHeap> heap;
+        uint64_t fenceValue;
+    };
+
+    std::vector<SPendingResource> m_pendingResources;
+    std::vector<SPendingHeap> m_pendingHeaps;
+    mutable std::mutex m_mutex;  // Thread safety for multi-threaded resource destruction
+};
 
 class CDX12Context {
 public:
@@ -72,6 +114,13 @@ public:
     // Get the descriptor size for SRV heap
     uint32_t GetSrvDescriptorSize() const { return m_srvDescriptorSize; }
 
+    // Deferred deletion - queue resources for deletion after GPU finishes
+    void DeferredRelease(ID3D12Resource* resource);
+    void DeferredRelease(ID3D12DescriptorHeap* heap);
+
+    // Get pending deletion count for debugging
+    size_t GetPendingDeletionCount() const { return m_deletionQueue.GetPendingCount(); }
+
 private:
     CDX12Context() = default;
     ~CDX12Context();
@@ -132,6 +181,9 @@ private:
     // Feature support flags
     bool m_supportsRaytracing = false;
     bool m_supportsMeshShaders = false;
+
+    // Deferred deletion queue
+    CDX12DeferredDeletionQueue m_deletionQueue;
 };
 
 } // namespace DX12

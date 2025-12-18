@@ -220,6 +220,17 @@ void CClusteredLightingPass::CreateShaders() {
     cullLightsDesc.bytecode = cullLightsCompiled.bytecode.data();
     cullLightsDesc.bytecodeSize = cullLightsCompiled.bytecode.size();
     m_cullLightsCS.reset(ctx->CreateShader(cullLightsDesc));
+
+    // Create compute pipeline states (cached to avoid per-frame creation overhead)
+    ComputePipelineDesc buildGridPsoDesc;
+    buildGridPsoDesc.computeShader = m_buildClusterGridCS.get();
+    m_buildClusterGridPSO.reset(ctx->CreateComputePipelineState(buildGridPsoDesc));
+
+    ComputePipelineDesc cullLightsPsoDesc;
+    cullLightsPsoDesc.computeShader = m_cullLightsCS.get();
+    m_cullLightsPSO.reset(ctx->CreateComputePipelineState(cullLightsPsoDesc));
+
+    CFFLog::Info("[ClusteredLightingPass] Compute shaders and PSOs created");
 }
 
 void CClusteredLightingPass::CreateDebugShaders() {
@@ -230,7 +241,7 @@ void CClusteredLightingPass::CreateDebugShaders() {
 void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
                                                const XMMATRIX& projection,
                                                float nearZ, float farZ) {
-    if (!m_buildClusterGridCS || !cmdList) return;
+    if (!m_buildClusterGridPSO || !cmdList) return;
 
     // Extract FovY from projection matrix for dirty checking
     // For perspective projection: tan(FovY/2) = 1 / m11
@@ -267,14 +278,8 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
     cb.screenWidth = m_screenWidth;
     cb.screenHeight = m_screenHeight;
 
-    // Create compute pipeline state for BuildClusterGrid
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ComputePipelineDesc psoDesc;
-    psoDesc.computeShader = m_buildClusterGridCS.get();
-    PipelineStatePtr buildGridPSO(ctx->CreateComputePipelineState(psoDesc));
-
-    // Bind resources
-    cmdList->SetPipelineState(buildGridPSO.get());
+    // Bind resources using cached PSO
+    cmdList->SetPipelineState(m_buildClusterGridPSO.get());
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(SClusterCB));
     cmdList->SetUnorderedAccess(0, m_clusterAABBBuffer.get());
 
@@ -291,7 +296,7 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
 void CClusteredLightingPass::CullLights(ICommandList* cmdList,
                                         CScene* scene,
                                         const XMMATRIX& view) {
-    if (!m_cullLightsCS || !scene || !cmdList) return;
+    if (!m_cullLightsPSO || !scene || !cmdList) return;
 
     // Unbind cluster buffers from pixel shader before using them as UAVs
     // This prevents D3D11 resource hazard warnings
@@ -393,14 +398,8 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
     cb.numClustersY = m_numClustersY;
     cb.numClustersZ = ClusteredConfig::DEPTH_SLICES;
 
-    // Create compute pipeline state for CullLights
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ComputePipelineDesc psoDesc;
-    psoDesc.computeShader = m_cullLightsCS.get();
-    PipelineStatePtr cullLightsPSO(ctx->CreateComputePipelineState(psoDesc));
-
-    // Bind resources
-    cmdList->SetPipelineState(cullLightsPSO.get());
+    // Bind resources using cached PSO
+    cmdList->SetPipelineState(m_cullLightsPSO.get());
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(SLightCullingCB));
     cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 0, m_pointLightBuffer.get());
     cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 1, m_clusterAABBBuffer.get());

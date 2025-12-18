@@ -304,7 +304,7 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
 
     D3D12_RESOURCE_STATES initialState = GetInitialResourceState(heapType, desc.usage);
 
-    ComPtr<ID3D12Resource> resource;
+     ComPtr<ID3D12Resource> resource;
     HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
@@ -313,8 +313,8 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
         nullptr,
         IID_PPV_ARGS(&resource)
     ));
-
-    if (FAILED(hr)) {
+    if (FAILED(hr))
+    {
         CFFLog::Error("[DX12RenderContext] CreateBuffer failed: %s", HRESULTToString(hr).c_str());
         return nullptr;
     }
@@ -327,7 +327,7 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
 
     // Create buffer wrapper
     CDX12Buffer* buffer = new CDX12Buffer(resource.Get(), desc, device);
-    resource.Detach();  // Transfer ownership
+    //resource.Detach();  // Transfer ownership
 
     // Upload initial data if provided
     if (initialData && heapType == D3D12_HEAP_TYPE_UPLOAD) {
@@ -508,7 +508,7 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
         // Create texture wrapper with staging buffer
         // Note: This is a staging buffer, not a real texture - it will need special handling
         CDX12Texture* texture = new CDX12Texture(stagingBuffer.Get(), desc, device);
-        stagingBuffer.Detach();
+        //stagingBuffer.Detach();
         return texture;
     }
 
@@ -628,7 +628,7 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
     }
 
     CDX12Texture* texture = new CDX12Texture(resource.Get(), finalDesc, device);
-    resource.Detach();
+    // resource.Detach();
 
     // Upload initial data if provided
     if (subresources && numSubresources > 0 && heapProps.Type == D3D12_HEAP_TYPE_DEFAULT) {
@@ -910,7 +910,8 @@ IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc&
     builder.SetPrimitiveTopologyType(ToD3D12TopologyType(desc.primitiveTopology));
 
     // Build PSO
-    ID3D12PipelineState* pso = builder.Build(CDX12Context::Instance().GetDevice());
+    ComPtr<ID3D12PipelineState> pso;
+    pso.Attach(builder.Build(CDX12Context::Instance().GetDevice()));
     if (!pso) {
         CFFLog::Error("[DX12RenderContext] Failed to create graphics PSO");
         return nullptr;
@@ -922,7 +923,7 @@ IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc&
         pso->SetName(wname);
     }
 
-    return new CDX12PipelineState(pso, m_graphicsRootSignature.Get(), false);
+    return new CDX12PipelineState(pso.Get(), m_graphicsRootSignature.Get(), false);
 }
 
 IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipelineDesc& desc) {
@@ -952,7 +953,7 @@ IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipe
         pso->SetName(wname);
     }
 
-    return new CDX12PipelineState(pso.Detach(), m_computeRootSignature.Get(), true);
+    return new CDX12PipelineState(pso.Get(), m_computeRootSignature.Get(), true);
 }
 
 ITexture* CDX12RenderContext::WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) {
@@ -974,7 +975,7 @@ ITexture* CDX12RenderContext::WrapNativeTexture(void* nativeTexture, void* nativ
     desc.usage = ETextureUsage::ShaderResource;
 
     ID3D12Resource* resource = static_cast<ID3D12Resource*>(nativeTexture);
-    resource->AddRef();  // CDX12Texture will own this reference
+    //resource->AddRef();  // CDX12Texture will own this reference
 
     return new CDX12Texture(resource, desc, CDX12Context::Instance().GetDevice());
 }
@@ -986,7 +987,7 @@ ITexture* CDX12RenderContext::WrapExternalTexture(void* nativeTexture, const Tex
     }
 
     ID3D12Resource* resource = static_cast<ID3D12Resource*>(nativeTexture);
-    resource->AddRef();  // CDX12Texture will own this reference
+    //resource->AddRef();  // CDX12Texture will own this reference
 
     return new CDX12Texture(resource, desc, CDX12Context::Instance().GetDevice());
 }
