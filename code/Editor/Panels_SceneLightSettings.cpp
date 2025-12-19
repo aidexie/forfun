@@ -11,6 +11,9 @@
 static bool s_showWindow = true;  // Default: hidden (user opens via menu)
 static bool s_isBaking = false;    // Volumetric Lightmap baking state
 
+// Bake configuration state (persisted across frames)
+static SLightmapBakeConfig s_bakeConfig;
+
 void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
     if (!s_showWindow) return;
 
@@ -139,6 +142,54 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         }
 
         ImGui::Spacing();
+        ImGui::Separator();
+
+        // ============================================
+        // Bake Backend Selection
+        // ============================================
+        ImGui::Text("Bake Settings:");
+
+        // Backend selection
+        const char* backends[] = { "CPU (Path Trace)", "GPU (DXR Ray Tracing)" };
+        int currentBackend = static_cast<int>(s_bakeConfig.backend);
+        ImGui::PushItemWidth(200);
+        if (ImGui::Combo("Backend##VLBake", &currentBackend, backends, IM_ARRAYSIZE(backends))) {
+            s_bakeConfig.backend = static_cast<ELightmapBakeBackend>(currentBackend);
+        }
+        ImGui::PopItemWidth();
+
+        // Check DXR availability
+        bool dxrAvailable = volumetricLightmap.IsDXRBakingAvailable();
+        if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR && !dxrAvailable) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "(DXR not available - will fallback to CPU)");
+        }
+
+        ImGui::Spacing();
+
+        // Backend-specific settings
+        if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) {
+            // GPU settings
+            ImGui::Text("GPU Settings:");
+            ImGui::PushItemWidth(150);
+            ImGui::SliderInt("Samples/Pass##GPU", &s_bakeConfig.gpuSamplesPerVoxel, 64, 512);
+            ImGui::SliderInt("Accumulation Passes##GPU", &s_bakeConfig.gpuAccumulationPasses, 1, 64);
+            ImGui::SliderInt("Max Bounces##GPU", &s_bakeConfig.gpuMaxBounces, 1, 8);
+            ImGui::SliderFloat("Sky Intensity##GPU", &s_bakeConfig.gpuSkyIntensity, 0.0f, 5.0f, "%.2f");
+            ImGui::PopItemWidth();
+
+            int totalSamples = s_bakeConfig.gpuSamplesPerVoxel * s_bakeConfig.gpuAccumulationPasses;
+            ImGui::TextDisabled("Total samples/voxel: %d", totalSamples);
+        } else {
+            // CPU settings
+            ImGui::Text("CPU Settings:");
+            ImGui::PushItemWidth(150);
+            ImGui::SliderInt("Samples/Voxel##CPU", &s_bakeConfig.cpuSamplesPerVoxel, 64, 16384);
+            ImGui::SliderInt("Max Bounces##CPU", &s_bakeConfig.cpuMaxBounces, 1, 8);
+            ImGui::PopItemWidth();
+        }
+
+        ImGui::Spacing();
 
         // Bake buttons
         if (s_isBaking) {
@@ -163,8 +214,10 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
                     // Build octree
                     vl.BuildOctree(CScene::Instance());
 
-                    // Bake all bricks
-                    vl.BakeAllBricks(CScene::Instance());
+                    // Bake all bricks with configured backend
+                    const char* backendStr = (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) ? "GPU (DXR)" : "CPU";
+                    CFFLog::Info("[VolumetricLightmap] Starting bake with %s backend...", backendStr);
+                    vl.BakeAllBricks(CScene::Instance(), s_bakeConfig);
 
                     // Create GPU resources
                     if (vl.CreateGPUResources()) {
