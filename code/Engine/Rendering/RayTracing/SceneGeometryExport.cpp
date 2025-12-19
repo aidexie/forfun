@@ -224,33 +224,33 @@ std::unique_ptr<SRayTracingSceneData> CSceneGeometryExporter::ExportScene(CScene
             result->lights.push_back(light);
         }
 
-        SPointLight* pointLight = go->GetComponent<SPointLight>();
-        if (pointLight) {
-            SRayTracingLight light;
-            light.type = SRayTracingLight::EType::Point;
-            light.position = transform->position;
-            light.color = pointLight->color;
-            light.intensity = pointLight->intensity;
-            light.range = pointLight->range;
-            result->lights.push_back(light);
-        }
+        // SPointLight* pointLight = go->GetComponent<SPointLight>();
+        // if (pointLight) {
+        //     SRayTracingLight light;
+        //     light.type = SRayTracingLight::EType::Point;
+        //     light.position = transform->position;
+        //     light.color = pointLight->color;
+        //     light.intensity = pointLight->intensity;
+        //     light.range = pointLight->range;
+        //     result->lights.push_back(light);
+        // }
 
-        SSpotLight* spotLight = go->GetComponent<SSpotLight>();
-        if (spotLight) {
-            SRayTracingLight light;
-            light.type = SRayTracingLight::EType::Spot;
-            light.position = transform->position;
-            // Use spot light's local direction transformed to world space
-            DirectX::XMMATRIX rotMat = transform->GetRotationMatrix();
-            DirectX::XMVECTOR localDir = DirectX::XMLoadFloat3(&spotLight->direction);
-            DirectX::XMVECTOR worldDir = DirectX::XMVector3TransformNormal(localDir, rotMat);
-            DirectX::XMStoreFloat3(&light.direction, worldDir);
-            light.color = spotLight->color;
-            light.intensity = spotLight->intensity;
-            light.range = spotLight->range;
-            light.spotAngle = spotLight->outerConeAngle;
-            result->lights.push_back(light);
-        }
+        // SSpotLight* spotLight = go->GetComponent<SSpotLight>();
+        // if (spotLight) {
+        //     SRayTracingLight light;
+        //     light.type = SRayTracingLight::EType::Spot;
+        //     light.position = transform->position;
+        //     // Use spot light's local direction transformed to world space
+        //     DirectX::XMMATRIX rotMat = transform->GetRotationMatrix();
+        //     DirectX::XMVECTOR localDir = DirectX::XMLoadFloat3(&spotLight->direction);
+        //     DirectX::XMVECTOR worldDir = DirectX::XMVector3TransformNormal(localDir, rotMat);
+        //     DirectX::XMStoreFloat3(&light.direction, worldDir);
+        //     light.color = spotLight->color;
+        //     light.intensity = spotLight->intensity;
+        //     light.range = spotLight->range;
+        //     light.spotAngle = spotLight->outerConeAngle;
+        //     result->lights.push_back(light);
+        // }
     }
 
     // Default scene bounds if empty

@@ -1041,6 +1041,26 @@ void* CDX12RenderContext::GetNativeContext() {
     return m_commandList ? m_commandList->GetNativeCommandList() : nullptr;
 }
 
+void CDX12RenderContext::ExecuteAndWait() {
+    // Close and execute the current command list, then wait for completion
+    if (!m_commandList) return;
+
+    auto& ctx = CDX12Context::Instance();
+
+    // Close command list
+    m_commandList->Close();
+
+    // Execute
+    ID3D12CommandList* cmdLists[] = { m_commandList->GetNativeCommandList() };
+    ctx.GetCommandQueue()->ExecuteCommandLists(1, cmdLists);
+
+    // Wait for GPU completion
+    ctx.WaitForGPU();
+
+    // Reset command list for next use
+    m_commandList->Reset(ctx.GetCurrentCommandAllocator());
+}
+
 ID3D12Device* CDX12RenderContext::GetDevice() const {
     return CDX12Context::Instance().GetDevice();
 }
@@ -1370,37 +1390,39 @@ IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(cons
     CDX12RayTracingPipelineBuilder builder;
     builder.SetShaderLibrary(bytecode.data(), bytecode.size());
 
-    // Add ray generation shaders
-    for (const auto& rayGenExport : desc.rayGenEntryPoints) {
-        // Convert to wide string
-        int wideLen = MultiByteToWideChar(CP_UTF8, 0, rayGenExport, -1, nullptr, 0);
-        std::wstring wideExport(wideLen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, rayGenExport, -1, wideExport.data(), wideLen);
-        builder.AddRayGenShader(wideExport.c_str());
-    }
+    // Helper to convert UTF-8 to wide string
+    auto toWide = [](const char* str) -> std::wstring {
+        if (!str || str[0] == '\0') return L"";
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, str, -1, nullptr, 0);
+        std::wstring wideStr(wideLen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, str, -1, wideStr.data(), wideLen);
+        return wideStr;
+    };
 
-    // Add miss shaders
-    for (const auto& missExport : desc.missEntryPoints) {
-        int wideLen = MultiByteToWideChar(CP_UTF8, 0, missExport, -1, nullptr, 0);
-        std::wstring wideExport(wideLen, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, missExport, -1, wideExport.data(), wideLen);
-        builder.AddMissShader(wideExport.c_str());
+    // Add shader exports
+    for (const auto& shaderExport : desc.exports) {
+        std::wstring wideName = toWide(shaderExport.name);
+        if (wideName.empty()) continue;
+
+        switch (shaderExport.type) {
+            case EShaderExportType::RayGeneration:
+                builder.AddRayGenShader(wideName.c_str());
+                break;
+            case EShaderExportType::Miss:
+                builder.AddMissShader(wideName.c_str());
+                break;
+            // ClosestHit, AnyHit, Intersection are added via hit groups
+            default:
+                break;
+        }
     }
 
     // Add hit groups
     for (const auto& hitGroup : desc.hitGroups) {
-        auto toWide = [](const char* str) -> std::wstring {
-            if (!str) return L"";
-            int wideLen = MultiByteToWideChar(CP_UTF8, 0, str, -1, nullptr, 0);
-            std::wstring wideStr(wideLen, L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, str, -1, wideStr.data(), wideLen);
-            return wideStr;
-        };
-
-        std::wstring name = toWide(hitGroup.hitGroupName);
-        std::wstring closestHit = toWide(hitGroup.closestHitEntryPoint);
-        std::wstring anyHit = toWide(hitGroup.anyHitEntryPoint);
-        std::wstring intersection = toWide(hitGroup.intersectionEntryPoint);
+        std::wstring name = toWide(hitGroup.name);
+        std::wstring closestHit = toWide(hitGroup.closestHitShader);
+        std::wstring anyHit = toWide(hitGroup.anyHitShader);
+        std::wstring intersection = toWide(hitGroup.intersectionShader);
 
         builder.AddHitGroup(
             name.c_str(),
@@ -1410,9 +1432,9 @@ IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(cons
     }
 
     // Set configuration
-    builder.SetMaxPayloadSize(desc.maxPayloadSizeInBytes);
-    builder.SetMaxAttributeSize(desc.maxAttributeSizeInBytes);
-    builder.SetMaxRecursionDepth(desc.maxTraceRecursionDepth);
+    builder.SetMaxPayloadSize(desc.maxPayloadSize);
+    builder.SetMaxAttributeSize(desc.maxAttributeSize);
+    builder.SetMaxRecursionDepth(desc.maxRecursionDepth);
 
     // Use compute root signature as global root signature for ray tracing
     builder.SetGlobalRootSignature(m_computeRootSignature.Get());

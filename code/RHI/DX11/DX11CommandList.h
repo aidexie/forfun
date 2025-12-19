@@ -68,6 +68,7 @@ public:
     void CopyTextureSubresource(
         ITexture* dst, uint32_t dstArraySlice, uint32_t dstMipLevel,
         ITexture* src, uint32_t srcArraySlice, uint32_t srcMipLevel) override;
+    void CopyBuffer(IBuffer* dst, uint64_t dstOffset, IBuffer* src, uint64_t srcOffset, uint64_t numBytes) override;
 
     // Mipmap Generation
     void GenerateMips(ITexture* texture) override;

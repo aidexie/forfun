@@ -1,11 +1,96 @@
 // ============================================
-// DXR Lightmap Baking Shader
+// DXR Lightmap Baking Shader (Per-Brick Dispatch)
 // ============================================
 // GPU-accelerated path tracing for volumetric lightmap baking.
-// Uses DXR to trace rays through the scene and accumulate
-// spherical harmonics coefficients for indirect lighting.
+// Dispatches 4x4x4 = 64 threads per brick, matching the CPU baker.
+// Output is written to a structured buffer for easy CPU readback.
 
 #include "LightmapBakeCommon.hlsl"
+
+// ============================================
+// Constants
+// ============================================
+
+#define BRICK_SIZE 4
+#define VOXELS_PER_BRICK 64  // 4^3
+#define SH_COEFF_COUNT 9     // L2 spherical harmonics
+
+// ============================================
+// Data Structures (must be defined before use)
+// ============================================
+
+struct SMaterialData {
+    float3 albedo;
+    float metallic;
+    float roughness;
+    float3 padding;
+};
+
+struct SLightData {
+    uint type;          // 0=Directional, 1=Point, 2=Spot
+    float3 padding0;
+    float3 position;
+    float padding1;
+    float3 direction;
+    float padding2;
+    float3 color;
+    float intensity;
+    float range;
+    float spotAngle;
+    float2 padding3;
+};
+
+struct SInstanceData {
+    uint materialIndex;
+    float3 padding;
+};
+
+// Output structure for one voxel (matches CPU SBrick layout)
+// 9 SH coefficients × RGB + validity
+struct SVoxelSHOutput {
+    float3 sh[SH_COEFF_COUNT];  // L2 SH coefficients (RGB each)
+    float validity;
+    float3 padding;
+};
+
+// Ray payload for path tracing
+struct SRayPayload {
+    float3 radiance;
+    float3 throughput;
+    float3 nextOrigin;
+    float3 nextDirection;
+    uint rngState;
+    uint bounceCount;
+    bool terminated;
+};
+
+// Shadow ray payload
+struct SShadowPayload {
+    bool isVisible;
+};
+
+// ============================================
+// Constant Buffer
+// ============================================
+
+cbuffer CB_BakeParams : register(b0) {
+    // Current brick info
+    float3 g_BrickWorldMin;
+    float g_Padding0;
+    float3 g_BrickWorldMax;
+    float g_Padding1;
+
+    // Bake parameters
+    uint g_SamplesPerVoxel;
+    uint g_MaxBounces;
+    uint g_FrameIndex;
+    uint g_NumLights;
+
+    float g_SkyIntensity;
+    uint g_BrickIndex;      // Current brick being baked
+    uint g_TotalBricks;     // Total number of bricks
+    float g_Padding2;
+};
 
 // ============================================
 // Resource Bindings
@@ -23,90 +108,27 @@ StructuredBuffer<SMaterialData> g_Materials : register(t2);
 StructuredBuffer<SLightData> g_Lights : register(t3);
 StructuredBuffer<SInstanceData> g_Instances : register(t4);
 
-// Output: SH coefficients (L1 = 4 coefficients, packed into 3 textures)
-// SH0: (L0.rgb, L1_y.r)
-// SH1: (L1_y.gb, L1_z.rg)
-// SH2: (L1_z.b, L1_x.rgb)
-RWTexture3D<float4> g_OutputSH0 : register(u0);
-RWTexture3D<float4> g_OutputSH1 : register(u1);
-RWTexture3D<float4> g_OutputSH2 : register(u2);
-
-// Validity mask output (1 = valid, 0 = inside geometry)
-RWTexture3D<float> g_OutputValidity : register(u3);
-
-// ============================================
-// Constant Buffers
-// ============================================
-
-cbuffer CB_BakeParams : register(b0) {
-    float3 g_VolumeMin;
-    float g_Padding0;
-    float3 g_VolumeMax;
-    float g_Padding1;
-    uint3 g_VoxelGridSize;
-    uint g_SamplesPerVoxel;
-    uint g_MaxBounces;
-    uint g_FrameIndex;
-    uint g_NumLights;
-    float g_SkyIntensity;
-};
-
-// ============================================
-// Data Structures
-// ============================================
-
-struct SMaterialData {
-    float3 albedo;
-    float metallic;
-    float roughness;
-    float3 padding;
-};
-
-struct SLightData {
-    uint type;          // 0=Directional, 1=Point, 2=Spot
-    float3 position;
-    float3 direction;
-    float3 color;
-    float intensity;
-    float range;
-    float spotAngle;
-    float padding;
-};
-
-struct SInstanceData {
-    uint materialIndex;
-    float3 padding;
-};
-
-// Ray payload for path tracing
-struct SRayPayload {
-    float3 radiance;        // Accumulated radiance
-    float3 throughput;      // Path throughput (for Russian Roulette)
-    float3 nextOrigin;      // Next ray origin
-    float3 nextDirection;   // Next ray direction
-    uint rngState;          // RNG state
-    uint bounceCount;       // Current bounce count
-    bool terminated;        // Path terminated flag
-};
-
-// Shadow ray payload (simplified)
-struct SShadowPayload {
-    bool isVisible;         // True if no hit (light is visible)
-};
+// Output: Structured buffer for all voxels in current brick
+// Layout: g_OutputBuffer[voxelIndex] where voxelIndex = x + y*4 + z*16
+RWStructuredBuffer<SVoxelSHOutput> g_OutputBuffer : register(u0);
 
 // ============================================
 // Helper Functions
 // ============================================
 
-// Convert voxel index to world position (voxel center)
-float3 VoxelIndexToWorldPos(uint3 voxelIdx) {
-    float3 normalizedPos = (float3(voxelIdx) + 0.5f) / float3(g_VoxelGridSize);
-    return g_VolumeMin + normalizedPos * (g_VolumeMax - g_VolumeMin);
+// Convert local voxel coordinate (0-3, 0-3, 0-3) to world position
+float3 LocalVoxelToWorldPos(uint3 localIdx) {
+    float3 brickSize = g_BrickWorldMax - g_BrickWorldMin;
+    float3 voxelSize = brickSize / float(BRICK_SIZE);
+
+    // Voxel center position
+    float3 localPos = (float3(localIdx) + 0.5f) * voxelSize;
+    return g_BrickWorldMin + localPos;
 }
 
-// Check if a point is inside the volume
-bool IsInsideVolume(float3 worldPos) {
-    return all(worldPos >= g_VolumeMin) && all(worldPos <= g_VolumeMax);
+// Convert local voxel coordinate to linear index
+uint LocalVoxelToIndex(uint3 localIdx) {
+    return localIdx.x + localIdx.y * BRICK_SIZE + localIdx.z * BRICK_SIZE * BRICK_SIZE;
 }
 
 // ============================================
@@ -119,9 +141,9 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
     for (uint i = 0; i < g_NumLights; i++) {
         SLightData light = g_Lights[i];
 
-        float3 L;           // Direction to light
-        float lightDist;    // Distance to light
-        float attenuation;  // Light attenuation
+        float3 L;
+        float lightDist;
+        float attenuation;
 
         if (light.type == 0) {
             // Directional light
@@ -135,7 +157,6 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
             lightDist = length(toLight);
             L = toLight / lightDist;
 
-            // Distance attenuation
             float distRatio = lightDist / light.range;
             attenuation = saturate(1.0f - distRatio * distRatio);
             attenuation *= attenuation;
@@ -146,12 +167,10 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
             lightDist = length(toLight);
             L = toLight / lightDist;
 
-            // Distance attenuation
             float distRatio = lightDist / light.range;
             attenuation = saturate(1.0f - distRatio * distRatio);
             attenuation *= attenuation;
 
-            // Cone attenuation
             float cosAngle = dot(-L, normalize(light.direction));
             float cosOuter = cos(radians(light.spotAngle));
             float cosInner = cos(radians(light.spotAngle * 0.8f));
@@ -175,15 +194,14 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
                 g_Scene,
                 RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
                 0xFF,
-                1,      // Shadow hit group
+                1,      // Shadow hit group index
                 0,
-                1,      // Shadow miss shader
+                1,      // Shadow miss shader index
                 shadowRay,
                 shadowPayload
             );
 
             if (shadowPayload.isVisible) {
-                // Lambertian BRDF: albedo / PI
                 float3 brdf = mat.albedo * INV_PI;
                 result += light.color * light.intensity * attenuation * NdotL * brdf;
             }
@@ -194,33 +212,41 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
 }
 
 // ============================================
-// Ray Generation Shader
+// Ray Generation Shader (Per-Brick)
 // ============================================
 
 [shader("raygeneration")]
 void RayGen() {
-    // Get voxel index from dispatch ID
-    uint3 voxelIdx = DispatchRaysIndex().xyz;
+    // DispatchRaysIndex is (x, y, z) within 4x4x4 dispatch
+    uint3 localVoxelIdx = DispatchRaysIndex().xyz;
 
-    // Bounds check
-    if (any(voxelIdx >= g_VoxelGridSize)) {
+    // Bounds check (should always pass for 4x4x4 dispatch)
+    if (any(localVoxelIdx >= uint3(BRICK_SIZE, BRICK_SIZE, BRICK_SIZE))) {
         return;
     }
 
-    // Compute world position (voxel center)
-    float3 worldPos = VoxelIndexToWorldPos(voxelIdx);
+    // Calculate output index
+    uint outputIndex = LocalVoxelToIndex(localVoxelIdx);
 
-    // Initialize SH accumulators (L1 = 4 coefficients)
-    float3 shCoeffs[4];
+    // Get world position for this voxel
+    float3 worldPos = LocalVoxelToWorldPos(localVoxelIdx);
+
+    // Initialize output
+    SVoxelSHOutput output;
     [unroll]
-    for (int i = 0; i < 4; i++) {
-        shCoeffs[i] = float3(0, 0, 0);
+    for (int i = 0; i < SH_COEFF_COUNT; i++) {
+        output.sh[i] = float3(0, 0, 0);
     }
+    output.validity = 1.0f;
+    output.padding = float3(0, 0, 0);
 
-    // Initialize RNG
-    uint rngState = InitRNGWithSample(voxelIdx, g_FrameIndex, 0);
+    // Initialize RNG with unique seed per voxel and frame
+    uint rngState = InitRNGWithSample(localVoxelIdx, g_FrameIndex, g_BrickIndex);
 
-    // Validity check: cast short rays to detect if voxel is inside geometry
+    // ============================================
+    // Validity Check
+    // ============================================
+    // Cast short rays to detect if voxel is inside geometry
     float validitySum = 0.0f;
     const uint validityRays = 6;
 
@@ -235,7 +261,7 @@ void RayGen() {
         validityRay.Origin = worldPos;
         validityRay.Direction = validityDirs[v];
         validityRay.TMin = 0.0f;
-        validityRay.TMax = 0.1f;  // Short distance check
+        validityRay.TMax = 0.1f;
 
         SShadowPayload validityPayload;
         validityPayload.isVisible = true;
@@ -252,19 +278,26 @@ void RayGen() {
     }
 
     float validity = validitySum / float(validityRays);
+    output.validity = validity;
 
     // If mostly inside geometry, skip sampling
     if (validity < 0.5f) {
-        g_OutputSH0[voxelIdx] = float4(0, 0, 0, 0);
-        g_OutputSH1[voxelIdx] = float4(0, 0, 0, 0);
-        g_OutputSH2[voxelIdx] = float4(0, 0, 0, 0);
-        g_OutputValidity[voxelIdx] = 0.0f;
+        g_OutputBuffer[outputIndex] = output;
         return;
     }
 
-    // Sample hemisphere for GI
+    // ============================================
+    // Path Tracing
+    // ============================================
+    // Accumulate SH coefficients (L2 = 9 coefficients)
+    float3 shAccum[SH_COEFF_COUNT];
+    [unroll]
+    for (int k = 0; k < SH_COEFF_COUNT; k++) {
+        shAccum[k] = float3(0, 0, 0);
+    }
+
     for (uint s = 0; s < g_SamplesPerVoxel; s++) {
-        // Generate uniform sphere direction (full sphere for volumetric)
+        // Generate uniform sphere direction
         float3 dir = SampleSphereUniform(rngState);
 
         // Initialize payload
@@ -277,7 +310,7 @@ void RayGen() {
         payload.bounceCount = 0;
         payload.terminated = false;
 
-        // Path trace
+        // Path trace with bounces
         while (!payload.terminated && payload.bounceCount < g_MaxBounces) {
             RayDesc ray;
             ray.Origin = payload.nextOrigin;
@@ -297,8 +330,8 @@ void RayGen() {
             );
         }
 
-        // Accumulate to SH
-        AccumulateToSHL1(dir, payload.radiance, shCoeffs);
+        // Accumulate to L2 SH
+        AccumulateToSH(dir, payload.radiance, shAccum);
 
         // Update RNG state
         rngState = payload.rngState;
@@ -307,45 +340,28 @@ void RayGen() {
     // Normalize SH coefficients
     float weight = 4.0f * PI / float(g_SamplesPerVoxel);
     [unroll]
-    for (int j = 0; j < 4; j++) {
-        shCoeffs[j] *= weight;
+    for (int j = 0; j < SH_COEFF_COUNT; j++) {
+        output.sh[j] = shAccum[j] * weight;
     }
 
-    // Pack and store output
-    // SH0: (L0.rgb, L1_y.r)
-    g_OutputSH0[voxelIdx] = float4(shCoeffs[0], shCoeffs[1].r);
-    // SH1: (L1_y.gb, L1_z.rg)
-    g_OutputSH1[voxelIdx] = float4(shCoeffs[1].gb, shCoeffs[2].rg);
-    // SH2: (L1_z.b, L1_x.rgb)
-    g_OutputSH2[voxelIdx] = float4(shCoeffs[2].b, shCoeffs[3]);
-
-    // Store validity
-    g_OutputValidity[voxelIdx] = validity;
+    // Write output
+    g_OutputBuffer[outputIndex] = output;
 }
 
 // ============================================
-// Closest Hit Shader (Primary Rays)
+// Closest Hit Shader
 // ============================================
 
 [shader("closesthit")]
 void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttributes attr) {
-    // Get instance and primitive info
     uint instanceID = InstanceID();
 
     // Compute hit position
     float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
 
-    // Compute barycentric coordinates
-    float3 barycentrics = float3(
-        1.0f - attr.barycentrics.x - attr.barycentrics.y,
-        attr.barycentrics.x,
-        attr.barycentrics.y
-    );
-
-    // Get geometric normal (assuming CCW winding)
-    // In a full implementation, you would interpolate vertex normals here
-    // For now, use geometric normal from ray direction
-    float3 normal = -WorldRayDirection();  // Placeholder - should use actual geometry normal
+    // Compute geometric normal (simplified - should use vertex normals)
+    // For now, use face normal approximation
+    float3 normal = -WorldRayDirection();
 
     // Get material
     uint materialIndex = g_Instances[instanceID].materialIndex;
@@ -360,7 +376,7 @@ void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttribu
     // Prepare next bounce
     payload.bounceCount++;
 
-    // Russian Roulette for path termination (after 2 bounces)
+    // Russian Roulette (after 2 bounces)
     if (payload.bounceCount >= 2) {
         float maxComponent = max(mat.albedo.r, max(mat.albedo.g, mat.albedo.b));
         float survivalProb = min(maxComponent, 0.95f);
@@ -373,27 +389,23 @@ void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttribu
         payload.throughput /= survivalProb;
     }
 
-    // Sample next direction (cosine-weighted for diffuse)
+    // Sample next direction (cosine-weighted hemisphere)
     float3 bounceDir = SampleHemisphereCosineWorld(normal, payload.rngState);
 
     payload.nextOrigin = OffsetRayOrigin(hitPos, normal);
     payload.nextDirection = bounceDir;
-
-    // Update throughput (albedo for Lambertian, PI cancels with cosine PDF)
     payload.throughput *= mat.albedo;
 }
 
 // ============================================
-// Miss Shader (Primary Rays - Sky)
+// Miss Shader (Sky)
 // ============================================
 
 [shader("miss")]
 void Miss(inout SRayPayload payload) {
-    // Sample skybox
     float3 dir = WorldRayDirection();
     float3 skyColor = g_Skybox.SampleLevel(g_LinearSampler, dir, 0).rgb;
 
-    // Accumulate sky contribution
     payload.radiance += payload.throughput * skyColor * g_SkyIntensity;
     payload.terminated = true;
 }
@@ -404,17 +416,15 @@ void Miss(inout SRayPayload payload) {
 
 [shader("miss")]
 void ShadowMiss(inout SShadowPayload payload) {
-    // No hit means light is visible
     payload.isVisible = true;
 }
 
 // ============================================
-// Shadow Any Hit Shader (for alpha testing if needed)
+// Shadow Any Hit Shader
 // ============================================
 
 [shader("anyhit")]
 void ShadowAnyHit(inout SShadowPayload payload, in BuiltInTriangleIntersectionAttributes attr) {
-    // For opaque geometry, any hit means shadowed
     payload.isVisible = false;
     AcceptHitAndEndSearch();
 }

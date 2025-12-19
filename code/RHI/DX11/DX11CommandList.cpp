@@ -493,6 +493,24 @@ void CDX11CommandList::CopyTextureSubresource(
     m_context->CopySubresourceRegion(dstRes, dstSubresource, 0, 0, 0, srcRes, srcSubresource, nullptr);
 }
 
+void CDX11CommandList::CopyBuffer(IBuffer* dst, uint64_t dstOffset, IBuffer* src, uint64_t srcOffset, uint64_t numBytes) {
+    if (!dst || !src || numBytes == 0) return;
+
+    ID3D11Resource* dstRes = static_cast<ID3D11Resource*>(dst->GetNativeHandle());
+    ID3D11Resource* srcRes = static_cast<ID3D11Resource*>(src->GetNativeHandle());
+    if (!dstRes || !srcRes) return;
+
+    D3D11_BOX srcBox;
+    srcBox.left = static_cast<UINT>(srcOffset);
+    srcBox.right = static_cast<UINT>(srcOffset + numBytes);
+    srcBox.top = 0;
+    srcBox.bottom = 1;
+    srcBox.front = 0;
+    srcBox.back = 1;
+
+    m_context->CopySubresourceRegion(dstRes, 0, static_cast<UINT>(dstOffset), 0, 0, srcRes, 0, &srcBox);
+}
+
 void CDX11CommandList::UnbindRenderTargets() {
     ID3D11RenderTargetView* nullRTV = nullptr;
     m_context->OMSetRenderTargets(1, &nullRTV, nullptr);

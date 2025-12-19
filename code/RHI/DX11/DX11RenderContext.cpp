@@ -715,5 +715,11 @@ void* CDX11RenderContext::GetNativeContext() {
     return CDX11Context::Instance().GetContext();
 }
 
+void CDX11RenderContext::ExecuteAndWait() {
+    // DX11 immediate context is synchronous - no action needed
+    // All commands submitted before this call are already executed/in-flight
+    // The driver handles synchronization implicitly
+}
+
 } // namespace DX11
 } // namespace RHI

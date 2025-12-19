@@ -225,7 +225,8 @@ enum class EShaderType {
     Compute,
     Geometry,
     Hull,
-    Domain
+    Domain,
+    Library     // DXR shader library (DXIL)
 };
 
 struct ShaderDesc {

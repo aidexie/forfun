@@ -54,6 +54,9 @@ public:
     void* GetNativeDevice() override;
     void* GetNativeContext() override;
 
+    // Synchronous Execution (no-op for DX11 since it's already immediate)
+    void ExecuteAndWait() override;
+
     // Ray Tracing (stubs - DX11 doesn't support ray tracing)
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override { return {}; }
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) override { return {}; }

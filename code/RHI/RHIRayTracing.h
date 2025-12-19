@@ -198,6 +198,21 @@ enum class ERayTracingShaderType {
     Intersection
 };
 
+// Shader export type (for pipeline desc)
+enum class EShaderExportType {
+    RayGeneration,
+    Miss,
+    ClosestHit,
+    AnyHit,
+    Intersection
+};
+
+// Shader export descriptor
+struct ShaderExport {
+    const char* name = nullptr;
+    EShaderExportType type = EShaderExportType::RayGeneration;
+};
+
 // Shader entry point description
 struct RayTracingShaderDesc {
     ERayTracingShaderType type;
@@ -207,10 +222,10 @@ struct RayTracingShaderDesc {
 
 // Hit group combines closest-hit, any-hit, and intersection shaders
 struct HitGroupDesc {
-    const char* hitGroupName = nullptr;         // Export name for hit group
-    const char* closestHitEntryPoint = nullptr; // Optional
-    const char* anyHitEntryPoint = nullptr;     // Optional
-    const char* intersectionEntryPoint = nullptr; // Optional (only for procedural)
+    const char* name = nullptr;                 // Export name for hit group
+    const char* closestHitShader = nullptr;     // Optional
+    const char* anyHitShader = nullptr;         // Optional
+    const char* intersectionShader = nullptr;   // Optional (only for procedural)
 };
 
 // Ray tracing pipeline descriptor
@@ -218,19 +233,16 @@ struct RayTracingPipelineDesc {
     // Shader library (DXIL library containing all shaders)
     IShader* shaderLibrary = nullptr;
 
-    // Ray generation shaders (at least one required)
-    std::vector<const char*> rayGenEntryPoints;
-
-    // Miss shaders
-    std::vector<const char*> missEntryPoints;
+    // Shader exports (ray gen, miss, hit shaders)
+    std::vector<ShaderExport> exports;
 
     // Hit groups
     std::vector<HitGroupDesc> hitGroups;
 
     // Pipeline configuration
-    uint32_t maxPayloadSizeInBytes = 32;        // Size of ray payload struct
-    uint32_t maxAttributeSizeInBytes = 8;       // Size of hit attributes (barycentrics = 8)
-    uint32_t maxTraceRecursionDepth = 1;        // Max recursive TraceRay calls
+    uint32_t maxPayloadSize = 32;           // Size of ray payload struct
+    uint32_t maxAttributeSize = 8;          // Size of hit attributes (barycentrics = 8)
+    uint32_t maxRecursionDepth = 1;         // Max recursive TraceRay calls
 };
 
 // ============================================

@@ -64,6 +64,9 @@ public:
     void* GetNativeDevice() override;
     void* GetNativeContext() override;
 
+    // Synchronous Execution
+    void ExecuteAndWait() override;
+
     // Ray Tracing (DXR)
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override;
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) override;

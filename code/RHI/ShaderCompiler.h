@@ -9,6 +9,7 @@
 // ============================================
 // Abstracts shader compilation from D3DCompiler
 // Implementation in RHI/DX11/DX11ShaderCompiler.cpp
+// DXC implementation in RHI/DX12/DX12ShaderCompiler.cpp
 
 namespace RHI {
 
@@ -35,7 +36,7 @@ struct SCompiledShader {
     bool success = false;
 };
 
-// Shader compiler functions
+// Shader compiler functions (D3DCompiler - SM 5.0 and below)
 SCompiledShader CompileShaderFromSource(
     const std::string& source,
     const char* entryPoint,
@@ -51,5 +52,27 @@ SCompiledShader CompileShaderFromFile(
     IShaderIncludeHandler* includeHandler = nullptr,
     bool debug = false
 );
+
+// ============================================
+// DXCompiler (DXC) - SM 6.0+ and DXR
+// ============================================
+
+// Compile DXR shader library (DXIL format, contains multiple entry points)
+// Target should be "lib_6_3" or higher for ray tracing
+SCompiledShader CompileDXRLibraryFromFile(
+    const std::string& filepath,
+    IShaderIncludeHandler* includeHandler = nullptr,
+    bool debug = false
+);
+
+SCompiledShader CompileDXRLibraryFromSource(
+    const std::string& source,
+    const std::string& sourceName,  // For error reporting
+    IShaderIncludeHandler* includeHandler = nullptr,
+    bool debug = false
+);
+
+// Check if DXCompiler is available
+bool IsDXCompilerAvailable();
 
 } // namespace RHI

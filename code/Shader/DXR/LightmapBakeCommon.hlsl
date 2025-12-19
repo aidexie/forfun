@@ -204,6 +204,9 @@ void AccumulateToSHL2(float3 dir, float3 radiance, inout float3 shCoeffs[9]) {
     }
 }
 
+// Alias for L2 accumulation (used by LightmapBake.hlsl)
+#define AccumulateToSH AccumulateToSHL2
+
 // ============================================
 // Utility Functions
 // ============================================

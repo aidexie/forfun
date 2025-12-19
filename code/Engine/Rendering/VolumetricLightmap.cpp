@@ -434,7 +434,6 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene, const SLightmapBakeConfig
         CFFLog::Warning("[VolumetricLightmap] No bricks to bake! Call BuildOctree first.");
         return;
     }
-
     // Determine which backend to use
     ELightmapBakeBackend backend = config.backend;
 
@@ -457,6 +456,10 @@ void CVolumetricLightmap::BakeAllBricks(CScene& scene, const SLightmapBakeConfig
 
 void CVolumetricLightmap::bakeWithCPU(CScene& scene, const SLightmapBakeConfig& config)
 {
+    if (m_bricks.empty()) {
+        CFFLog::Warning("[VolumetricLightmap] No bricks to bake! Call BuildOctree first.");
+        return;
+    }
     // 创建 Path Trace Baker
     SPathTraceConfig ptConfig;
     ptConfig.samplesPerVoxel = config.cpuSamplesPerVoxel;
@@ -546,8 +549,7 @@ void CVolumetricLightmap::bakeWithGPU(CScene& scene, const SLightmapBakeConfig& 
 
     if (!m_dxrBaker->IsReady()) {
         if (!m_dxrBaker->Initialize()) {
-            CFFLog::Error("[VolumetricLightmap] Failed to initialize DXR baker, falling back to CPU");
-            bakeWithCPU(scene, config);
+            CFFLog::Error("[VolumetricLightmap] Failed to initialize DXR baker");
             return;
         }
     }
@@ -562,8 +564,7 @@ void CVolumetricLightmap::bakeWithGPU(CScene& scene, const SLightmapBakeConfig& 
 
     // Run DXR bake
     if (!m_dxrBaker->BakeVolumetricLightmap(*this, scene, dxrConfig)) {
-        CFFLog::Error("[VolumetricLightmap] DXR bake failed, falling back to CPU");
-        bakeWithCPU(scene, config);
+        CFFLog::Error("[VolumetricLightmap] DXR bake failed");
         return;
     }
 

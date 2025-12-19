@@ -41,7 +41,9 @@ enum class EBufferUsage : uint32_t {
     Constant = 1 << 2,
     Structured = 1 << 3,
     UnorderedAccess = 1 << 4,
-    IndirectArgs = 1 << 5
+    IndirectArgs = 1 << 5,
+    Staging = 1 << 6,        // CPU readback buffer (D3D12_HEAP_TYPE_READBACK)
+    AccelerationStructure = 1 << 7  // For DXR acceleration structure storage
 };
 
 inline EBufferUsage operator|(EBufferUsage a, EBufferUsage b) {

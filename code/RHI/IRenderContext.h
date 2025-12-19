@@ -140,6 +140,14 @@ public:
     virtual void* GetNativeContext() = 0;
 
     // ============================================
+    // Synchronous Execution (for offline baking)
+    // ============================================
+
+    // Execute pending commands and wait for GPU completion
+    // Use sparingly - primarily for offline baking operations
+    virtual void ExecuteAndWait() = 0;
+
+    // ============================================
     // Ray Tracing (DXR)
     // ============================================
     // These methods return nullptr on backends that don't support ray tracing.

@@ -22,6 +22,7 @@ namespace RHI {
 
 class CVolumetricLightmap;
 class CScene;
+struct SBrick;  // Forward declaration from VolumetricLightmap.h
 
 // ============================================
 // Baker Configuration
@@ -46,20 +47,42 @@ struct SDXRBakeConfig {
 
 // ============================================
 // Bake Parameters (matches shader CB_BakeParams)
+// Per-brick dispatch - updated to match LightmapBake.hlsl
 // ============================================
 
 struct CB_BakeParams {
-    DirectX::XMFLOAT3 volumeMin;
+    // Current brick info
+    DirectX::XMFLOAT3 brickWorldMin;
     float padding0;
-    DirectX::XMFLOAT3 volumeMax;
+    DirectX::XMFLOAT3 brickWorldMax;
     float padding1;
-    uint32_t voxelGridSize[3];
+
+    // Bake parameters
     uint32_t samplesPerVoxel;
     uint32_t maxBounces;
     uint32_t frameIndex;
     uint32_t numLights;
+
     float skyIntensity;
+    uint32_t brickIndex;      // Current brick being baked
+    uint32_t totalBricks;     // Total number of bricks
+    float padding2;
 };
+
+// ============================================
+// GPU Voxel SH Output (matches shader SVoxelSHOutput)
+// Output structure for one voxel in a brick
+// ============================================
+
+struct SVoxelSHOutput {
+    DirectX::XMFLOAT3 sh[9];  // L2 SH coefficients (9 RGB values) = 108 bytes
+    float validity;            // 4 bytes
+    DirectX::XMFLOAT3 padding; // 12 bytes to align to 16-byte boundary
+};
+
+// 9 * 12 (XMFLOAT3) + 4 (validity) + 12 (padding) = 124 bytes
+// But HLSL structured buffer may have different packing rules
+// Verify with actual GPU output
 
 // ============================================
 // GPU Material Data (matches shader SMaterialData)
@@ -154,7 +177,8 @@ private:
     // Per-Bake Setup
     // ============================================
 
-    bool CreateOutputTextures(uint32_t width, uint32_t height, uint32_t depth);
+    bool CreateOutputBuffer();  // Per-brick structured buffer (64 voxels)
+    bool CreateReadbackBuffer();  // CPU-readable staging buffer
     bool UploadSceneData(const SRayTracingSceneData& sceneData);
     bool BuildAccelerationStructures(const SRayTracingSceneData& sceneData);
 
@@ -162,7 +186,8 @@ private:
     // Baking
     // ============================================
 
-    void DispatchBakePass(uint32_t passIndex, const SDXRBakeConfig& config);
+    void DispatchBakeBrick(uint32_t brickIndex, const SBrick& brick, const SDXRBakeConfig& config);
+    void ReadbackBrickResults(SBrick& brick);
     void CopyResultsToLightmap(CVolumetricLightmap& lightmap);
 
     // ============================================
@@ -190,22 +215,18 @@ private:
     std::unique_ptr<RHI::IBuffer> m_lightBuffer;
     std::unique_ptr<RHI::IBuffer> m_instanceBuffer;
 
-    // Output textures (SH coefficients)
-    std::unique_ptr<RHI::ITexture> m_outputSH0;
-    std::unique_ptr<RHI::ITexture> m_outputSH1;
-    std::unique_ptr<RHI::ITexture> m_outputSH2;
-    std::unique_ptr<RHI::ITexture> m_outputValidity;
+    // Per-brick output buffer (UAV - 64 voxels × SVoxelSHOutput)
+    std::unique_ptr<RHI::IBuffer> m_outputBuffer;
 
-    // Accumulation textures (for multi-pass)
-    std::unique_ptr<RHI::ITexture> m_accumSH0;
-    std::unique_ptr<RHI::ITexture> m_accumSH1;
-    std::unique_ptr<RHI::ITexture> m_accumSH2;
+    // Readback buffer (CPU-readable staging)
+    std::unique_ptr<RHI::IBuffer> m_readbackBuffer;
+
+    // CPU-side readback data
+    std::vector<SVoxelSHOutput> m_readbackData;
 
     // Current bake state
-    uint32_t m_voxelGridWidth = 0;
-    uint32_t m_voxelGridHeight = 0;
-    uint32_t m_voxelGridDepth = 0;
     DirectX::XMFLOAT3 m_volumeMin;
     DirectX::XMFLOAT3 m_volumeMax;
     uint32_t m_numLights = 0;
+    uint32_t m_totalBricks = 0;
 };

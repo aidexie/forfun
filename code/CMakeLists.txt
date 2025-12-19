@@ -161,6 +161,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12RayTracingPipeline.cpp
     ${CODE_PATH}/RHI/DX12/DX12ShaderBindingTable.h
     ${CODE_PATH}/RHI/DX12/DX12ShaderBindingTable.cpp
+    ${CODE_PATH}/RHI/DX12/DX12ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX12/DX12Debug.cpp
 )
 

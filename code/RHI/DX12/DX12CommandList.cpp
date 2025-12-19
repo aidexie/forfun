@@ -648,6 +648,22 @@ void CDX12CommandList::CopyTextureSubresource(ITexture* dst, uint32_t dstArraySl
     m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 }
 
+void CDX12CommandList::CopyBuffer(IBuffer* dst, uint64_t dstOffset, IBuffer* src, uint64_t srcOffset, uint64_t numBytes) {
+    if (!dst || !src || numBytes == 0) return;
+
+    CDX12Buffer* dstBuf = static_cast<CDX12Buffer*>(dst);
+    CDX12Buffer* srcBuf = static_cast<CDX12Buffer*>(src);
+
+    TransitionResource(dstBuf, D3D12_RESOURCE_STATE_COPY_DEST);
+    TransitionResource(srcBuf, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    FlushBarriers();
+
+    m_commandList->CopyBufferRegion(
+        dstBuf->GetD3D12Resource(), dstOffset,
+        srcBuf->GetD3D12Resource(), srcOffset,
+        numBytes);
+}
+
 // ============================================
 // Mipmap Generation
 // ============================================
