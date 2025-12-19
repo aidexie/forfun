@@ -6,6 +6,8 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
+#include <memory>
+#include <functional>
 
 // Forward declarations
 namespace RHI {
@@ -15,6 +17,7 @@ namespace RHI {
 class CScene;
 class CPathTraceBaker;
 struct SPathTraceConfig;
+class CDXRLightmapBaker;
 
 // ============================================
 // Volumetric Lightmap Constants
@@ -23,6 +26,32 @@ static const int VL_BRICK_SIZE = 4;                    // 每个 Brick 4×4×4 �
 static const int VL_BRICK_VOXEL_COUNT = 64;            // 4^3 = 64
 static const int VL_SH_COEFF_COUNT = 9;                // L2 球谐系数数量
 static const int VL_MAX_LEVEL = 8;                     // 最大细分级别限制
+
+// ============================================
+// Baking Backend Selection
+// ============================================
+enum class ELightmapBakeBackend {
+    CPU,        // CPathTraceBaker - CPU-based path tracing (default, always available)
+    GPU_DXR     // CDXRLightmapBaker - GPU DXR ray tracing (requires RTX/DXR support)
+};
+
+// Bake configuration
+struct SLightmapBakeConfig {
+    ELightmapBakeBackend backend = ELightmapBakeBackend::CPU;
+
+    // CPU backend settings
+    int cpuSamplesPerVoxel = 6144;
+    int cpuMaxBounces = 3;
+
+    // GPU backend settings
+    int gpuSamplesPerVoxel = 256;
+    int gpuAccumulationPasses = 24;  // Total = gpuSamplesPerVoxel * gpuAccumulationPasses
+    int gpuMaxBounces = 3;
+    float gpuSkyIntensity = 1.0f;
+
+    // Progress callback (0.0 to 1.0)
+    std::function<void(float)> progressCallback = nullptr;
+};
 
 // ============================================
 // SBrick - 单个 Brick 数据
@@ -208,7 +237,7 @@ public:
     // 生命周期
     // ============================================
     CVolumetricLightmap();
-    ~CVolumetricLightmap() = default;
+    ~CVolumetricLightmap();  // Defined in .cpp due to unique_ptr<CDXRLightmapBaker>
 
     bool Initialize(const Config& config);
     void Shutdown();
@@ -221,7 +250,11 @@ public:
     void BuildOctree(CScene& scene);
 
     // Step 2: 烘焙所有 Brick 的 SH（耗时操作）
-    void BakeAllBricks(CScene& scene);
+    // Uses CPU or GPU backend based on config (auto-fallback if DXR unavailable)
+    void BakeAllBricks(CScene& scene, const SLightmapBakeConfig& config = {});
+
+    // Check if DXR baking is available
+    bool IsDXRBakingAvailable() const;
 
     // ============================================
     // GPU 资源
@@ -372,4 +405,13 @@ private:
     RHI::BufferPtr m_brickInfoBuffer;
 
     RHI::SamplerPtr m_sampler;  // s3: trilinear sampler for atlas
+
+    // ============================================
+    // DXR Baker (lazy initialized)
+    // ============================================
+    std::unique_ptr<CDXRLightmapBaker> m_dxrBaker;
+
+    // Backend-specific baking
+    void bakeWithCPU(CScene& scene, const SLightmapBakeConfig& config);
+    void bakeWithGPU(CScene& scene, const SLightmapBakeConfig& config);
 };

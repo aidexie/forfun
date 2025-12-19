@@ -1,5 +1,6 @@
 #include "VolumetricLightmap.h"
 #include "RayTracing/PathTraceBaker.h"
+#include "RayTracing/DXRLightmapBaker.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
@@ -37,6 +38,8 @@ CVolumetricLightmap::CVolumetricLightmap()
         m_sampler.reset(renderContext->CreateSampler(samplerDesc));
     }
 }
+
+CVolumetricLightmap::~CVolumetricLightmap() = default;
 
 bool CVolumetricLightmap::Initialize(const Config& config)
 {
@@ -419,85 +422,154 @@ bool CVolumetricLightmap::allocateBrickInAtlas(SBrick& brick)
 // 烘焙
 // ============================================
 
-void CVolumetricLightmap::BakeAllBricks(CScene& scene)
+bool CVolumetricLightmap::IsDXRBakingAvailable() const
 {
-   if (m_bricks.empty()) {
-       CFFLog::Warning("[VolumetricLightmap] No bricks to bake! Call BuildOctree first.");
-       return;
-   }
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    return ctx && ctx->SupportsRaytracing();
+}
 
-   // 创建 Path Trace Baker
-   SPathTraceConfig ptConfig;
-   ptConfig.samplesPerVoxel = 32*32*6;   // 每个 voxel 采样 64 次
-   ptConfig.maxBounces = 3;         // 最多 3 次反弹
-   ptConfig.useRussianRoulette = true;
+void CVolumetricLightmap::BakeAllBricks(CScene& scene, const SLightmapBakeConfig& config)
+{
+    if (m_bricks.empty()) {
+        CFFLog::Warning("[VolumetricLightmap] No bricks to bake! Call BuildOctree first.");
+        return;
+    }
 
-   CPathTraceBaker baker;
-   if (!baker.Initialize(scene, ptConfig)) {
-       CFFLog::Error("[VolumetricLightmap] Failed to initialize PathTraceBaker!");
-       return;
-   }
+    // Determine which backend to use
+    ELightmapBakeBackend backend = config.backend;
 
-   int totalBricks = (int)m_bricks.size();
-   int totalVoxels = totalBricks * VL_BRICK_VOXEL_COUNT;
-   int bakedVoxels = 0;
+    // Auto-fallback if DXR requested but not available
+    if (backend == ELightmapBakeBackend::GPU_DXR && !IsDXRBakingAvailable()) {
+        CFFLog::Warning("[VolumetricLightmap] DXR not supported on this device, falling back to CPU");
+        backend = ELightmapBakeBackend::CPU;
+    }
 
-   // 计算合适的进度打印间隔
-   // 对于小数量的 Brick，每个都打印；对于大数量，按百分比打印
-   int progressInterval = std::max(1, totalBricks / 20);  // 最多打印约 20 次进度
+    // Dispatch to appropriate backend
+    if (backend == ELightmapBakeBackend::GPU_DXR) {
+        bakeWithGPU(scene, config);
+    } else {
+        bakeWithCPU(scene, config);
+    }
 
-   CFFLog::Info("[VolumetricLightmap] ========================================");
-   CFFLog::Info("[VolumetricLightmap] Starting Path Trace bake...");
-   CFFLog::Info("[VolumetricLightmap]   Total Bricks: %d", totalBricks);
-   CFFLog::Info("[VolumetricLightmap]   Total Voxels: %d (%d per brick)", totalVoxels, VL_BRICK_VOXEL_COUNT);
-   CFFLog::Info("[VolumetricLightmap]   Samples per voxel: %d", ptConfig.samplesPerVoxel);
-   CFFLog::Info("[VolumetricLightmap]   Max bounces: %d", ptConfig.maxBounces);
-   CFFLog::Info("[VolumetricLightmap]   Volume: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
-                m_config.volumeMin.x, m_config.volumeMin.y, m_config.volumeMin.z,
-                m_config.volumeMax.x, m_config.volumeMax.y, m_config.volumeMax.z);
-   CFFLog::Info("[VolumetricLightmap] ========================================");
+    // Apply dilation to fill invalid probes with data from nearby valid probes
+    //dilateInvalidProbes();
+}
 
-   auto startTime = std::chrono::high_resolution_clock::now();
-   auto lastProgressTime = startTime;
+void CVolumetricLightmap::bakeWithCPU(CScene& scene, const SLightmapBakeConfig& config)
+{
+    // 创建 Path Trace Baker
+    SPathTraceConfig ptConfig;
+    ptConfig.samplesPerVoxel = config.cpuSamplesPerVoxel;
+    ptConfig.maxBounces = config.cpuMaxBounces;
+    ptConfig.useRussianRoulette = true;
 
-   for (size_t i = 0; i < m_bricks.size(); i++)
-   {
-       bakeBrick(m_bricks[i], scene, baker);
-       bakedVoxels += VL_BRICK_VOXEL_COUNT;
+    CPathTraceBaker baker;
+    if (!baker.Initialize(scene, ptConfig)) {
+        CFFLog::Error("[VolumetricLightmap] Failed to initialize PathTraceBaker!");
+        return;
+    }
 
-       // 进度日志
-       bool shouldPrint = (i + 1) % progressInterval == 0 || i == m_bricks.size() - 1;
-       if (shouldPrint)
-       {
-           auto now = std::chrono::high_resolution_clock::now();
-           float elapsedSec = std::chrono::duration<float>(now - startTime).count();
-           float progressPercent = 100.0f * (i + 1) / totalBricks;
+    int totalBricks = (int)m_bricks.size();
+    int totalVoxels = totalBricks * VL_BRICK_VOXEL_COUNT;
 
-           // 估算剩余时间
-           float estimatedTotalTime = (elapsedSec / (i + 1)) * totalBricks;
-           float remainingSec = estimatedTotalTime - elapsedSec;
+    // 计算合适的进度打印间隔
+    int progressInterval = std::max(1, totalBricks / 20);
 
-           CFFLog::Info("[VolumetricLightmap] Progress: %d/%d bricks (%.1f%%) | Elapsed: %.1fs | ETA: %.1fs",
-                        (int)(i + 1), totalBricks, progressPercent, elapsedSec, remainingSec);
-       }
-   }
+    CFFLog::Info("[VolumetricLightmap] ========================================");
+    CFFLog::Info("[VolumetricLightmap] Starting CPU Path Trace bake...");
+    CFFLog::Info("[VolumetricLightmap]   Total Bricks: %d", totalBricks);
+    CFFLog::Info("[VolumetricLightmap]   Total Voxels: %d (%d per brick)", totalVoxels, VL_BRICK_VOXEL_COUNT);
+    CFFLog::Info("[VolumetricLightmap]   Samples per voxel: %d", ptConfig.samplesPerVoxel);
+    CFFLog::Info("[VolumetricLightmap]   Max bounces: %d", ptConfig.maxBounces);
+    CFFLog::Info("[VolumetricLightmap]   Volume: (%.1f, %.1f, %.1f) to (%.1f, %.1f, %.1f)",
+                 m_config.volumeMin.x, m_config.volumeMin.y, m_config.volumeMin.z,
+                 m_config.volumeMax.x, m_config.volumeMax.y, m_config.volumeMax.z);
+    CFFLog::Info("[VolumetricLightmap] ========================================");
 
-   auto endTime = std::chrono::high_resolution_clock::now();
-   float totalElapsedSec = std::chrono::duration<float>(endTime - startTime).count();
+    auto startTime = std::chrono::high_resolution_clock::now();
 
-   baker.Shutdown();
+    for (size_t i = 0; i < m_bricks.size(); i++)
+    {
+        bakeBrick(m_bricks[i], scene, baker);
 
-   CFFLog::Info("[VolumetricLightmap] ========================================");
-   CFFLog::Info("[VolumetricLightmap] Path Trace bake complete!");
-   CFFLog::Info("[VolumetricLightmap]   Bricks baked: %d", totalBricks);
-   CFFLog::Info("[VolumetricLightmap]   Voxels baked: %d", totalVoxels);
-   CFFLog::Info("[VolumetricLightmap]   Total time: %.2f seconds", totalElapsedSec);
-   CFFLog::Info("[VolumetricLightmap]   Avg per brick: %.3f ms", (totalElapsedSec * 1000.0f) / totalBricks);
-   CFFLog::Info("[VolumetricLightmap]   Avg per voxel: %.3f ms", (totalElapsedSec * 1000.0f) / totalVoxels);
-   CFFLog::Info("[VolumetricLightmap] ========================================");
+        // Progress callback
+        if (config.progressCallback) {
+            float progress = static_cast<float>(i + 1) / static_cast<float>(totalBricks);
+            config.progressCallback(progress);
+        }
 
-   // Apply dilation to fill invalid probes with data from nearby valid probes
-   //dilateInvalidProbes();
+        // 进度日志
+        bool shouldPrint = (i + 1) % progressInterval == 0 || i == m_bricks.size() - 1;
+        if (shouldPrint)
+        {
+            auto now = std::chrono::high_resolution_clock::now();
+            float elapsedSec = std::chrono::duration<float>(now - startTime).count();
+            float progressPercent = 100.0f * (i + 1) / totalBricks;
+
+            float estimatedTotalTime = (elapsedSec / (i + 1)) * totalBricks;
+            float remainingSec = estimatedTotalTime - elapsedSec;
+
+            CFFLog::Info("[VolumetricLightmap] Progress: %d/%d bricks (%.1f%%) | Elapsed: %.1fs | ETA: %.1fs",
+                         (int)(i + 1), totalBricks, progressPercent, elapsedSec, remainingSec);
+        }
+    }
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    float totalElapsedSec = std::chrono::duration<float>(endTime - startTime).count();
+
+    baker.Shutdown();
+
+    CFFLog::Info("[VolumetricLightmap] ========================================");
+    CFFLog::Info("[VolumetricLightmap] CPU Path Trace bake complete!");
+    CFFLog::Info("[VolumetricLightmap]   Bricks baked: %d", totalBricks);
+    CFFLog::Info("[VolumetricLightmap]   Voxels baked: %d", totalVoxels);
+    CFFLog::Info("[VolumetricLightmap]   Total time: %.2f seconds", totalElapsedSec);
+    CFFLog::Info("[VolumetricLightmap]   Avg per brick: %.3f ms", (totalElapsedSec * 1000.0f) / totalBricks);
+    CFFLog::Info("[VolumetricLightmap]   Avg per voxel: %.3f ms", (totalElapsedSec * 1000.0f) / totalVoxels);
+    CFFLog::Info("[VolumetricLightmap] ========================================");
+}
+
+void CVolumetricLightmap::bakeWithGPU(CScene& scene, const SLightmapBakeConfig& config)
+{
+    CFFLog::Info("[VolumetricLightmap] ========================================");
+    CFFLog::Info("[VolumetricLightmap] Starting GPU DXR bake...");
+    CFFLog::Info("[VolumetricLightmap]   Samples per pass: %d", config.gpuSamplesPerVoxel);
+    CFFLog::Info("[VolumetricLightmap]   Accumulation passes: %d", config.gpuAccumulationPasses);
+    CFFLog::Info("[VolumetricLightmap]   Total samples per voxel: %d", config.gpuSamplesPerVoxel * config.gpuAccumulationPasses);
+    CFFLog::Info("[VolumetricLightmap]   Max bounces: %d", config.gpuMaxBounces);
+    CFFLog::Info("[VolumetricLightmap] ========================================");
+
+    // Lazy initialize DXR baker
+    if (!m_dxrBaker) {
+        m_dxrBaker = std::make_unique<CDXRLightmapBaker>();
+    }
+
+    if (!m_dxrBaker->IsReady()) {
+        if (!m_dxrBaker->Initialize()) {
+            CFFLog::Error("[VolumetricLightmap] Failed to initialize DXR baker, falling back to CPU");
+            bakeWithCPU(scene, config);
+            return;
+        }
+    }
+
+    // Configure DXR bake
+    SDXRBakeConfig dxrConfig;
+    dxrConfig.samplesPerVoxel = config.gpuSamplesPerVoxel;
+    dxrConfig.accumulationPasses = config.gpuAccumulationPasses;
+    dxrConfig.maxBounces = config.gpuMaxBounces;
+    dxrConfig.skyIntensity = config.gpuSkyIntensity;
+    dxrConfig.progressCallback = config.progressCallback;
+
+    // Run DXR bake
+    if (!m_dxrBaker->BakeVolumetricLightmap(*this, scene, dxrConfig)) {
+        CFFLog::Error("[VolumetricLightmap] DXR bake failed, falling back to CPU");
+        bakeWithCPU(scene, config);
+        return;
+    }
+
+    CFFLog::Info("[VolumetricLightmap] ========================================");
+    CFFLog::Info("[VolumetricLightmap] GPU DXR bake complete!");
+    CFFLog::Info("[VolumetricLightmap] ========================================");
 }
 
 void CVolumetricLightmap::bakeBrick(SBrick& brick, CScene& scene, CPathTraceBaker& baker)
