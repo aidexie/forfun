@@ -4,6 +4,7 @@
 #include "DX12Context.h"
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
+#include "DX12AccelerationStructure.h"
 #include "../RHIManager.h"
 #include "../../Core/FFLog.h"
 #include "../../Core/PathManager.h"
@@ -870,6 +871,112 @@ void CDX12CommandList::BindPendingResourcesCompute() {
         }
         m_uavDirty = false;
     }
+}
+
+// ============================================
+// Ray Tracing Commands
+// ============================================
+
+void CDX12CommandList::BuildAccelerationStructure(IAccelerationStructure* as) {
+    if (!as) {
+        CFFLog::Warning("[DX12CommandList] BuildAccelerationStructure: null acceleration structure");
+        return;
+    }
+
+    // Query for ID3D12GraphicsCommandList4 which has ray tracing support
+    ComPtr<ID3D12GraphicsCommandList4> cmdList4;
+    if (FAILED(m_commandList->QueryInterface(IID_PPV_ARGS(&cmdList4)))) {
+        CFFLog::Error("[DX12CommandList] BuildAccelerationStructure: Failed to query ID3D12GraphicsCommandList4");
+        return;
+    }
+
+    auto* dx12AS = static_cast<CDX12AccelerationStructure*>(as);
+
+    // Get build desc from acceleration structure
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = dx12AS->GetBuildDesc();
+
+    // Execute the build
+    cmdList4->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+
+    // Insert UAV barrier to ensure build completes before use
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barrier.UAV.pResource = dx12AS->GetResultBuffer();
+    m_commandList->ResourceBarrier(1, &barrier);
+
+    dx12AS->MarkBuilt();
+}
+
+void CDX12CommandList::SetRayTracingPipelineState(IRayTracingPipelineState* pso) {
+    if (!pso) {
+        CFFLog::Warning("[DX12CommandList] SetRayTracingPipelineState: null PSO");
+        return;
+    }
+
+    // Query for ID3D12GraphicsCommandList4
+    ComPtr<ID3D12GraphicsCommandList4> cmdList4;
+    if (FAILED(m_commandList->QueryInterface(IID_PPV_ARGS(&cmdList4)))) {
+        CFFLog::Error("[DX12CommandList] SetRayTracingPipelineState: Failed to query ID3D12GraphicsCommandList4");
+        return;
+    }
+
+    ID3D12StateObject* stateObject = static_cast<ID3D12StateObject*>(pso->GetNativeHandle());
+    cmdList4->SetPipelineState1(stateObject);
+}
+
+void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
+    if (!desc.shaderBindingTable) {
+        CFFLog::Warning("[DX12CommandList] DispatchRays: null SBT");
+        return;
+    }
+
+    // Query for ID3D12GraphicsCommandList4
+    ComPtr<ID3D12GraphicsCommandList4> cmdList4;
+    if (FAILED(m_commandList->QueryInterface(IID_PPV_ARGS(&cmdList4)))) {
+        CFFLog::Error("[DX12CommandList] DispatchRays: Failed to query ID3D12GraphicsCommandList4");
+        return;
+    }
+
+    IShaderBindingTable* sbt = desc.shaderBindingTable;
+
+    D3D12_DISPATCH_RAYS_DESC d3dDesc = {};
+
+    // Ray generation shader record
+    d3dDesc.RayGenerationShaderRecord.StartAddress = sbt->GetRayGenShaderRecordAddress();
+    d3dDesc.RayGenerationShaderRecord.SizeInBytes = sbt->GetRayGenShaderRecordSize();
+
+    // Miss shader table
+    d3dDesc.MissShaderTable.StartAddress = sbt->GetMissShaderTableAddress();
+    d3dDesc.MissShaderTable.SizeInBytes = sbt->GetMissShaderTableSize();
+    d3dDesc.MissShaderTable.StrideInBytes = sbt->GetMissShaderTableStride();
+
+    // Hit group table
+    d3dDesc.HitGroupTable.StartAddress = sbt->GetHitGroupTableAddress();
+    d3dDesc.HitGroupTable.SizeInBytes = sbt->GetHitGroupTableSize();
+    d3dDesc.HitGroupTable.StrideInBytes = sbt->GetHitGroupTableStride();
+
+    // Dispatch dimensions
+    d3dDesc.Width = desc.width;
+    d3dDesc.Height = desc.height;
+    d3dDesc.Depth = desc.depth;
+
+    cmdList4->DispatchRays(&d3dDesc);
+}
+
+void CDX12CommandList::SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) {
+    // In our root signature, we would need to add a slot for acceleration structures
+    // For now, this binds the TLAS SRV to the specified slot in the SRV table
+    // This is a simplification - a full implementation would use a dedicated root parameter
+
+    if (!tlas) {
+        CFFLog::Warning("[DX12CommandList] SetAccelerationStructure: null TLAS");
+        return;
+    }
+
+    // For now, we'll treat the acceleration structure as an SRV
+    // The GPU virtual address can be used with SetComputeRootShaderResourceView
+    // However, proper implementation requires root signature modification
+    CFFLog::Warning("[DX12CommandList] SetAccelerationStructure: Not fully implemented - needs root signature update");
 }
 
 } // namespace DX12

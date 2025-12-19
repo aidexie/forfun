@@ -1,5 +1,6 @@
 #pragma once
 #include "../ICommandList.h"
+#include "../RHIRayTracing.h"
 #include "DX11Resources.h"
 #include <d3d11.h>
 #include <vector>
@@ -78,6 +79,12 @@ public:
     // Debug Events
     void BeginEvent(const wchar_t* name) override;
     void EndEvent() override;
+
+    // Ray Tracing (stubs - DX11 doesn't support ray tracing)
+    void BuildAccelerationStructure(IAccelerationStructure* as) override {}
+    void SetRayTracingPipelineState(IRayTracingPipelineState* pso) override {}
+    void DispatchRays(const DispatchRaysDesc& desc) override {}
+    void SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) override {}
 
 private:
     ID3D11DeviceContext* m_context;  // Non-owning

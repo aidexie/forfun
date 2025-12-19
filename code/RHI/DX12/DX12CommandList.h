@@ -5,6 +5,7 @@
 #include "DX12DynamicBuffer.h"
 #include "../ICommandList.h"
 #include "../RHIResources.h"
+#include "../RHIRayTracing.h"
 #include <memory>
 
 // ============================================
@@ -103,6 +104,12 @@ public:
     // Debug Events
     void BeginEvent(const wchar_t* name) override;
     void EndEvent() override;
+
+    // Ray Tracing Commands
+    void BuildAccelerationStructure(IAccelerationStructure* as) override;
+    void SetRayTracingPipelineState(IRayTracingPipelineState* pso) override;
+    void DispatchRays(const DispatchRaysDesc& desc) override;
+    void SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) override;
 
 private:
     // Helper to transition resource to required state

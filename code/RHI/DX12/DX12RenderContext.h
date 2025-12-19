@@ -6,6 +6,7 @@
 #include "DX12DynamicBuffer.h"
 #include "DX12GenerateMipsPass.h"
 #include "../IRenderContext.h"
+#include "../RHIRayTracing.h"
 
 // ============================================
 // DX12 Render Context Implementation
@@ -62,6 +63,14 @@ public:
     // Advanced
     void* GetNativeDevice() override;
     void* GetNativeContext() override;
+
+    // Ray Tracing (DXR)
+    AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override;
+    AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) override;
+    IAccelerationStructure* CreateBLAS(const BLASDesc& desc, IBuffer* scratchBuffer, IBuffer* resultBuffer) override;
+    IAccelerationStructure* CreateTLAS(const TLASDesc& desc, IBuffer* scratchBuffer, IBuffer* resultBuffer, IBuffer* instanceBuffer) override;
+    IRayTracingPipelineState* CreateRayTracingPipelineState(const RayTracingPipelineDesc& desc) override;
+    IShaderBindingTable* CreateShaderBindingTable(const ShaderBindingTableDesc& desc) override;
 
     // ============================================
     // DX12-Specific Accessors

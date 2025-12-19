@@ -118,6 +118,7 @@ enum class ETextureFormat {
     R8G8B8A8_TYPELESS,      // For creating views with different formats
     R16G16_FLOAT,           // For BRDF LUT
     R16G16B16A16_FLOAT,
+    R32G32B32_FLOAT,        // For vertex positions in ray tracing
     R32G32B32A32_FLOAT,
     B8G8R8A8_UNORM,
     B8G8R8A8_UNORM_SRGB,
@@ -154,6 +155,7 @@ inline uint32_t GetBytesPerPixel(ETextureFormat format) {
         case ETextureFormat::R16G16_FLOAT:          return 4;
         case ETextureFormat::R16G16B16A16_FLOAT:    return 8;
         case ETextureFormat::R32G32_UINT:           return 8;
+        case ETextureFormat::R32G32B32_FLOAT:       return 12;
         case ETextureFormat::R32G32B32A32_FLOAT:
         case ETextureFormat::R32G32B32A32_UINT:     return 16;
         default:                                     return 0;

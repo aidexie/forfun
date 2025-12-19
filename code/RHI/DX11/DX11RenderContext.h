@@ -1,5 +1,6 @@
 #pragma once
 #include "../IRenderContext.h"
+#include "../RHIRayTracing.h"
 #include "DX11CommandList.h"
 #include "DX11Resources.h"
 #include "DX11Context.h"
@@ -52,6 +53,14 @@ public:
     // Advanced
     void* GetNativeDevice() override;
     void* GetNativeContext() override;
+
+    // Ray Tracing (stubs - DX11 doesn't support ray tracing)
+    AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override { return {}; }
+    AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) override { return {}; }
+    IAccelerationStructure* CreateBLAS(const BLASDesc& desc, IBuffer* scratchBuffer, IBuffer* resultBuffer) override { return nullptr; }
+    IAccelerationStructure* CreateTLAS(const TLASDesc& desc, IBuffer* scratchBuffer, IBuffer* resultBuffer, IBuffer* instanceBuffer) override { return nullptr; }
+    IRayTracingPipelineState* CreateRayTracingPipelineState(const RayTracingPipelineDesc& desc) override { return nullptr; }
+    IShaderBindingTable* CreateShaderBindingTable(const ShaderBindingTableDesc& desc) override { return nullptr; }
 
 private:
     std::unique_ptr<CDX11CommandList> m_commandList;

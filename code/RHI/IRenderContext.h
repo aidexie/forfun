@@ -10,6 +10,16 @@
 
 namespace RHI {
 
+// Forward declarations for ray tracing types
+class IAccelerationStructure;
+class IRayTracingPipelineState;
+class IShaderBindingTable;
+struct BLASDesc;
+struct TLASDesc;
+struct RayTracingPipelineDesc;
+struct ShaderBindingTableDesc;
+struct AccelerationStructurePrebuildInfo;
+
 class IRenderContext {
 public:
     virtual ~IRenderContext() = default;
@@ -128,6 +138,46 @@ public:
     // DX11: returns ID3D11DeviceContext*
     // DX12: returns ID3D12GraphicsCommandList* (of current command list)
     virtual void* GetNativeContext() = 0;
+
+    // ============================================
+    // Ray Tracing (DXR)
+    // ============================================
+    // These methods return nullptr on backends that don't support ray tracing.
+    // Always check SupportsRaytracing() before using these methods.
+
+    // Get prebuild info for acceleration structure
+    // Used to determine buffer sizes before building
+    virtual AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(
+        const BLASDesc& desc) = 0;
+    virtual AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(
+        const TLASDesc& desc) = 0;
+
+    // Create Bottom-Level Acceleration Structure (BLAS)
+    // Contains geometry (triangles or procedural AABBs)
+    // scratchBuffer: Temporary buffer for build (size from GetAccelerationStructurePrebuildInfo)
+    // resultBuffer: Output buffer for BLAS data (size from GetAccelerationStructurePrebuildInfo)
+    virtual IAccelerationStructure* CreateBLAS(
+        const BLASDesc& desc,
+        IBuffer* scratchBuffer,
+        IBuffer* resultBuffer) = 0;
+
+    // Create Top-Level Acceleration Structure (TLAS)
+    // Contains instances referencing BLASes
+    virtual IAccelerationStructure* CreateTLAS(
+        const TLASDesc& desc,
+        IBuffer* scratchBuffer,
+        IBuffer* resultBuffer,
+        IBuffer* instanceBuffer) = 0;
+
+    // Create ray tracing pipeline state
+    // Contains all shaders (ray generation, miss, hit groups)
+    virtual IRayTracingPipelineState* CreateRayTracingPipelineState(
+        const RayTracingPipelineDesc& desc) = 0;
+
+    // Create shader binding table
+    // Maps shader records for DispatchRays
+    virtual IShaderBindingTable* CreateShaderBindingTable(
+        const ShaderBindingTableDesc& desc) = 0;
 };
 
 } // namespace RHI

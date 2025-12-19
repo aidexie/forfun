@@ -5,6 +5,7 @@
 #include "DX12DescriptorHeap.h"
 #include "DX12UploadManager.h"
 #include "DX12PipelineState.h"
+#include "DX12AccelerationStructure.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -1247,6 +1248,121 @@ void CDX12RenderContext::ReleaseBackbufferWrappers() {
     for (uint32_t i = 0; i < NUM_FRAMES_IN_FLIGHT; ++i) {
         m_backbufferWrappers[i].reset();
     }
+}
+
+// ============================================
+// Ray Tracing (DXR)
+// ============================================
+
+AccelerationStructurePrebuildInfo CDX12RenderContext::GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) {
+    if (!SupportsRaytracing()) {
+        CFFLog::Warning("[DX12RenderContext] Ray tracing not supported");
+        return {};
+    }
+
+    ComPtr<ID3D12Device5> device5;
+    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+        return {};
+    }
+
+    return GetBLASPrebuildInfo(device5.Get(), desc);
+}
+
+AccelerationStructurePrebuildInfo CDX12RenderContext::GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) {
+    if (!SupportsRaytracing()) {
+        CFFLog::Warning("[DX12RenderContext] Ray tracing not supported");
+        return {};
+    }
+
+    ComPtr<ID3D12Device5> device5;
+    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+        return {};
+    }
+
+    return GetTLASPrebuildInfo(device5.Get(), desc);
+}
+
+IAccelerationStructure* CDX12RenderContext::CreateBLAS(
+    const BLASDesc& desc,
+    IBuffer* scratchBuffer,
+    IBuffer* resultBuffer)
+{
+    if (!SupportsRaytracing()) {
+        CFFLog::Warning("[DX12RenderContext] Ray tracing not supported");
+        return nullptr;
+    }
+
+    if (!scratchBuffer || !resultBuffer) {
+        CFFLog::Error("[DX12RenderContext] CreateBLAS: null buffer");
+        return nullptr;
+    }
+
+    ComPtr<ID3D12Device5> device5;
+    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+        return nullptr;
+    }
+
+    return new CDX12AccelerationStructure(device5.Get(), desc, scratchBuffer, resultBuffer);
+}
+
+IAccelerationStructure* CDX12RenderContext::CreateTLAS(
+    const TLASDesc& desc,
+    IBuffer* scratchBuffer,
+    IBuffer* resultBuffer,
+    IBuffer* instanceBuffer)
+{
+    if (!SupportsRaytracing()) {
+        CFFLog::Warning("[DX12RenderContext] Ray tracing not supported");
+        return nullptr;
+    }
+
+    if (!scratchBuffer || !resultBuffer || !instanceBuffer) {
+        CFFLog::Error("[DX12RenderContext] CreateTLAS: null buffer");
+        return nullptr;
+    }
+
+    ComPtr<ID3D12Device5> device5;
+    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+        return nullptr;
+    }
+
+    // Write instance data to the instance buffer
+    void* mappedData = instanceBuffer->Map();
+    if (mappedData) {
+        WriteInstanceData(mappedData, desc);
+        instanceBuffer->Unmap();
+    } else {
+        CFFLog::Error("[DX12RenderContext] CreateTLAS: Failed to map instance buffer");
+        return nullptr;
+    }
+
+    return new CDX12AccelerationStructure(device5.Get(), desc, scratchBuffer, resultBuffer, instanceBuffer);
+}
+
+IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(const RayTracingPipelineDesc& desc) {
+    if (!SupportsRaytracing()) {
+        CFFLog::Warning("[DX12RenderContext] Ray tracing not supported");
+        return nullptr;
+    }
+
+    // TODO: Implement in Phase 1.3
+    CFFLog::Warning("[DX12RenderContext] CreateRayTracingPipelineState not implemented yet");
+    return nullptr;
+}
+
+IShaderBindingTable* CDX12RenderContext::CreateShaderBindingTable(const ShaderBindingTableDesc& desc) {
+    if (!SupportsRaytracing()) {
+        CFFLog::Warning("[DX12RenderContext] Ray tracing not supported");
+        return nullptr;
+    }
+
+    // TODO: Implement in Phase 1.4
+    CFFLog::Warning("[DX12RenderContext] CreateShaderBindingTable not implemented yet");
+    return nullptr;
 }
 
 } // namespace DX12

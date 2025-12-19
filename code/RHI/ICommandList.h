@@ -8,6 +8,12 @@
 
 namespace RHI {
 
+// Forward declarations for ray tracing
+class IAccelerationStructure;
+class IShaderBindingTable;
+class IRayTracingPipelineState;
+struct DispatchRaysDesc;
+
 class ICommandList {
 public:
     virtual ~ICommandList() = default;
@@ -171,6 +177,26 @@ public:
 
     // End the current event region
     virtual void EndEvent() = 0;
+
+    // ============================================
+    // Ray Tracing Commands (DXR)
+    // ============================================
+    // These methods are no-ops on backends that don't support ray tracing.
+
+    // Build acceleration structure (BLAS or TLAS)
+    // Executes the build on GPU command queue
+    virtual void BuildAccelerationStructure(IAccelerationStructure* as) = 0;
+
+    // Set ray tracing pipeline state
+    virtual void SetRayTracingPipelineState(IRayTracingPipelineState* pso) = 0;
+
+    // Dispatch rays
+    // Launches ray generation shaders
+    virtual void DispatchRays(const DispatchRaysDesc& desc) = 0;
+
+    // Set acceleration structure for shader access
+    // Binds TLAS to shader resource slot for TraceRay() calls
+    virtual void SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) = 0;
 };
 
 // RAII wrapper for debug events

@@ -109,6 +109,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/RHICommon.h
     ${CODE_PATH}/RHI/RHIDescriptors.h
     ${CODE_PATH}/RHI/RHIResources.h
+    ${CODE_PATH}/RHI/RHIRayTracing.h
     ${CODE_PATH}/RHI/RHIHelpers.cpp
     ${CODE_PATH}/RHI/RHIHelpers.h
     ${CODE_PATH}/RHI/ICommandList.h
@@ -154,6 +155,8 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12RenderContext.cpp
     ${CODE_PATH}/RHI/DX12/DX12PipelineState.h
     ${CODE_PATH}/RHI/DX12/DX12PipelineState.cpp
+    ${CODE_PATH}/RHI/DX12/DX12AccelerationStructure.h
+    ${CODE_PATH}/RHI/DX12/DX12AccelerationStructure.cpp
     ${CODE_PATH}/RHI/DX12/DX12Debug.cpp
 )
 
