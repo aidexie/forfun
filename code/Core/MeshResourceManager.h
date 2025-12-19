@@ -19,8 +19,10 @@ public:
     // Returns nullptr on failure
     // Supports .obj and .gltf files
     // For glTF files with multiple sub-meshes, returns a vector
+    // If cacheForRayTracing is true, also stores mesh data in CRayTracingMeshCache
     std::vector<std::shared_ptr<GpuMeshResource>> GetOrLoad(
-        const std::string& path
+        const std::string& path,
+        bool cacheForRayTracing = false
     );
 
     // Remove unused resources from cache (resources only held by weak_ptr)
@@ -46,6 +48,9 @@ private:
     std::shared_ptr<GpuMeshResource> UploadGltfMesh(
         const SGltfMeshCPU& gltfMesh
     );
+
+    // Cache mesh data for ray tracing
+    void CacheMeshForRayTracing(const SMeshCPU_PNT& cpu, const std::string& path, uint32_t subMeshIndex);
 
 private:
     // Cache: path -> weak_ptr (allows resources to be freed when no longer used)

@@ -4,6 +4,7 @@
 #include "Mesh.h"
 #include "Loader/ObjLoader.h"
 #include "Loader/GltfLoader.h"
+#include "../Engine/Rendering/RayTracing/SceneGeometryExport.h"
 #include <algorithm>
 
 CMeshResourceManager& CMeshResourceManager::Instance() {
@@ -11,8 +12,44 @@ CMeshResourceManager& CMeshResourceManager::Instance() {
     return instance;
 }
 
+void CMeshResourceManager::CacheMeshForRayTracing(const SMeshCPU_PNT& cpu, const std::string& path, uint32_t subMeshIndex) {
+    SRayTracingMeshData rtData;
+    rtData.sourcePath = path;
+    rtData.vertexCount = static_cast<uint32_t>(cpu.vertices.size());
+    rtData.indexCount = static_cast<uint32_t>(cpu.indices.size());
+
+    // Extract positions
+    rtData.positions.reserve(cpu.vertices.size());
+    for (const auto& v : cpu.vertices) {
+        rtData.positions.push_back(DirectX::XMFLOAT3(v.px, v.py, v.pz));
+    }
+
+    // Copy indices
+    rtData.indices = cpu.indices;
+
+    // Compute bounds
+    if (!cpu.vertices.empty()) {
+        rtData.boundsMin = DirectX::XMFLOAT3(FLT_MAX, FLT_MAX, FLT_MAX);
+        rtData.boundsMax = DirectX::XMFLOAT3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+        for (const auto& v : cpu.vertices) {
+            rtData.boundsMin.x = std::min(rtData.boundsMin.x, v.px);
+            rtData.boundsMin.y = std::min(rtData.boundsMin.y, v.py);
+            rtData.boundsMin.z = std::min(rtData.boundsMin.z, v.pz);
+
+            rtData.boundsMax.x = std::max(rtData.boundsMax.x, v.px);
+            rtData.boundsMax.y = std::max(rtData.boundsMax.y, v.py);
+            rtData.boundsMax.z = std::max(rtData.boundsMax.z, v.pz);
+        }
+    }
+
+    // Store in cache
+    CRayTracingMeshCache::Instance().StoreMeshData(path, subMeshIndex, rtData);
+}
+
 std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
-    const std::string& path
+    const std::string& path,
+    bool cacheForRayTracing
 ) {
     if (path.empty()) {
         return {};
@@ -61,6 +98,11 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
         }
         RecenterAndScale(cpu, 2.0f);
 
+        // Cache for ray tracing if requested
+        if (cacheForRayTracing) {
+            CacheMeshForRayTracing(cpu, path, 0);
+        }
+
         auto resource = UploadMesh(cpu);
         if (resource) {
             resources.push_back(resource);
@@ -73,11 +115,39 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
             return {};
         }
 
+        uint32_t subMeshIndex = 0;
         for (auto& gltfMesh : meshes) {
+            // Cache for ray tracing if requested
+            if (cacheForRayTracing) {
+                CacheMeshForRayTracing(gltfMesh.mesh, path, subMeshIndex);
+            }
+
             auto resource = UploadGltfMesh(gltfMesh);
             if (resource) {
                 resources.push_back(resource);
             }
+            subMeshIndex++;
+        }
+    }
+    // Load GLB (same as glTF)
+    else if (lower.size() >= 4 && lower.substr(lower.size() - 4) == ".glb") {
+        std::vector<SGltfMeshCPU> meshes;
+        if (!LoadGLTF_PNT(path.c_str(), meshes, /*flipZ_to_LH*/true, /*flipWinding*/true)) {
+            return {};
+        }
+
+        uint32_t subMeshIndex = 0;
+        for (auto& gltfMesh : meshes) {
+            // Cache for ray tracing if requested
+            if (cacheForRayTracing) {
+                CacheMeshForRayTracing(gltfMesh.mesh, path, subMeshIndex);
+            }
+
+            auto resource = UploadGltfMesh(gltfMesh);
+            if (resource) {
+                resources.push_back(resource);
+            }
+            subMeshIndex++;
         }
     }
 
