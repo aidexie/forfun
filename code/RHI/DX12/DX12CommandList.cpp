@@ -980,19 +980,52 @@ void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
 }
 
 void CDX12CommandList::SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) {
-    // In our root signature, we would need to add a slot for acceleration structures
-    // For now, this binds the TLAS SRV to the specified slot in the SRV table
-    // This is a simplification - a full implementation would use a dedicated root parameter
-
     if (!tlas) {
         CFFLog::Warning("[DX12CommandList] SetAccelerationStructure: null TLAS");
         return;
     }
 
-    // For now, we'll treat the acceleration structure as an SRV
-    // The GPU virtual address can be used with SetComputeRootShaderResourceView
-    // However, proper implementation requires root signature modification
-    CFFLog::Warning("[DX12CommandList] SetAccelerationStructure: Not fully implemented - needs root signature update");
+    // Get the GPU virtual address of the TLAS
+    uint64_t gpuVA = tlas->GetGPUVirtualAddress();
+    if (gpuVA == 0) {
+        CFFLog::Warning("[DX12CommandList] SetAccelerationStructure: TLAS has no GPU address");
+        return;
+    }
+
+    // For ray tracing, the TLAS is accessed via its GPU virtual address
+    // The shader uses: RaytracingAccelerationStructure g_Scene : register(t0);
+    //
+    // Create an SRV descriptor for the TLAS and put it in the pending SRV slot.
+    // The acceleration structure SRV has a special format with ViewDimension =
+    // D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE
+
+    // Allocate a descriptor from the CPU-side CBV/SRV/UAV heap
+    auto& heapManager = CDX12DescriptorHeapManager::Instance();
+    SDescriptorHandle handle = heapManager.AllocateCBVSRVUAV();
+    if (!handle.IsValid()) {
+        CFFLog::Error("[DX12CommandList] SetAccelerationStructure: Failed to allocate descriptor");
+        return;
+    }
+
+    // Create an SRV descriptor for the TLAS
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.RaytracingAccelerationStructure.Location = gpuVA;
+
+    // Create the SRV (note: pResource is nullptr for acceleration structures)
+    m_context->GetDevice()->CreateShaderResourceView(nullptr, &srvDesc, handle.cpuHandle);
+
+    // Store in pending SRV slot for binding
+    if (slot < MAX_SRV_SLOTS) {
+        m_pendingSRVCpuHandles[slot] = handle.cpuHandle;
+        m_srvDirty = true;
+    }
+
+    // Note: We're leaking the descriptor handle here since we don't track it.
+    // For a production implementation, we would need to track and free it
+    // after the command list completes. For now, this works but wastes descriptors.
 }
 
 } // namespace DX12
