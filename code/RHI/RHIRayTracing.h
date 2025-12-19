@@ -256,9 +256,9 @@ public:
 // Shader Binding Table (SBT)
 // ============================================
 
-// SBT record: shader identifier + local root arguments
+// SBT record: shader export name + local root arguments
 struct ShaderRecord {
-    const void* shaderIdentifier = nullptr;     // 32 bytes from pipeline
+    const char* exportName = nullptr;           // Shader export name (e.g., "RayGen", "Miss", "HitGroup")
     const void* localRootArguments = nullptr;   // Optional local data
     uint32_t localRootArgumentsSize = 0;
 };

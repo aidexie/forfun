@@ -6,6 +6,8 @@
 #include "DX12UploadManager.h"
 #include "DX12PipelineState.h"
 #include "DX12AccelerationStructure.h"
+#include "DX12RayTracingPipeline.h"
+#include "DX12ShaderBindingTable.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -1349,9 +1351,73 @@ IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(cons
         return nullptr;
     }
 
-    // TODO: Implement in Phase 1.3
-    CFFLog::Warning("[DX12RenderContext] CreateRayTracingPipelineState not implemented yet");
-    return nullptr;
+    if (!desc.shaderLibrary) {
+        CFFLog::Error("[DX12RenderContext] CreateRayTracingPipelineState: null shader library");
+        return nullptr;
+    }
+
+    ComPtr<ID3D12Device5> device5;
+    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
+        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+        return nullptr;
+    }
+
+    // Get shader bytecode
+    CDX12Shader* shader = static_cast<CDX12Shader*>(desc.shaderLibrary);
+    const auto& bytecode = shader->GetBytecodeData();
+
+    // Build pipeline using builder
+    CDX12RayTracingPipelineBuilder builder;
+    builder.SetShaderLibrary(bytecode.data(), bytecode.size());
+
+    // Add ray generation shaders
+    for (const auto& rayGenExport : desc.rayGenEntryPoints) {
+        // Convert to wide string
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, rayGenExport, -1, nullptr, 0);
+        std::wstring wideExport(wideLen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, rayGenExport, -1, wideExport.data(), wideLen);
+        builder.AddRayGenShader(wideExport.c_str());
+    }
+
+    // Add miss shaders
+    for (const auto& missExport : desc.missEntryPoints) {
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, missExport, -1, nullptr, 0);
+        std::wstring wideExport(wideLen, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, missExport, -1, wideExport.data(), wideLen);
+        builder.AddMissShader(wideExport.c_str());
+    }
+
+    // Add hit groups
+    for (const auto& hitGroup : desc.hitGroups) {
+        auto toWide = [](const char* str) -> std::wstring {
+            if (!str) return L"";
+            int wideLen = MultiByteToWideChar(CP_UTF8, 0, str, -1, nullptr, 0);
+            std::wstring wideStr(wideLen, L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, str, -1, wideStr.data(), wideLen);
+            return wideStr;
+        };
+
+        std::wstring name = toWide(hitGroup.hitGroupName);
+        std::wstring closestHit = toWide(hitGroup.closestHitEntryPoint);
+        std::wstring anyHit = toWide(hitGroup.anyHitEntryPoint);
+        std::wstring intersection = toWide(hitGroup.intersectionEntryPoint);
+
+        builder.AddHitGroup(
+            name.c_str(),
+            closestHit.empty() ? nullptr : closestHit.c_str(),
+            anyHit.empty() ? nullptr : anyHit.c_str(),
+            intersection.empty() ? nullptr : intersection.c_str());
+    }
+
+    // Set configuration
+    builder.SetMaxPayloadSize(desc.maxPayloadSizeInBytes);
+    builder.SetMaxAttributeSize(desc.maxAttributeSizeInBytes);
+    builder.SetMaxRecursionDepth(desc.maxTraceRecursionDepth);
+
+    // Use compute root signature as global root signature for ray tracing
+    builder.SetGlobalRootSignature(m_computeRootSignature.Get());
+
+    return builder.Build(device5.Get());
 }
 
 IShaderBindingTable* CDX12RenderContext::CreateShaderBindingTable(const ShaderBindingTableDesc& desc) {
@@ -1360,9 +1426,41 @@ IShaderBindingTable* CDX12RenderContext::CreateShaderBindingTable(const ShaderBi
         return nullptr;
     }
 
-    // TODO: Implement in Phase 1.4
-    CFFLog::Warning("[DX12RenderContext] CreateShaderBindingTable not implemented yet");
-    return nullptr;
+    if (!desc.pipeline) {
+        CFFLog::Error("[DX12RenderContext] CreateShaderBindingTable: null pipeline");
+        return nullptr;
+    }
+
+    if (desc.rayGenRecords.empty()) {
+        CFFLog::Error("[DX12RenderContext] CreateShaderBindingTable: no ray generation records");
+        return nullptr;
+    }
+
+    CDX12ShaderBindingTableBuilder builder;
+    builder.SetPipeline(desc.pipeline);
+
+    // Add ray generation records
+    for (const auto& record : desc.rayGenRecords) {
+        if (record.exportName) {
+            builder.AddRayGenRecord(record.exportName, record.localRootArguments, record.localRootArgumentsSize);
+        }
+    }
+
+    // Add miss shader records
+    for (const auto& record : desc.missRecords) {
+        if (record.exportName) {
+            builder.AddMissRecord(record.exportName, record.localRootArguments, record.localRootArgumentsSize);
+        }
+    }
+
+    // Add hit group records
+    for (const auto& record : desc.hitGroupRecords) {
+        if (record.exportName) {
+            builder.AddHitGroupRecord(record.exportName, record.localRootArguments, record.localRootArgumentsSize);
+        }
+    }
+
+    return builder.Build(CDX12Context::Instance().GetDevice());
 }
 
 } // namespace DX12
