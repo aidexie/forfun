@@ -334,10 +334,13 @@ bool CDXRAccelerationStructureManager::CreateGeometryBuffers(
     }
 
     // Create index buffer
+    // NOTE: For DXR BLAS building, index buffer needs NON_PIXEL_SHADER_RESOURCE state,
+    // so we use Structured usage instead of Index usage
     RHI::BufferDesc ibDesc;
     ibDesc.size = static_cast<uint32_t>(meshData.indices.size() * sizeof(uint32_t));
-    ibDesc.usage = RHI::EBufferUsage::Index;  // Index buffer
+    ibDesc.usage = RHI::EBufferUsage::Structured;  // For BLAS building (SRV access, not Index)
     ibDesc.cpuAccess = RHI::ECPUAccess::None;
+    ibDesc.structureByteStride = sizeof(uint32_t);
 
     outIndexBuffer.reset(ctx->CreateBuffer(ibDesc, meshData.indices.data()));
     if (!outIndexBuffer) {
