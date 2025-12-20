@@ -126,6 +126,7 @@ private:
 private:
     CDX12RenderContext* m_context = nullptr;
     ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12GraphicsCommandList4> m_commandList4;  // Cached for ray tracing (DXR)
 
     // Resource state tracking
     CDX12ResourceStateTracker m_stateTracker;

@@ -47,8 +47,8 @@ CDX12Buffer::~CDX12Buffer() {
 }
 
 void* CDX12Buffer::Map() {
-    if (m_desc.cpuAccess != ECPUAccess::Write) {
-        CFFLog::Error("[CDX12Buffer] Cannot map buffer without Write CPU access");
+    if (m_desc.cpuAccess == ECPUAccess::None) {
+        CFFLog::Error("[CDX12Buffer] Cannot map buffer without CPU access (DEFAULT heap)");
         return nullptr;
     }
 
@@ -57,7 +57,13 @@ void* CDX12Buffer::Map() {
         return m_mappedData;
     }
 
-    D3D12_RANGE readRange = { 0, 0 };  // We don't intend to read
+    D3D12_RANGE readRange = { 0, 0 };
+    if (m_desc.cpuAccess == ECPUAccess::Read) {
+        // READBACK buffer: we intend to read the entire buffer
+        readRange.End = m_desc.size;
+    }
+    // UPLOAD buffer: readRange stays {0,0} - we don't intend to read
+
     HRESULT hr = m_resource->Map(0, &readRange, &m_mappedData);
     if (FAILED(hr)) {
         CFFLog::Error("[CDX12Buffer] Map failed: %s", HRESULTToString(hr).c_str());
@@ -72,7 +78,13 @@ void CDX12Buffer::Unmap() {
         return;
     }
 
-    D3D12_RANGE writtenRange = { 0, m_desc.size };
+    D3D12_RANGE writtenRange = { 0, 0 };
+    if (m_desc.cpuAccess == ECPUAccess::Write) {
+        // UPLOAD buffer: we wrote the entire buffer
+        writtenRange.End = m_desc.size;
+    }
+    // READBACK buffer: writtenRange stays {0,0} - we didn't write anything
+
     m_resource->Unmap(0, &writtenRange);
     m_mappedData = nullptr;
 }

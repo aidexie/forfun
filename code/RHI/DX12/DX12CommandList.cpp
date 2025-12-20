@@ -46,6 +46,14 @@ bool CDX12CommandList::Initialize() {
         return false;
     }
 
+    // Query for ID3D12GraphicsCommandList4 (DXR support) - cache it to avoid per-call QueryInterface
+    if (SUCCEEDED(m_commandList->QueryInterface(IID_PPV_ARGS(&m_commandList4)))) {
+        CFFLog::Info("[DX12CommandList] ID3D12GraphicsCommandList4 available (DXR support)");
+    } else {
+        CFFLog::Warning("[DX12CommandList] ID3D12GraphicsCommandList4 not available (no DXR support)");
+        // m_commandList4 remains nullptr - ray tracing methods will check this
+    }
+
     // Close it initially - will be reset in BeginFrame
     m_commandList->Close();
 
@@ -899,10 +907,9 @@ void CDX12CommandList::BuildAccelerationStructure(IAccelerationStructure* as) {
         return;
     }
 
-    // Query for ID3D12GraphicsCommandList4 which has ray tracing support
-    ComPtr<ID3D12GraphicsCommandList4> cmdList4;
-    if (FAILED(m_commandList->QueryInterface(IID_PPV_ARGS(&cmdList4)))) {
-        CFFLog::Error("[DX12CommandList] BuildAccelerationStructure: Failed to query ID3D12GraphicsCommandList4");
+    // Use cached ID3D12GraphicsCommandList4 (queried once in Initialize)
+    if (!m_commandList4) {
+        CFFLog::Error("[DX12CommandList] BuildAccelerationStructure: ID3D12GraphicsCommandList4 not available");
         return;
     }
 
@@ -912,7 +919,7 @@ void CDX12CommandList::BuildAccelerationStructure(IAccelerationStructure* as) {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = dx12AS->GetBuildDesc();
 
     // Execute the build
-    cmdList4->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+    m_commandList4->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
 
     // Insert UAV barrier to ensure build completes before use
     D3D12_RESOURCE_BARRIER barrier = {};
@@ -929,15 +936,14 @@ void CDX12CommandList::SetRayTracingPipelineState(IRayTracingPipelineState* pso)
         return;
     }
 
-    // Query for ID3D12GraphicsCommandList4
-    ComPtr<ID3D12GraphicsCommandList4> cmdList4;
-    if (FAILED(m_commandList->QueryInterface(IID_PPV_ARGS(&cmdList4)))) {
-        CFFLog::Error("[DX12CommandList] SetRayTracingPipelineState: Failed to query ID3D12GraphicsCommandList4");
+    // Use cached ID3D12GraphicsCommandList4 (queried once in Initialize)
+    if (!m_commandList4) {
+        CFFLog::Error("[DX12CommandList] SetRayTracingPipelineState: ID3D12GraphicsCommandList4 not available");
         return;
     }
 
     ID3D12StateObject* stateObject = static_cast<ID3D12StateObject*>(pso->GetNativeHandle());
-    cmdList4->SetPipelineState1(stateObject);
+    m_commandList4->SetPipelineState1(stateObject);
 }
 
 void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
@@ -946,10 +952,9 @@ void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
         return;
     }
 
-    // Query for ID3D12GraphicsCommandList4
-    ComPtr<ID3D12GraphicsCommandList4> cmdList4;
-    if (FAILED(m_commandList->QueryInterface(IID_PPV_ARGS(&cmdList4)))) {
-        CFFLog::Error("[DX12CommandList] DispatchRays: Failed to query ID3D12GraphicsCommandList4");
+    // Use cached ID3D12GraphicsCommandList4 (queried once in Initialize)
+    if (!m_commandList4) {
+        CFFLog::Error("[DX12CommandList] DispatchRays: ID3D12GraphicsCommandList4 not available");
         return;
     }
 
@@ -976,7 +981,7 @@ void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
     d3dDesc.Height = desc.height;
     d3dDesc.Depth = desc.depth;
 
-    cmdList4->DispatchRays(&d3dDesc);
+    m_commandList4->DispatchRays(&d3dDesc);
 }
 
 void CDX12CommandList::SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) {
