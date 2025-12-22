@@ -1104,8 +1104,15 @@ void CVolumetricLightmap::UploadToGPU()
 
 void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
 {
-    // 如果未启用或未烘焙，不绑定任何资源
+    // 如果未启用或未烘焙，绑定禁用状态的 CB 和空 SRV
     if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
+        // Must still bind CB with enabled=0 so shader can check the flag
+        // Otherwise DX12 GPU validation will report uninitialized root argument
+        CB_VolumetricLightmap cb = {};
+        cb.enabled = 0;
+        cb.brickCount = 0;
+        cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 6, &cb, sizeof(CB_VolumetricLightmap));
+
         // 绑定空 SRV，避免 RTV/SRV 资源冲突
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 11, nullptr);
         cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 12, nullptr);
