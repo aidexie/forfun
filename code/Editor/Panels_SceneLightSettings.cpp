@@ -14,6 +14,10 @@ static bool s_isBaking = false;    // Volumetric Lightmap baking state
 // Bake configuration state (persisted across frames)
 static SLightmapBakeConfig s_bakeConfig;
 
+// Deferred GPU bake request (executed at start of next frame)
+static bool s_pendingGPUBake = false;
+static CVolumetricLightmap::Config s_pendingBakeVLConfig;
+
 void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
     if (!s_showWindow) return;
 
@@ -186,52 +190,51 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
             ImGui::PushItemWidth(150);
             ImGui::SliderInt("Samples/Voxel##CPU", &s_bakeConfig.cpuSamplesPerVoxel, 64, 16384);
             ImGui::SliderInt("Max Bounces##CPU", &s_bakeConfig.cpuMaxBounces, 1, 8);
-            ImGui::PopItemWidth();
         }
 
         ImGui::Spacing();
 
         // Bake buttons
-        if (s_isBaking) {
+        if (s_isBaking || s_pendingGPUBake) {
             ImGui::BeginDisabled();
-            ImGui::Button("Baking...", ImVec2(200, 30));
+            const char* statusText = s_pendingGPUBake ? "Bake pending (next frame)..." : "Baking...";
+            ImGui::Button(statusText, ImVec2(250, 30));
             ImGui::EndDisabled();
         } else {
             if (ImGui::Button("Build & Bake Volumetric Lightmap", ImVec2(250, 30))) {
-                s_isBaking = true;
+                // Prepare config
+                s_pendingBakeVLConfig.volumeMin = vlConfig.volumeMin;
+                s_pendingBakeVLConfig.volumeMax = vlConfig.volumeMax;
+                s_pendingBakeVLConfig.minBrickWorldSize = vlConfig.minBrickWorldSize;
 
-                // Initialize with current config
-                CVolumetricLightmap::Config config;
-                config.volumeMin = vlConfig.volumeMin;
-                config.volumeMax = vlConfig.volumeMax;
-                config.minBrickWorldSize = vlConfig.minBrickWorldSize;
-
-                auto& vl = CScene::Instance().GetVolumetricLightmap();
-
-                // Re-initialize if config changed
-                vl.Shutdown();
-                if (vl.Initialize(config)) {
-                    // Build octree
-                    vl.BuildOctree(CScene::Instance());
-
-                    // Bake all bricks with configured backend
-                    const char* backendStr = (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) ? "GPU (DXR)" : "CPU";
-                    CFFLog::Info("[VolumetricLightmap] Starting bake with %s backend...", backendStr);
-                    vl.BakeAllBricks(CScene::Instance(), s_bakeConfig);
-
-                    // Create GPU resources
-                    if (vl.CreateGPUResources()) {
-                        vl.SetEnabled(true);
-                        vlConfig.enabled = true;
-                        CFFLog::Info("[VolumetricLightmap] Bake complete and GPU resources created!");
-                    } else {
-                        CFFLog::Error("[VolumetricLightmap] Failed to create GPU resources!");
-                    }
+                if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) {
+                    // GPU bake: Defer to start of next frame to avoid command list conflicts
+                    s_pendingGPUBake = true;
+                    CFFLog::Info("[VolumetricLightmap] GPU bake requested - will execute at start of next frame");
                 } else {
-                    CFFLog::Error("[VolumetricLightmap] Failed to initialize!");
-                }
+                    // CPU bake: Execute immediately (no GPU state conflicts)
+                    s_isBaking = true;
 
-                s_isBaking = false;
+                    auto& vl = CScene::Instance().GetVolumetricLightmap();
+                    vl.Shutdown();
+                    if (vl.Initialize(s_pendingBakeVLConfig)) {
+                        vl.BuildOctree(CScene::Instance());
+                        CFFLog::Info("[VolumetricLightmap] Starting bake with CPU backend...");
+                        vl.BakeAllBricks(CScene::Instance(), s_bakeConfig);
+
+                        if (vl.CreateGPUResources()) {
+                            vl.SetEnabled(true);
+                            vlConfig.enabled = true;
+                            CFFLog::Info("[VolumetricLightmap] Bake complete and GPU resources created!");
+                        } else {
+                            CFFLog::Error("[VolumetricLightmap] Failed to create GPU resources!");
+                        }
+                    } else {
+                        CFFLog::Error("[VolumetricLightmap] Failed to initialize!");
+                    }
+
+                    s_isBaking = false;
+                }
             }
         }
 
@@ -305,4 +308,37 @@ void Panels::ShowSceneLightSettings(bool show) {
 
 bool Panels::IsSceneLightSettingsVisible() {
     return s_showWindow;
+}
+
+bool Panels::ExecutePendingGPUBake() {
+    if (!s_pendingGPUBake) {
+        return false;
+    }
+
+    CFFLog::Info("[VolumetricLightmap] Executing deferred GPU bake at frame start...");
+    s_pendingGPUBake = false;
+    s_isBaking = true;
+
+    auto& vl = CScene::Instance().GetVolumetricLightmap();
+    auto& vlConfig = CScene::Instance().GetLightSettings().volumetricLightmap;
+
+    vl.Shutdown();
+    if (vl.Initialize(s_pendingBakeVLConfig)) {
+        vl.BuildOctree(CScene::Instance());
+        CFFLog::Info("[VolumetricLightmap] Starting bake with GPU (DXR) backend...");
+        vl.BakeAllBricks(CScene::Instance(), s_bakeConfig);
+
+        if (vl.CreateGPUResources()) {
+            vl.SetEnabled(true);
+            vlConfig.enabled = true;
+            CFFLog::Info("[VolumetricLightmap] GPU bake complete and resources created!");
+        } else {
+            CFFLog::Error("[VolumetricLightmap] Failed to create GPU resources!");
+        }
+    } else {
+        CFFLog::Error("[VolumetricLightmap] Failed to initialize!");
+    }
+
+    s_isBaking = false;
+    return true;
 }

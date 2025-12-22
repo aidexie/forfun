@@ -28,6 +28,34 @@ struct SBrick;  // Forward declaration from VolumetricLightmap.h
 // Baker Configuration
 // ============================================
 
+// Debug flags for step-by-step verification with Nsight Graphics
+// See docs/DXR_VERIFICATION_ROADMAP.md for details
+struct SDXRDebugFlags {
+    // Phase 0: Pause for Nsight capture (5 seconds before dispatch)
+    bool enableCaptureDelay = true;
+
+    // Phase 1: Log acceleration structure info (BLAS/TLAS)
+    bool logAccelerationStructure = true;
+
+    // Phase 2: Log pipeline and SBT creation
+    bool logPipelineCreation = true;
+
+    // Phase 3: Log resource binding details
+    bool logResourceBinding = true;
+
+    // Phase 4: Log DispatchRays parameters
+    bool logDispatchInfo = true;
+
+    // Phase 5: Log readback SH values and statistics
+    bool logReadbackResults = true;
+
+    // Phase 6: Pause after first brick for inspection
+    bool pauseAfterFirstBrick = false;
+
+    // Verbose mode: log every brick (instead of just first)
+    bool verboseLogging = false;
+};
+
 struct SDXRBakeConfig {
     // Samples per voxel per pass (GPU handles many in parallel)
     uint32_t samplesPerVoxel = 256;
@@ -43,6 +71,9 @@ struct SDXRBakeConfig {
 
     // Progress callback (0.0 to 1.0)
     std::function<void(float)> progressCallback = nullptr;
+
+    // Debug flags for verification
+    SDXRDebugFlags debug;
 };
 
 // ============================================
@@ -187,7 +218,7 @@ private:
     // ============================================
 
     void DispatchBakeBrick(uint32_t brickIndex, const SBrick& brick, const SDXRBakeConfig& config);
-    void ReadbackBrickResults(SBrick& brick);
+    void ReadbackBrickResults(SBrick& brick, const SDXRBakeConfig& config);
     void CopyResultsToLightmap(CVolumetricLightmap& lightmap);
 
     // ============================================

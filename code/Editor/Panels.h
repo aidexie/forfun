@@ -32,4 +32,8 @@ namespace Panels {
     // Material Editor Window
     void OpenMaterialEditor(const std::string& materialPath);
     void DrawMaterialEditor();
+
+    // Deferred GPU Bake (call at start of frame, before scene rendering)
+    // Returns true if a bake was executed this frame
+    bool ExecutePendingGPUBake();
 }

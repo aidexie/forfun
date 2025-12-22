@@ -72,6 +72,7 @@ public:
 
     // Accessors
     ID3D12Device* GetDevice() const { return m_device.Get(); }
+    ID3D12Device5* GetDevice5() const { return m_device5.Get(); }  // For ray tracing (cached)
     ID3D12CommandQueue* GetCommandQueue() const { return m_commandQueue.Get(); }
     IDXGISwapChain3* GetSwapChain() const { return m_swapChain.Get(); }
 
@@ -148,6 +149,7 @@ private:
     // Core objects
     ComPtr<IDXGIFactory4> m_factory;
     ComPtr<ID3D12Device> m_device;
+    ComPtr<ID3D12Device5> m_device5;  // Cached for ray tracing (avoids repeated QueryInterface)
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<IDXGISwapChain3> m_swapChain;
 

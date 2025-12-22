@@ -37,7 +37,7 @@ enum class ELightmapBakeBackend {
 
 // Bake configuration
 struct SLightmapBakeConfig {
-    ELightmapBakeBackend backend = ELightmapBakeBackend::CPU;
+    ELightmapBakeBackend backend = ELightmapBakeBackend::GPU_DXR;
 
     // CPU backend settings
     int cpuSamplesPerVoxel = 6144;

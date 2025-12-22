@@ -915,6 +915,21 @@ void CDX12CommandList::BuildAccelerationStructure(IAccelerationStructure* as) {
 
     auto* dx12AS = static_cast<CDX12AccelerationStructure*>(as);
 
+    // Result buffer is already created in RAYTRACING_ACCELERATION_STRUCTURE state
+    // Scratch buffer needs to be transitioned from COMMON to UNORDERED_ACCESS
+    ID3D12Resource* resultBuffer = dx12AS->GetResultBuffer();
+    ID3D12Resource* scratchBuffer = dx12AS->GetScratchBuffer();
+
+    if (scratchBuffer) {
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = scratchBuffer;
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        m_commandList->ResourceBarrier(1, &barrier);
+    }
+
     // Get build desc from acceleration structure
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = dx12AS->GetBuildDesc();
 
@@ -922,10 +937,10 @@ void CDX12CommandList::BuildAccelerationStructure(IAccelerationStructure* as) {
     m_commandList4->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
 
     // Insert UAV barrier to ensure build completes before use
-    D3D12_RESOURCE_BARRIER barrier = {};
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    barrier.UAV.pResource = dx12AS->GetResultBuffer();
-    m_commandList->ResourceBarrier(1, &barrier);
+    D3D12_RESOURCE_BARRIER uavBarrier = {};
+    uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uavBarrier.UAV.pResource = resultBuffer;
+    m_commandList->ResourceBarrier(1, &uavBarrier);
 
     dx12AS->MarkBuilt();
 }

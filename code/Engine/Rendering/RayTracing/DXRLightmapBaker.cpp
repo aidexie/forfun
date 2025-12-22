@@ -11,6 +11,9 @@
 #include "../../../Core/FFLog.h"
 #include "../../../Core/PathManager.h"
 #include <chrono>
+#include <cfloat>  // For FLT_MAX
+#include <cmath>   // For std::isnan, std::isinf
+#include <Windows.h>  // For Sleep()
 
 // ============================================
 // CDXRLightmapBaker Implementation
@@ -424,7 +427,18 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
         CFFLog::Error("[DXRBaker] Lightmap has no bricks - call BuildOctree first");
         return false;
     }
-
+    // ============================================
+    // Phase 0: Nsight Graphics Capture Point
+    // ============================================
+    if (config.debug.enableCaptureDelay)
+    {
+        CFFLog::Info("========================================");
+        CFFLog::Info("[DXRBaker] NSIGHT CAPTURE POINT (Phase 0)");
+        CFFLog::Info("[DXRBaker] Press F11 in Nsight Graphics NOW to capture");
+        CFFLog::Info("[DXRBaker] Waiting 5 seconds before dispatch...");
+        CFFLog::Info("========================================");
+        Sleep(5000); // 5 second delay for Nsight capture
+    }
     m_totalBricks = static_cast<uint32_t>(bricks.size());
     CFFLog::Info("[DXRBaker] Starting volumetric lightmap bake (%u bricks)...", m_totalBricks);
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -432,12 +446,26 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
     // Store volume bounds from scene
     m_volumeMin = sceneData.sceneBoundsMin;
     m_volumeMax = sceneData.sceneBoundsMax;
-
     // Build acceleration structures
     CFFLog::Info("[DXRBaker] Building acceleration structures...");
     if (!BuildAccelerationStructures(sceneData)) {
         CFFLog::Error("[DXRBaker] Failed to build acceleration structures");
         return false;
+    }
+    // Phase 1: Log acceleration structure info
+    if (config.debug.logAccelerationStructure) {
+        CFFLog::Info("[DXRBaker] === Phase 1: Acceleration Structure Info ===");
+        auto* tlas = m_asManager->GetTLAS();
+        if (tlas) {
+            CFFLog::Info("[DXRBaker] TLAS GPU VA: 0x%llX", tlas->GetGPUVirtualAddress());
+            CFFLog::Info("[DXRBaker] TLAS built successfully");
+        } else {
+            CFFLog::Error("[DXRBaker] TLAS is NULL after build!");
+        }
+        CFFLog::Info("[DXRBaker] Scene bounds: (%.2f, %.2f, %.2f) - (%.2f, %.2f, %.2f)",
+                     m_volumeMin.x, m_volumeMin.y, m_volumeMin.z,
+                     m_volumeMax.x, m_volumeMax.y, m_volumeMax.z);
+        CFFLog::Info("[DXRBaker] === End Phase 1 ===");
     }
 
     // Upload scene data
@@ -457,7 +485,6 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
         CFFLog::Error("[DXRBaker] Failed to create readback buffer");
         return false;
     }
-
     // Create pipeline if not already done
     if (!m_pipeline) {
         CFFLog::Info("[DXRBaker] Creating ray tracing pipeline...");
@@ -472,10 +499,22 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
             CFFLog::Error("[DXRBaker] Failed to create shader binding table");
             return false;
         }
+
+        // Phase 2: Log pipeline creation info
+        if (config.debug.logPipelineCreation) {
+            CFFLog::Info("[DXRBaker] === Phase 2: Pipeline Creation Info ===");
+            CFFLog::Info("[DXRBaker] Pipeline created: %p", m_pipeline.get());
+            CFFLog::Info("[DXRBaker] SBT created: %p", m_sbt.get());
+            CFFLog::Info("[DXRBaker] Shader exports: RayGen, Miss, ShadowMiss, HitGroup, ShadowHitGroup");
+            CFFLog::Info("[DXRBaker] === End Phase 2 ===");
+        }
     }
 
+    return false;
     // Get mutable access to bricks for writing results
     auto& mutableBricks = const_cast<std::vector<SBrick>&>(bricks);
+
+
 
     // Per-brick dispatch loop
     CFFLog::Info("[DXRBaker] Dispatching %u bricks...", m_totalBricks);
@@ -487,7 +526,16 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
         DispatchBakeBrick(brickIdx, brick, config);
 
         // Readback results to CPU
-        ReadbackBrickResults(brick);
+        ReadbackBrickResults(brick, config);
+
+        // Phase 6: Pause after first brick for inspection
+        if (brickIdx == 0 && config.debug.pauseAfterFirstBrick) {
+            CFFLog::Info("========================================");
+            CFFLog::Info("[DXRBaker] PAUSE AFTER FIRST BRICK (Phase 6)");
+            CFFLog::Info("[DXRBaker] Inspect results in Nsight, then press any key...");
+            CFFLog::Info("========================================");
+            Sleep(10000);  // 10 second pause
+        }
 
         // Progress callback
         if (config.progressCallback) {
@@ -516,7 +564,35 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     auto* cmdList = ctx ? ctx->GetCommandList() : nullptr;
     if (!cmdList || !m_pipeline || !m_sbt) {
+        CFFLog::Error("[DXRBaker] DispatchBakeBrick: Invalid state (cmdList=%p, pipeline=%p, sbt=%p)",
+                      cmdList, m_pipeline.get(), m_sbt.get());
         return;
+    }
+
+    const bool shouldLog = (brickIndex == 0) || config.debug.verboseLogging;
+
+    // ============================================
+    // Phase 3: Log resource binding info
+    // ============================================
+    if (shouldLog && config.debug.logResourceBinding) {
+        CFFLog::Info("[DXRBaker] === Phase 3: Resource Binding (Brick %u) ===", brickIndex);
+        CFFLog::Info("[DXRBaker] Brick bounds: (%.2f, %.2f, %.2f) - (%.2f, %.2f, %.2f)",
+                     brick.worldMin.x, brick.worldMin.y, brick.worldMin.z,
+                     brick.worldMax.x, brick.worldMax.y, brick.worldMax.z);
+        CFFLog::Info("[DXRBaker] CB_BakeParams:");
+        CFFLog::Info("[DXRBaker]   samplesPerVoxel: %u", config.samplesPerVoxel);
+        CFFLog::Info("[DXRBaker]   maxBounces: %u", config.maxBounces);
+        CFFLog::Info("[DXRBaker]   skyIntensity: %.2f", config.skyIntensity);
+        CFFLog::Info("[DXRBaker]   numLights: %u", m_numLights);
+
+        auto* tlas = m_asManager->GetTLAS();
+        if (tlas) {
+            CFFLog::Info("[DXRBaker] TLAS bound at t0, GPU VA: 0x%llX", tlas->GetGPUVirtualAddress());
+        } else {
+            CFFLog::Error("[DXRBaker] TLAS is NULL!");
+        }
+        CFFLog::Info("[DXRBaker] Output UAV size: %u bytes", VL_BRICK_VOXEL_COUNT * (uint32_t)sizeof(SVoxelSHOutput));
+        CFFLog::Info("[DXRBaker] === End Phase 3 ===");
     }
 
     // Update constant buffer with per-brick parameters
@@ -536,6 +612,8 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
     if (cbData) {
         memcpy(cbData, &params, sizeof(params));
         m_constantBuffer->Unmap();
+    } else {
+        CFFLog::Error("[DXRBaker] Failed to map constant buffer!");
     }
 
     // Set ray tracing pipeline state
@@ -556,6 +634,8 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
     auto* tlas = m_asManager->GetTLAS();
     if (tlas) {
         cmdList->SetAccelerationStructure(0, tlas);
+    } else {
+        CFFLog::Error("[DXRBaker] Cannot bind NULL TLAS!");
     }
 
     // Dispatch rays: 4x4x4 = 64 threads per brick
@@ -564,6 +644,16 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
     dispatchDesc.width = VL_BRICK_SIZE;   // 4
     dispatchDesc.height = VL_BRICK_SIZE;  // 4
     dispatchDesc.depth = VL_BRICK_SIZE;   // 4
+
+    // Phase 4: Log dispatch info
+    if (shouldLog && config.debug.logDispatchInfo) {
+        CFFLog::Info("[DXRBaker] === Phase 4: DispatchRays (Brick %u) ===", brickIndex);
+        CFFLog::Info("[DXRBaker] Dispatch dimensions: %u x %u x %u = %u threads",
+                     dispatchDesc.width, dispatchDesc.height, dispatchDesc.depth,
+                     dispatchDesc.width * dispatchDesc.height * dispatchDesc.depth);
+        CFFLog::Info("[DXRBaker] SBT: %p", m_sbt.get());
+        CFFLog::Info("[DXRBaker] === End Phase 4 ===");
+    }
 
     cmdList->DispatchRays(dispatchDesc);
 
@@ -575,10 +665,17 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
     // Note: This is synchronous per-brick, which is simpler but not optimal
     // Future optimization: batch multiple bricks before sync
     ctx->ExecuteAndWait();
+
+    if (shouldLog && config.debug.logDispatchInfo) {
+        CFFLog::Info("[DXRBaker] Brick %u dispatch complete", brickIndex);
+    }
 }
 
-void CDXRLightmapBaker::ReadbackBrickResults(SBrick& brick) {
+void CDXRLightmapBaker::ReadbackBrickResults(SBrick& brick, const SDXRBakeConfig& config) {
+    static uint32_t s_readbackCount = 0;
+
     if (!m_readbackBuffer) {
+        CFFLog::Error("[DXRBaker] ReadbackBrickResults: No readback buffer!");
         return;
     }
 
@@ -592,6 +689,54 @@ void CDXRLightmapBaker::ReadbackBrickResults(SBrick& brick) {
     // Copy to CPU-side storage
     memcpy(m_readbackData.data(), mappedData, VL_BRICK_VOXEL_COUNT * sizeof(SVoxelSHOutput));
     m_readbackBuffer->Unmap();
+
+    const bool shouldLog = (s_readbackCount == 0) || config.debug.verboseLogging;
+
+    // ============================================
+    // Phase 5: Log readback results
+    // ============================================
+    if (shouldLog && config.debug.logReadbackResults) {
+        CFFLog::Info("[DXRBaker] === Phase 5: Readback Results (Brick %u) ===", s_readbackCount);
+
+        // Check for NaN/Inf/Zero
+        int nanCount = 0, zeroCount = 0, validCount = 0;
+        float minVal = FLT_MAX, maxVal = -FLT_MAX;
+
+        for (int voxelIdx = 0; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {
+            const SVoxelSHOutput& output = m_readbackData[voxelIdx];
+
+            // Check SH[0] (L0 coefficient - should be dominant)
+            float sh0Lum = output.sh[0].x * 0.2126f + output.sh[0].y * 0.7152f + output.sh[0].z * 0.0722f;
+
+            if (std::isnan(sh0Lum) || std::isinf(sh0Lum)) {
+                nanCount++;
+            } else if (sh0Lum == 0.0f) {
+                zeroCount++;
+            } else {
+                validCount++;
+                minVal = std::min(minVal, sh0Lum);
+                maxVal = std::max(maxVal, sh0Lum);
+            }
+        }
+
+        CFFLog::Info("[DXRBaker] Voxel SH[0] stats: valid=%d, zero=%d, nan/inf=%d",
+                     validCount, zeroCount, nanCount);
+
+        if (validCount > 0) {
+            CFFLog::Info("[DXRBaker] SH[0] luminance range: [%.6f, %.6f]", minVal, maxVal);
+        }
+
+        // Log first voxel's full SH data
+        const SVoxelSHOutput& first = m_readbackData[0];
+        CFFLog::Info("[DXRBaker] Voxel[0] SH[0] (L0): (%.4f, %.4f, %.4f)",
+                     first.sh[0].x, first.sh[0].y, first.sh[0].z);
+        CFFLog::Info("[DXRBaker] Voxel[0] SH[1] (L1y): (%.4f, %.4f, %.4f)",
+                     first.sh[1].x, first.sh[1].y, first.sh[1].z);
+        CFFLog::Info("[DXRBaker] Voxel[0] validity: %.2f", first.validity);
+
+        CFFLog::Info("[DXRBaker] === End Phase 5 ===");
+    }
+    s_readbackCount++;
 
     // Copy SH data to brick
     for (int voxelIdx = 0; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {

@@ -304,8 +304,17 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
     if (desc.usage & EBufferUsage::UnorderedAccess) {
         resourceDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     }
+    // Acceleration structure buffers also need UAV flag
+    if (desc.usage & EBufferUsage::AccelerationStructure) {
+        resourceDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    }
 
+    // Determine initial state
     D3D12_RESOURCE_STATES initialState = GetInitialResourceState(heapType, desc.usage);
+    // Acceleration structure buffers must be created in RAYTRACING_ACCELERATION_STRUCTURE state
+    if (desc.usage & EBufferUsage::AccelerationStructure) {
+        initialState = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+    }
 
      ComPtr<ID3D12Resource> resource;
     HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
@@ -384,7 +393,8 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
         } else if (desc.usage & EBufferUsage::Index) {
             finalState = D3D12_RESOURCE_STATE_INDEX_BUFFER;
         } else if (desc.usage & EBufferUsage::Structured) {
-            finalState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            // Structured buffers need NON_PIXEL for compute/DXR access
+            finalState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         } else if (desc.usage & EBufferUsage::UnorderedAccess) {
             finalState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         }
@@ -1282,13 +1292,13 @@ AccelerationStructurePrebuildInfo CDX12RenderContext::GetAccelerationStructurePr
         return {};
     }
 
-    ComPtr<ID3D12Device5> device5;
-    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
-        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+    ID3D12Device5* device5 = CDX12Context::Instance().GetDevice5();
+    if (!device5) {
+        CFFLog::Error("[DX12RenderContext] ID3D12Device5 not available");
         return {};
     }
 
-    return GetBLASPrebuildInfo(device5.Get(), desc);
+    return GetBLASPrebuildInfo(device5, desc);
 }
 
 AccelerationStructurePrebuildInfo CDX12RenderContext::GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) {
@@ -1297,13 +1307,13 @@ AccelerationStructurePrebuildInfo CDX12RenderContext::GetAccelerationStructurePr
         return {};
     }
 
-    ComPtr<ID3D12Device5> device5;
-    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
-        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+    ID3D12Device5* device5 = CDX12Context::Instance().GetDevice5();
+    if (!device5) {
+        CFFLog::Error("[DX12RenderContext] ID3D12Device5 not available");
         return {};
     }
 
-    return GetTLASPrebuildInfo(device5.Get(), desc);
+    return GetTLASPrebuildInfo(device5, desc);
 }
 
 IAccelerationStructure* CDX12RenderContext::CreateBLAS(
@@ -1321,13 +1331,13 @@ IAccelerationStructure* CDX12RenderContext::CreateBLAS(
         return nullptr;
     }
 
-    ComPtr<ID3D12Device5> device5;
-    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
-        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+    ID3D12Device5* device5 = CDX12Context::Instance().GetDevice5();
+    if (!device5) {
+        CFFLog::Error("[DX12RenderContext] ID3D12Device5 not available");
         return nullptr;
     }
 
-    return new CDX12AccelerationStructure(device5.Get(), desc, scratchBuffer, resultBuffer);
+    return new CDX12AccelerationStructure(device5, desc, scratchBuffer, resultBuffer);
 }
 
 IAccelerationStructure* CDX12RenderContext::CreateTLAS(
@@ -1346,9 +1356,9 @@ IAccelerationStructure* CDX12RenderContext::CreateTLAS(
         return nullptr;
     }
 
-    ComPtr<ID3D12Device5> device5;
-    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
-        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+    ID3D12Device5* device5 = CDX12Context::Instance().GetDevice5();
+    if (!device5) {
+        CFFLog::Error("[DX12RenderContext] ID3D12Device5 not available");
         return nullptr;
     }
 
@@ -1362,7 +1372,7 @@ IAccelerationStructure* CDX12RenderContext::CreateTLAS(
         return nullptr;
     }
 
-    return new CDX12AccelerationStructure(device5.Get(), desc, scratchBuffer, resultBuffer, instanceBuffer);
+    return new CDX12AccelerationStructure(device5, desc, scratchBuffer, resultBuffer, instanceBuffer);
 }
 
 IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(const RayTracingPipelineDesc& desc) {
@@ -1376,9 +1386,9 @@ IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(cons
         return nullptr;
     }
 
-    ComPtr<ID3D12Device5> device5;
-    if (FAILED(CDX12Context::Instance().GetDevice()->QueryInterface(IID_PPV_ARGS(&device5)))) {
-        CFFLog::Error("[DX12RenderContext] Failed to query ID3D12Device5");
+    ID3D12Device5* device5 = CDX12Context::Instance().GetDevice5();
+    if (!device5) {
+        CFFLog::Error("[DX12RenderContext] ID3D12Device5 not available");
         return nullptr;
     }
 
@@ -1439,7 +1449,7 @@ IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(cons
     // Use compute root signature as global root signature for ray tracing
     builder.SetGlobalRootSignature(m_computeRootSignature.Get());
 
-    return builder.Build(device5.Get());
+    return builder.Build(device5);
 }
 
 IShaderBindingTable* CDX12RenderContext::CreateShaderBindingTable(const ShaderBindingTableDesc& desc) {

@@ -361,7 +361,7 @@ bool CDXRAccelerationStructureManager::AllocateASBuffers(
         return false;
     }
 
-    // Scratch buffer (UAV for building)
+    // Scratch buffer (UAV for building, starts in COMMON state)
     RHI::BufferDesc scratchDesc;
     scratchDesc.size = static_cast<uint32_t>(scratchSize);
     scratchDesc.usage = RHI::EBufferUsage::UnorderedAccess;
@@ -372,10 +372,11 @@ bool CDXRAccelerationStructureManager::AllocateASBuffers(
         return false;
     }
 
-    // Result buffer (UAV, acceleration structure storage)
+    // Result buffer (acceleration structure storage)
+    // Must be created with AccelerationStructure flag to get correct initial state
     RHI::BufferDesc resultDesc;
     resultDesc.size = static_cast<uint32_t>(resultSize);
-    resultDesc.usage = RHI::EBufferUsage::UnorderedAccess;
+    resultDesc.usage = RHI::EBufferUsage::AccelerationStructure;
     resultDesc.cpuAccess = RHI::ECPUAccess::None;
 
     outResultBuffer.reset(ctx->CreateBuffer(resultDesc, nullptr));

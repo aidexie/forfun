@@ -465,6 +465,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             defaultSceneLoaded = true;
         }
 
+        // Execute any pending GPU bake (deferred from previous frame's UI)
+        // Must be done BEFORE scene rendering to avoid command list state conflicts
+        if (Panels::ExecutePendingGPUBake()) {
+            CFFLog::Info("[Main] GPU bake executed at frame start");
+        }
+
         // Execute test frame if in test mode
         if (activeTest)
         {

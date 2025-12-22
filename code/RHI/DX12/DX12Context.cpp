@@ -218,12 +218,12 @@ void CDX12Context::EnableDebugLayer() {
         debugController->EnableDebugLayer();
         CFFLog::Info("[DX12Context] Debug layer enabled");
 
-        // Optional: Enable GPU-based validation (very slow but thorough)
-        // ComPtr<ID3D12Debug1> debugController1;
-        // if (SUCCEEDED(debugController.As(&debugController1))) {
-        //     debugController1->SetEnableGPUBasedValidation(true);
-        //     CFFLog::Info("[DX12Context] GPU-based validation enabled");
-        // }
+        //Optional: Enable GPU-based validation (very slow but thorough)
+        ComPtr<ID3D12Debug1> debugController1;
+        if (SUCCEEDED(debugController.As(&debugController1))) {
+            debugController1->SetEnableGPUBasedValidation(true);
+            CFFLog::Info("[DX12Context] GPU-based validation enabled");
+        }
     } else {
         CFFLog::Warning("[DX12Context] Failed to enable debug layer");
     }
@@ -346,6 +346,14 @@ void CDX12Context::CheckFeatureSupport() {
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
     if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)))) {
         m_supportsRaytracing = (options5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0);
+    }
+
+    // Cache ID3D12Device5 if ray tracing is supported (avoids repeated QueryInterface)
+    if (m_supportsRaytracing) {
+        if (FAILED(m_device->QueryInterface(IID_PPV_ARGS(&m_device5)))) {
+            CFFLog::Warning("[DX12Context] Failed to query ID3D12Device5, disabling ray tracing");
+            m_supportsRaytracing = false;
+        }
     }
 
     // Check mesh shader support
