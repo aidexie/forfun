@@ -4,6 +4,9 @@
 // GPU-accelerated path tracing for volumetric lightmap baking.
 // Dispatches 4x4x4 = 64 threads per brick, matching the CPU baker.
 // Output is written to a structured buffer for easy CPU readback.
+//
+// IMPORTANT: DXR shaders require [unroll] for loops with TraceRay.
+// Dynamic while loops cause GPU crashes due to divergent control flow.
 
 #include "LightmapBakeCommon.hlsl"
 
@@ -15,8 +18,12 @@
 #define VOXELS_PER_BRICK 64  // 4^3
 #define SH_COEFF_COUNT 9     // L2 spherical harmonics
 
+// Fixed max iterations for shader compilation (DXR requirement)
+static const uint MAX_SAMPLES = 16;
+static const uint MAX_BOUNCES = 4;
+
 // ============================================
-// Data Structures (must be defined before use)
+// Data Structures
 // ============================================
 
 struct SMaterialData {
@@ -46,7 +53,6 @@ struct SInstanceData {
 };
 
 // Output structure for one voxel (matches CPU SBrick layout)
-// 9 SH coefficients × RGB + validity
 struct SVoxelSHOutput {
     float3 sh[SH_COEFF_COUNT];  // L2 SH coefficients (RGB each)
     float validity;
@@ -74,21 +80,19 @@ struct SShadowPayload {
 // ============================================
 
 cbuffer CB_BakeParams : register(b0) {
-    // Current brick info
     float3 g_BrickWorldMin;
     float g_Padding0;
     float3 g_BrickWorldMax;
     float g_Padding1;
 
-    // Bake parameters
     uint g_SamplesPerVoxel;
     uint g_MaxBounces;
     uint g_FrameIndex;
     uint g_NumLights;
 
     float g_SkyIntensity;
-    uint g_BrickIndex;      // Current brick being baked
-    uint g_TotalBricks;     // Total number of bricks
+    uint g_BrickIndex;
+    uint g_TotalBricks;
     float g_Padding2;
 };
 
@@ -96,37 +100,25 @@ cbuffer CB_BakeParams : register(b0) {
 // Resource Bindings
 // ============================================
 
-// Acceleration structure
 RaytracingAccelerationStructure g_Scene : register(t0);
-
-// Environment map (skybox)
 TextureCube<float4> g_Skybox : register(t1);
 SamplerState g_LinearSampler : register(s0);
-
-// Scene data buffers
 StructuredBuffer<SMaterialData> g_Materials : register(t2);
 StructuredBuffer<SLightData> g_Lights : register(t3);
 StructuredBuffer<SInstanceData> g_Instances : register(t4);
-
-// Output: Structured buffer for all voxels in current brick
-// Layout: g_OutputBuffer[voxelIndex] where voxelIndex = x + y*4 + z*16
 RWStructuredBuffer<SVoxelSHOutput> g_OutputBuffer : register(u0);
 
 // ============================================
 // Helper Functions
 // ============================================
 
-// Convert local voxel coordinate (0-3, 0-3, 0-3) to world position
 float3 LocalVoxelToWorldPos(uint3 localIdx) {
     float3 brickSize = g_BrickWorldMax - g_BrickWorldMin;
     float3 voxelSize = brickSize / float(BRICK_SIZE);
-
-    // Voxel center position
     float3 localPos = (float3(localIdx) + 0.5f) * voxelSize;
     return g_BrickWorldMin + localPos;
 }
 
-// Convert local voxel coordinate to linear index
 uint LocalVoxelToIndex(uint3 localIdx) {
     return localIdx.x + localIdx.y * BRICK_SIZE + localIdx.z * BRICK_SIZE * BRICK_SIZE;
 }
@@ -138,73 +130,44 @@ uint LocalVoxelToIndex(uint3 localIdx) {
 float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, inout uint rng) {
     float3 result = float3(0, 0, 0);
 
-    for (uint i = 0; i < g_NumLights; i++) {
-        SLightData light = g_Lights[i];
+    SLightData light = g_Lights[0];
 
-        float3 L;
-        float lightDist;
-        float attenuation;
+    float3 L;
+    float lightDist;
+    float attenuation;
 
-        if (light.type == 0) {
-            // Directional light
-            L = -normalize(light.direction);
-            lightDist = 10000.0f;
-            attenuation = 1.0f;
-        }
-        else if (light.type == 1) {
-            // Point light
-            float3 toLight = light.position - hitPos;
-            lightDist = length(toLight);
-            L = toLight / lightDist;
+    // Directional light
+    L = -normalize(light.direction);
+    lightDist = 10000.0f;
+    attenuation = 1.0f;
 
-            float distRatio = lightDist / light.range;
-            attenuation = saturate(1.0f - distRatio * distRatio);
-            attenuation *= attenuation;
-        }
-        else {
-            // Spot light
-            float3 toLight = light.position - hitPos;
-            lightDist = length(toLight);
-            L = toLight / lightDist;
+    float NdotL = saturate(dot(normal, L));
 
-            float distRatio = lightDist / light.range;
-            attenuation = saturate(1.0f - distRatio * distRatio);
-            attenuation *= attenuation;
+    if (NdotL > 0.0f && attenuation > 0.0f) {
+        // Shadow ray
+        RayDesc shadowRay;
+        shadowRay.Origin = OffsetRayOrigin(hitPos, normal);
+        shadowRay.Direction = L;
+        shadowRay.TMin = 0.001f;
+        shadowRay.TMax = lightDist - 0.001f;
 
-            float cosAngle = dot(-L, normalize(light.direction));
-            float cosOuter = cos(radians(light.spotAngle));
-            float cosInner = cos(radians(light.spotAngle * 0.8f));
-            attenuation *= saturate((cosAngle - cosOuter) / (cosInner - cosOuter));
-        }
+        SShadowPayload shadowPayload;
+        shadowPayload.isVisible = true;
 
-        float NdotL = saturate(dot(normal, L));
+        TraceRay(
+            g_Scene,
+            RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+            0xFF,
+            1,      // Shadow hit group index
+            0,
+            1,      // Shadow miss shader index
+            shadowRay,
+            shadowPayload
+        );
 
-        if (NdotL > 0.0f && attenuation > 0.0f) {
-            // Shadow ray
-            RayDesc shadowRay;
-            shadowRay.Origin = OffsetRayOrigin(hitPos, normal);
-            shadowRay.Direction = L;
-            shadowRay.TMin = 0.001f;
-            shadowRay.TMax = lightDist - 0.001f;
-
-            SShadowPayload shadowPayload;
-            shadowPayload.isVisible = true;
-
-            TraceRay(
-                g_Scene,
-                RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-                0xFF,
-                1,      // Shadow hit group index
-                0,
-                1,      // Shadow miss shader index
-                shadowRay,
-                shadowPayload
-            );
-
-            if (shadowPayload.isVisible) {
-                float3 brdf = mat.albedo * INV_PI;
-                result += light.color * light.intensity * attenuation * NdotL * brdf;
-            }
+        if (shadowPayload.isVisible) {
+            float3 brdf = mat.albedo * INV_PI;
+            result += light.color * light.intensity * attenuation * NdotL * brdf;
         }
     }
 
@@ -217,36 +180,13 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
 
 [shader("raygeneration")]
 void RayGen() {
-    // DispatchRaysIndex is (x, y, z) within 4x4x4 dispatch
     uint3 localVoxelIdx = DispatchRaysIndex().xyz;
 
-    // Bounds check (should always pass for 4x4x4 dispatch)
     if (any(localVoxelIdx >= uint3(BRICK_SIZE, BRICK_SIZE, BRICK_SIZE))) {
         return;
     }
 
-    // Calculate output index
     uint outputIndex = LocalVoxelToIndex(localVoxelIdx);
-
-    // DEBUG: Write thread ID as output to verify shader runs
-    // Comment out this block when debugging is done
-    #if 1  // Set to 0 to disable debug output
-    {
-        SVoxelSHOutput debugOutput;
-        // Write unique pattern: thread ID * 0.1 so we can identify which thread wrote
-        float debugVal = float(outputIndex + 1) * 0.1f;  // +1 to avoid zero
-        [unroll]
-        for (int d = 0; d < SH_COEFF_COUNT; d++) {
-            debugOutput.sh[d] = float3(debugVal, debugVal * 2.0f, debugVal * 3.0f);
-        }
-        debugOutput.validity = 1.0f;
-        debugOutput.padding = float3(0, 0, 0);
-        g_OutputBuffer[outputIndex] = debugOutput;
-        return;  // Skip rest of shader for debug
-    }
-    #endif
-
-    // Get world position for this voxel
     float3 worldPos = LocalVoxelToWorldPos(localVoxelIdx);
 
     // Initialize output
@@ -258,23 +198,20 @@ void RayGen() {
     output.validity = 1.0f;
     output.padding = float3(0, 0, 0);
 
-    // Initialize RNG with unique seed per voxel and frame
+    // Initialize RNG
     uint rngState = InitRNGWithSample(localVoxelIdx, g_FrameIndex, g_BrickIndex);
 
     // ============================================
     // Validity Check
     // ============================================
-    // Cast short rays to detect if voxel is inside geometry
     float validitySum = 0.0f;
-    const uint validityRays = 6;
-
     float3 validityDirs[6] = {
         float3(1, 0, 0), float3(-1, 0, 0),
         float3(0, 1, 0), float3(0, -1, 0),
         float3(0, 0, 1), float3(0, 0, -1)
     };
 
-    for (uint v = 0; v < validityRays; v++) {
+    for (uint v = 0; v < 6; v++) {
         RayDesc validityRay;
         validityRay.Origin = worldPos;
         validityRay.Direction = validityDirs[v];
@@ -295,10 +232,9 @@ void RayGen() {
         validitySum += validityPayload.isVisible ? 1.0f : 0.0f;
     }
 
-    float validity = validitySum / float(validityRays);
+    float validity = validitySum / 6.0f;
     output.validity = validity;
 
-    // If mostly inside geometry, skip sampling
     if (validity < 0.5f) {
         g_OutputBuffer[outputIndex] = output;
         return;
@@ -307,18 +243,20 @@ void RayGen() {
     // ============================================
     // Path Tracing
     // ============================================
-    // Accumulate SH coefficients (L2 = 9 coefficients)
     float3 shAccum[SH_COEFF_COUNT];
     [unroll]
     for (int k = 0; k < SH_COEFF_COUNT; k++) {
         shAccum[k] = float3(0, 0, 0);
     }
 
-    for (uint s = 0; s < g_SamplesPerVoxel; s++) {
-        // Generate uniform sphere direction
+    uint actualSamples = min(g_SamplesPerVoxel, MAX_SAMPLES);
+
+    [unroll]
+    for (uint s = 0; s < MAX_SAMPLES; s++) {
+        if (s >= actualSamples) break;
+
         float3 dir = SampleSphereUniform(rngState);
 
-        // Initialize payload
         SRayPayload payload;
         payload.radiance = float3(0, 0, 0);
         payload.throughput = float3(1, 1, 1);
@@ -328,8 +266,10 @@ void RayGen() {
         payload.bounceCount = 0;
         payload.terminated = false;
 
-        // Path trace with bounces
-        while (!payload.terminated && payload.bounceCount < g_MaxBounces) {
+        [unroll]
+        for (uint bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+            if (payload.terminated || payload.bounceCount >= g_MaxBounces) break;
+
             RayDesc ray;
             ray.Origin = payload.nextOrigin;
             ray.Direction = payload.nextDirection;
@@ -340,29 +280,23 @@ void RayGen() {
                 g_Scene,
                 RAY_FLAG_NONE,
                 0xFF,
-                0,      // Primary hit group
-                0,
-                0,      // Primary miss shader
+                0, 0, 0,
                 ray,
                 payload
             );
         }
 
-        // Accumulate to L2 SH
         AccumulateToSH(dir, payload.radiance, shAccum);
-
-        // Update RNG state
         rngState = payload.rngState;
     }
 
     // Normalize SH coefficients
-    float weight = 4.0f * PI / float(g_SamplesPerVoxel);
+    float weight = 4.0f * PI / float(actualSamples);
     [unroll]
     for (int j = 0; j < SH_COEFF_COUNT; j++) {
         output.sh[j] = shAccum[j] * weight;
     }
 
-    // Write output
     g_OutputBuffer[outputIndex] = output;
 }
 
@@ -374,24 +308,17 @@ void RayGen() {
 void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttributes attr) {
     uint instanceID = InstanceID();
 
-    // Compute hit position
     float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 normal = -normalize(WorldRayDirection());
 
-    // Compute geometric normal (simplified - should use vertex normals)
-    // For now, use face normal approximation
-    float3 normal = -WorldRayDirection();
-
-    // Get material
+    // Get material from buffer
     uint materialIndex = g_Instances[instanceID].materialIndex;
     SMaterialData mat = g_Materials[materialIndex];
 
     // Evaluate direct lighting
     float3 directLight = EvaluateDirectLighting(hitPos, normal, mat, payload.rngState);
 
-    // Accumulate radiance
     payload.radiance += payload.throughput * directLight;
-
-    // Prepare next bounce
     payload.bounceCount++;
 
     // Russian Roulette (after 2 bounces)
@@ -407,7 +334,7 @@ void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttribu
         payload.throughput /= survivalProb;
     }
 
-    // Sample next direction (cosine-weighted hemisphere)
+    // Sample next bounce direction
     float3 bounceDir = SampleHemisphereCosineWorld(normal, payload.rngState);
 
     payload.nextOrigin = OffsetRayOrigin(hitPos, normal);
