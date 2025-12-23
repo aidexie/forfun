@@ -897,6 +897,115 @@ void CDX12CommandList::BindPendingResourcesCompute() {
     }
 }
 
+void CDX12CommandList::BindPendingResourcesRayTracing() {
+    // Ray Tracing Root Signature layout:
+    // Parameter 0: Root CBV (b0)
+    // Parameter 1: SRV Descriptor Table (t0-t4)
+    // Parameter 2: UAV Descriptor Table (u0)
+    // Parameter 3: Sampler Descriptor Table (s0)
+
+    CFFLog::Info("[BindPendingResourcesRayTracing] cbvDirty=%d, srvDirty=%d, uavDirty=%d, samplerDirty=%d",
+                 m_cbvDirty, m_srvDirty, m_uavDirty, m_samplerDirty);
+
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    auto device = CDX12Context::Instance().GetDevice();
+
+    // Bind CBV (parameter 0) - use first pending CBV if set
+    if (m_cbvDirty) {
+        if (m_pendingCBVs[0] != 0) {
+            m_commandList4->SetComputeRootConstantBufferView(0, m_pendingCBVs[0]);
+        }
+        m_cbvDirty = false;
+    }
+
+    // Bind SRV table (parameter 1) - t0-t4
+    if (m_srvDirty) {
+        // Ray tracing uses 5 SRV slots (t0-t4)
+        const uint32_t rtSrvCount = 5;
+        uint32_t maxBoundSlot = 0;
+        for (uint32_t i = 0; i < rtSrvCount; ++i) {
+            if (m_pendingSRVCpuHandles[i].ptr != 0) {
+                maxBoundSlot = i + 1;
+            }
+        }
+
+        CFFLog::Info("[BindPendingResourcesRayTracing] SRV: maxBoundSlot=%u, pendingSRV[0].ptr=0x%llX",
+                     maxBoundSlot, m_pendingSRVCpuHandles[0].ptr);
+
+        if (maxBoundSlot > 0) {
+            auto& stagingRing = heapMgr.GetSRVStagingRing();
+            SDescriptorHandle staging = stagingRing.AllocateContiguous(rtSrvCount);
+
+            if (staging.IsValid()) {
+                CFFLog::Info("[BindPendingResourcesRayTracing] SRV staging: gpuHandle=0x%llX", staging.gpuHandle.ptr);
+                uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+                for (uint32_t i = 0; i < rtSrvCount; ++i) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
+                    if (m_pendingSRVCpuHandles[i].ptr != 0) {
+                        device->CopyDescriptorsSimple(1, dest, m_pendingSRVCpuHandles[i],
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    } else {
+                        // Create null SRV for unbound slots
+                        D3D12_SHADER_RESOURCE_VIEW_DESC nullSrvDesc = {};
+                        nullSrvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        nullSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                        nullSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        nullSrvDesc.Texture2D.MipLevels = 1;
+                        device->CreateShaderResourceView(nullptr, &nullSrvDesc, dest);
+                    }
+                }
+
+                m_commandList4->SetComputeRootDescriptorTable(1, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] BindPendingResourcesRayTracing: Failed to allocate SRV staging descriptors");
+            }
+        }
+        m_srvDirty = false;
+    }
+
+    // Bind UAV table (parameter 2) - u0
+    if (m_uavDirty) {
+        CFFLog::Info("[BindPendingResourcesRayTracing] UAV: pendingUAV[0].ptr=0x%llX", m_pendingUAVCpuHandles[0].ptr);
+        if (m_pendingUAVCpuHandles[0].ptr != 0) {
+            auto& stagingRing = heapMgr.GetSRVStagingRing();
+            SDescriptorHandle staging = stagingRing.AllocateContiguous(1);
+
+            if (staging.IsValid()) {
+                CFFLog::Info("[BindPendingResourcesRayTracing] UAV staging: gpuHandle=0x%llX", staging.gpuHandle.ptr);
+                device->CopyDescriptorsSimple(1, staging.cpuHandle, m_pendingUAVCpuHandles[0],
+                                              D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                m_commandList4->SetComputeRootDescriptorTable(2, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] BindPendingResourcesRayTracing: Failed to allocate UAV staging descriptors");
+            }
+        }
+        m_uavDirty = false;
+    }
+
+    // Bind Sampler table (parameter 3) - s0
+    if (m_samplerDirty) {
+        if (m_pendingSamplerCpuHandles[0].ptr != 0) {
+            auto& samplerStagingRing = heapMgr.GetSamplerStagingRing();
+            SDescriptorHandle staging = samplerStagingRing.AllocateContiguous(1);
+
+            if (staging.IsValid()) {
+                device->CopyDescriptorsSimple(1, staging.cpuHandle, m_pendingSamplerCpuHandles[0],
+                                              D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+                m_commandList4->SetComputeRootDescriptorTable(3, staging.gpuHandle);
+            }
+        } else {
+            // Allocate dummy sampler for unbound slot
+            auto& samplerStagingRing = heapMgr.GetSamplerStagingRing();
+            SDescriptorHandle staging = samplerStagingRing.AllocateContiguous(1);
+            if (staging.IsValid()) {
+                m_commandList4->SetComputeRootDescriptorTable(3, staging.gpuHandle);
+            }
+        }
+        m_samplerDirty = false;
+    }
+}
+
 // ============================================
 // Ray Tracing Commands
 // ============================================
@@ -959,6 +1068,13 @@ void CDX12CommandList::SetRayTracingPipelineState(IRayTracingPipelineState* pso)
 
     ID3D12StateObject* stateObject = static_cast<ID3D12StateObject*>(pso->GetNativeHandle());
     m_commandList4->SetPipelineState1(stateObject);
+
+    // Re-set the root signature after SetPipelineState1
+    // According to DXR samples, root signature should be set after pipeline state
+    ID3D12RootSignature* rtRootSig = m_context->GetRayTracingRootSignature();
+    if (rtRootSig) {
+        m_commandList->SetComputeRootSignature(rtRootSig);
+    }
 }
 
 void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
@@ -973,6 +1089,12 @@ void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
         return;
     }
 
+    // Bind pending resources (SRV/UAV/Sampler tables) for ray tracing
+    BindPendingResourcesRayTracing();
+
+    // Flush any pending resource barriers before dispatch
+    FlushBarriers();
+
     IShaderBindingTable* sbt = desc.shaderBindingTable;
 
     D3D12_DISPATCH_RAYS_DESC d3dDesc = {};
@@ -986,9 +1108,10 @@ void CDX12CommandList::DispatchRays(const DispatchRaysDesc& desc) {
     d3dDesc.MissShaderTable.SizeInBytes = sbt->GetMissShaderTableSize();
     d3dDesc.MissShaderTable.StrideInBytes = sbt->GetMissShaderTableStride();
 
-    // Hit group table
-    d3dDesc.HitGroupTable.StartAddress = sbt->GetHitGroupTableAddress();
-    d3dDesc.HitGroupTable.SizeInBytes = sbt->GetHitGroupTableSize();
+    // Hit group table (address must be 0 if size is 0)
+    uint64_t hitGroupSize = sbt->GetHitGroupTableSize();
+    d3dDesc.HitGroupTable.StartAddress = (hitGroupSize > 0) ? sbt->GetHitGroupTableAddress() : 0;
+    d3dDesc.HitGroupTable.SizeInBytes = hitGroupSize;
     d3dDesc.HitGroupTable.StrideInBytes = sbt->GetHitGroupTableStride();
 
     // Dispatch dimensions

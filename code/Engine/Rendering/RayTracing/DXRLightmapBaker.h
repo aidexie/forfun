@@ -32,7 +32,7 @@ struct SBrick;  // Forward declaration from VolumetricLightmap.h
 // See docs/DXR_VERIFICATION_ROADMAP.md for details
 struct SDXRDebugFlags {
     // Phase 0: Pause for Nsight capture (5 seconds before dispatch)
-    bool enableCaptureDelay = true;
+    bool enableCaptureDelay = false;
 
     // Phase 1: Log acceleration structure info (BLAS/TLAS)
     bool logAccelerationStructure = true;
@@ -241,6 +241,9 @@ private:
     // Constant buffer
     std::unique_ptr<RHI::IBuffer> m_constantBuffer;
 
+    // Linear sampler for skybox sampling
+    std::unique_ptr<RHI::ISampler> m_linearSampler;
+
     // Scene data buffers
     std::unique_ptr<RHI::IBuffer> m_materialBuffer;
     std::unique_ptr<RHI::IBuffer> m_lightBuffer;
@@ -260,4 +263,8 @@ private:
     DirectX::XMFLOAT3 m_volumeMax;
     uint32_t m_numLights = 0;
     uint32_t m_totalBricks = 0;
+
+    // Skybox texture for environment lighting (not owned, borrowed from scene)
+    RHI::ITexture* m_skyboxTexture = nullptr;
+    RHI::ISampler* m_skyboxTextureSample = nullptr;
 };

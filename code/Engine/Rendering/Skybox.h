@@ -24,6 +24,7 @@ public:
 
     // Get cubemap for IBL
     RHI::ITexture* GetEnvironmentTexture() const { return m_envTexture.get(); }
+    RHI::ISampler* GetEnvironmentTextureSampler() const { return m_sampler.get(); }
 
 private:
     void createCubeMesh();

@@ -212,6 +212,8 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestReflectionProbe.cpp
     ${CODE_PATH}/Tests/TestLightProbeSH.cpp
     ${CODE_PATH}/Tests/TestLightProbeIntegration.cpp
+    ${CODE_PATH}/Tests/TestGPUReadback.cpp
+    ${CODE_PATH}/Tests/TestDXRReadback.cpp
 )
 
 add_executable(forfun WIN32

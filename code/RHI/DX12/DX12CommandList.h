@@ -163,6 +163,8 @@ private:
     void BindPendingResources();
     // Bind pending resources for compute dispatch
     void BindPendingResourcesCompute();
+    // Bind pending resources for ray tracing dispatch
+    void BindPendingResourcesRayTracing();
 
     // Dynamic constant buffer ring (owned by RenderContext, set during initialization)
     CDX12DynamicBufferRing* m_dynamicBuffer = nullptr;

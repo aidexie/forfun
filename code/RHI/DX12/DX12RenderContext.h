@@ -83,6 +83,7 @@ public:
     ID3D12CommandQueue* GetCommandQueue() const;
     ID3D12RootSignature* GetGraphicsRootSignature() const { return m_graphicsRootSignature.Get(); }
     ID3D12RootSignature* GetComputeRootSignature() const { return m_computeRootSignature.Get(); }
+    ID3D12RootSignature* GetRayTracingRootSignature() const { return m_rayTracingRootSignature.Get(); }
 
     // Access to internal passes
     CDX12GenerateMipsPass& GetGenerateMipsPass() { return m_generateMipsPass; }
@@ -105,6 +106,7 @@ private:
     // Root signatures (shared by all PSOs)
     ComPtr<ID3D12RootSignature> m_graphicsRootSignature;
     ComPtr<ID3D12RootSignature> m_computeRootSignature;
+    ComPtr<ID3D12RootSignature> m_rayTracingRootSignature;
 
     // Backbuffer wrappers (one per frame in flight)
     std::unique_ptr<class CDX12Texture> m_backbufferWrappers[3];

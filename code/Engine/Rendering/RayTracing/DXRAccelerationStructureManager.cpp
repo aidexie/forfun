@@ -226,20 +226,24 @@ bool CDXRAccelerationStructureManager::BuildTLAS(const std::vector<SRayTracingIn
 
         RHI::AccelerationStructureInstance asInst;
 
-        // Copy transform (convert from XMFLOAT4X4 to 3x4 row-major)
-        // XMFLOAT4X4 is row-major, we need 3x4 (first 3 rows)
-        asInst.transform[0][0] = inst.worldTransform._11;
-        asInst.transform[0][1] = inst.worldTransform._12;
-        asInst.transform[0][2] = inst.worldTransform._13;
-        asInst.transform[0][3] = inst.worldTransform._14;
-        asInst.transform[1][0] = inst.worldTransform._21;
-        asInst.transform[1][1] = inst.worldTransform._22;
-        asInst.transform[1][2] = inst.worldTransform._23;
-        asInst.transform[1][3] = inst.worldTransform._24;
-        asInst.transform[2][0] = inst.worldTransform._31;
-        asInst.transform[2][1] = inst.worldTransform._32;
-        asInst.transform[2][2] = inst.worldTransform._33;
-        asInst.transform[2][3] = inst.worldTransform._34;
+        // Copy transform (convert from XMFLOAT4X4 to DXR 3x4 format)
+        // DirectX XMFLOAT4X4 is row-major with translation in row 3 (_41, _42, _43)
+        // DXR expects 3x4 transposed format: rows become columns, translation in column 3
+        // DXR layout: [Rx Ux Fx Tx]  where R=Right, U=Up, F=Forward, T=Translation
+        //             [Ry Uy Fy Ty]
+        //             [Rz Uz Fz Tz]
+        asInst.transform[0][0] = inst.worldTransform._11;  // Rx
+        asInst.transform[0][1] = inst.worldTransform._21;  // Ux (transposed)
+        asInst.transform[0][2] = inst.worldTransform._31;  // Fx (transposed)
+        asInst.transform[0][3] = inst.worldTransform._41;  // Tx (from row 3)
+        asInst.transform[1][0] = inst.worldTransform._12;  // Ry (transposed)
+        asInst.transform[1][1] = inst.worldTransform._22;  // Uy
+        asInst.transform[1][2] = inst.worldTransform._32;  // Fy (transposed)
+        asInst.transform[1][3] = inst.worldTransform._42;  // Ty (from row 3)
+        asInst.transform[2][0] = inst.worldTransform._13;  // Rz (transposed)
+        asInst.transform[2][1] = inst.worldTransform._23;  // Uz (transposed)
+        asInst.transform[2][2] = inst.worldTransform._33;  // Fz
+        asInst.transform[2][3] = inst.worldTransform._43;  // Tz (from row 3)
 
         asInst.instanceID = inst.instanceID;
         asInst.instanceMask = inst.instanceMask;

@@ -1222,7 +1222,87 @@ bool CDX12RenderContext::CreateRootSignatures() {
 
     DX12_SET_DEBUG_NAME(m_computeRootSignature, "ComputeRootSignature");
 
-    CFFLog::Info("[DX12RenderContext] Root signatures created");
+    // ============================================
+    // Ray Tracing Root Signature
+    // ============================================
+    // Layout for DXR lightmap baking shader (LightmapBake.hlsl):
+    // Parameter 0: Root CBV b0 (CB_BakeParams)
+    // Parameter 1: SRV Descriptor Table (t0=TLAS, t1=Skybox, t2-t4=Materials/Lights/Instances)
+    // Parameter 2: UAV Descriptor Table (u0=OutputBuffer)
+    // Parameter 3: Sampler Descriptor Table (s0)
+
+    D3D12_ROOT_PARAMETER rtParams[4] = {};
+
+    // Parameter 0: Root CBV for CB_BakeParams (b0)
+    rtParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    rtParams[0].Descriptor.ShaderRegister = 0;
+    rtParams[0].Descriptor.RegisterSpace = 0;
+    rtParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Parameter 1: SRV table (t0-t4: TLAS, Skybox, Materials, Lights, Instances)
+    D3D12_DESCRIPTOR_RANGE rtSrvRange = {};
+    rtSrvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    rtSrvRange.NumDescriptors = 5;  // t0-t4
+    rtSrvRange.BaseShaderRegister = 0;
+    rtSrvRange.RegisterSpace = 0;
+    rtSrvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    rtParams[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rtParams[1].DescriptorTable.NumDescriptorRanges = 1;
+    rtParams[1].DescriptorTable.pDescriptorRanges = &rtSrvRange;
+    rtParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Parameter 2: UAV table (u0: OutputBuffer)
+    D3D12_DESCRIPTOR_RANGE rtUavRange = {};
+    rtUavRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    rtUavRange.NumDescriptors = 1;  // u0
+    rtUavRange.BaseShaderRegister = 0;
+    rtUavRange.RegisterSpace = 0;
+    rtUavRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    rtParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rtParams[2].DescriptorTable.NumDescriptorRanges = 1;
+    rtParams[2].DescriptorTable.pDescriptorRanges = &rtUavRange;
+    rtParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    // Parameter 3: Sampler table (s0)
+    D3D12_DESCRIPTOR_RANGE rtSamplerRange = {};
+    rtSamplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+    rtSamplerRange.NumDescriptors = 1;  // s0
+    rtSamplerRange.BaseShaderRegister = 0;
+    rtSamplerRange.RegisterSpace = 0;
+    rtSamplerRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    rtParams[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rtParams[3].DescriptorTable.NumDescriptorRanges = 1;
+    rtParams[3].DescriptorTable.pDescriptorRanges = &rtSamplerRange;
+    rtParams[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+    D3D12_ROOT_SIGNATURE_DESC rtRootSigDesc = {};
+    rtRootSigDesc.NumParameters = 4;
+    rtRootSigDesc.pParameters = rtParams;
+    rtRootSigDesc.NumStaticSamplers = 0;
+    rtRootSigDesc.pStaticSamplers = nullptr;
+    // D3D12_ROOT_SIGNATURE_FLAG_NONE for ray tracing (no input assembler)
+    rtRootSigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+    hr = DX12_CHECK(D3D12SerializeRootSignature(&rtRootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
+    if (FAILED(hr)) {
+        if (error) {
+            CFFLog::Error("[DX12RenderContext] Ray tracing root signature serialization failed: %s", (char*)error->GetBufferPointer());
+        }
+        return false;
+    }
+
+    hr = DX12_CHECK(device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rayTracingRootSignature)));
+    if (FAILED(hr)) {
+        CFFLog::Error("[DX12RenderContext] CreateRootSignature (ray tracing) failed: %s", HRESULTToString(hr).c_str());
+        return false;
+    }
+
+    DX12_SET_DEBUG_NAME(m_rayTracingRootSignature, "RayTracingRootSignature");
+
+    CFFLog::Info("[DX12RenderContext] Root signatures created (graphics, compute, ray tracing)");
     return true;
 }
 
@@ -1446,8 +1526,9 @@ IRayTracingPipelineState* CDX12RenderContext::CreateRayTracingPipelineState(cons
     builder.SetMaxAttributeSize(desc.maxAttributeSize);
     builder.SetMaxRecursionDepth(desc.maxRecursionDepth);
 
-    // Use compute root signature as global root signature for ray tracing
-    builder.SetGlobalRootSignature(m_computeRootSignature.Get());
+    // Use ray tracing root signature as global root signature
+    // IMPORTANT: This must match what PrepareForRayTracing sets on the command list
+    builder.SetGlobalRootSignature(m_rayTracingRootSignature.Get());
 
     return builder.Build(device5);
 }

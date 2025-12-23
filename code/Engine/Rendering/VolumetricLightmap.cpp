@@ -59,6 +59,18 @@ bool CVolumetricLightmap::Initialize(const Config& config)
     CFFLog::Info("  Root Brick Size: %.2f m", m_derived.rootBrickSize);
 
     m_initialized = true;
+    if (!m_dxrBaker)
+    {
+        m_dxrBaker = std::make_unique<CDXRLightmapBaker>();
+    }
+
+    if (!m_dxrBaker->IsReady())
+    {
+        if (!m_dxrBaker->Initialize())
+        {
+            CFFLog::Error("[VolumetricLightmap] Failed to initialize DXR baker");
+        }
+    }
     return true;
 }
 

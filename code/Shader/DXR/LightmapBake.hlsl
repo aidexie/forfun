@@ -228,6 +228,24 @@ void RayGen() {
     // Calculate output index
     uint outputIndex = LocalVoxelToIndex(localVoxelIdx);
 
+    // DEBUG: Write thread ID as output to verify shader runs
+    // Comment out this block when debugging is done
+    #if 1  // Set to 0 to disable debug output
+    {
+        SVoxelSHOutput debugOutput;
+        // Write unique pattern: thread ID * 0.1 so we can identify which thread wrote
+        float debugVal = float(outputIndex + 1) * 0.1f;  // +1 to avoid zero
+        [unroll]
+        for (int d = 0; d < SH_COEFF_COUNT; d++) {
+            debugOutput.sh[d] = float3(debugVal, debugVal * 2.0f, debugVal * 3.0f);
+        }
+        debugOutput.validity = 1.0f;
+        debugOutput.padding = float3(0, 0, 0);
+        g_OutputBuffer[outputIndex] = debugOutput;
+        return;  // Skip rest of shader for debug
+    }
+    #endif
+
     // Get world position for this voxel
     float3 worldPos = LocalVoxelToWorldPos(localVoxelIdx);
 

@@ -197,7 +197,7 @@ CDX12ShaderBindingTable* CDX12ShaderBindingTableBuilder::Build(ID3D12Device* dev
         if (identifier) {
             memcpy(recordPtr, identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
         } else {
-            CFFLog::Warning("[DX12ShaderBindingTable] Missing shader identifier: %s", record.exportName.c_str());
+            CFFLog::Error("[DX12ShaderBindingTable] Missing RayGen shader identifier: %s", record.exportName.c_str());
         }
 
         // Copy local root arguments

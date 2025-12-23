@@ -15,23 +15,21 @@ using namespace DirectX;
 
 // Static runtime log path (initialized lazily after FFPath::Initialize)
 static std::string s_runtimeLogPath;
+static std::string s_testLogPath;
 
 static const std::string& GetRuntimeLogPathInternal() {
     if (s_runtimeLogPath.empty() && FFPath::IsInitialized()) {
-        s_runtimeLogPath = FFPath::GetDebugDir() + "/logs/runtime.log";
+        if (s_testLogPath.empty()) {
+            s_runtimeLogPath = FFPath::GetDebugDir() + "/logs/runtime.log";
+        } else {
+            s_runtimeLogPath = FFPath::GetDebugDir() + s_testLogPath;
+        }
     }
     return s_runtimeLogPath;
 }
 
-void CFFLog::SetRuntimeLogPath(const char* path) {
-    s_runtimeLogPath = path;
-
-    // Ensure directory exists
-    std::filesystem::path p(path);
-    std::filesystem::path dir = p.parent_path();
-    if (!dir.empty() && !std::filesystem::exists(dir)) {
-        std::filesystem::create_directories(dir);
-    }
+void CFFLog::SetTestLogPath(const char* path) {
+    s_testLogPath = path;
 }
 
 const char* CFFLog::GetRuntimeLogPath() {

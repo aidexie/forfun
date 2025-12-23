@@ -2,6 +2,7 @@
 #include "DX12Common.h"
 #include "../../Core/FFLog.h"
 #include <algorithm>
+#include <cstdlib>  // for std::getenv
 
 namespace RHI {
 namespace DX12 {
@@ -218,11 +219,21 @@ void CDX12Context::EnableDebugLayer() {
         debugController->EnableDebugLayer();
         CFFLog::Info("[DX12Context] Debug layer enabled");
 
-        //Optional: Enable GPU-based validation (very slow but thorough)
-        ComPtr<ID3D12Debug1> debugController1;
-        if (SUCCEEDED(debugController.As(&debugController1))) {
-            debugController1->SetEnableGPUBasedValidation(true);
-            CFFLog::Info("[DX12Context] GPU-based validation enabled");
+        // GPU-based validation: Enable by default, but can be disabled for Nsight capture
+        // Set environment variable DISABLE_GPU_VALIDATION=1 to disable
+        bool enableGpuValidation = true;
+        if (const char* env = std::getenv("DISABLE_GPU_VALIDATION")) {
+            enableGpuValidation = (std::string(env) != "1");
+        }
+
+        if (enableGpuValidation) {
+            ComPtr<ID3D12Debug1> debugController1;
+            if (SUCCEEDED(debugController.As(&debugController1))) {
+                debugController1->SetEnableGPUBasedValidation(true);
+                CFFLog::Info("[DX12Context] GPU-based validation enabled");
+            }
+        } else {
+            CFFLog::Warning("[DX12Context] GPU-based validation DISABLED (for Nsight capture)");
         }
     } else {
         CFFLog::Warning("[DX12Context] Failed to enable debug layer");
@@ -260,14 +271,19 @@ void CDX12Context::FlushDebugMessages() {
                         case D3D12_MESSAGE_SEVERITY_MESSAGE: severityStr = "MESSAGE"; break;
                     }
 
-                    // Output directly to debugger to avoid Poco issues
+                    // Output to both debugger and log file
                     char buffer[4096];
-                    snprintf(buffer, sizeof(buffer), "[D3D12 %s] %s\n", severityStr, message->pDescription);
+                    snprintf(buffer, sizeof(buffer), "[D3D12 %s] %s", severityStr, message->pDescription);
                     OutputDebugStringA(buffer);
+                    OutputDebugStringA("\n");
 
-                    // Break on errors in debugger
+                    // Also log via CFFLog so it appears in test output
                     if (isError) {
-                        __debugbreak();
+                        CFFLog::Error("%s", buffer);
+                    } else if (message->Severity == D3D12_MESSAGE_SEVERITY_WARNING) {
+                        CFFLog::Warning("%s", buffer);
+                    } else {
+                        CFFLog::Info("%s", buffer);
                     }
                 }
             }

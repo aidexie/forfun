@@ -5,7 +5,6 @@
 #include "../../Scene.h"
 #include "../../../RHI/RHIManager.h"
 #include "../../../RHI/RHIResources.h"
-#include "../../../RHI/RHIDescriptors.h"
 #include "../../../RHI/RHIRayTracing.h"
 #include "../../../RHI/ShaderCompiler.h"
 #include "../../../Core/FFLog.h"
@@ -41,6 +40,21 @@ bool CDXRLightmapBaker::Initialize() {
     // Check DXR support
     if (!ctx->SupportsRaytracing()) {
         CFFLog::Warning("[DXRBaker] Ray tracing not supported on this device");
+        return false;
+    }
+
+    CFFLog::Info("[DXRBaker] Creating ray tracing pipeline...");
+    if (!CreatePipeline())
+    {
+        CFFLog::Error("[DXRBaker] Failed to create ray tracing pipeline");
+        return false;
+    }
+
+    // Create shader binding table
+    CFFLog::Info("[DXRBaker] Creating shader binding table...");
+    if (!CreateShaderBindingTable())
+    {
+        CFFLog::Error("[DXRBaker] Failed to create shader binding table");
         return false;
     }
 
@@ -399,6 +413,18 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
     CScene& scene,
     const SDXRBakeConfig& config)
 {
+    // Capture skybox texture from scene for environment lighting
+    m_skyboxTexture = scene.GetSkybox().GetEnvironmentTexture();
+    m_skyboxTextureSample = scene.GetSkybox().GetEnvironmentTextureSampler();
+    if (m_skyboxTexture)
+    {
+        CFFLog::Info("[DXRBaker] Skybox texture captured for environment lighting");
+    }
+    else
+    {
+        CFFLog::Warning("[DXRBaker] No skybox texture available - sky will be black");
+    }
+
     // Export scene geometry
     auto sceneData = CSceneGeometryExporter::ExportScene(scene);
     if (!sceneData) {
@@ -510,7 +536,6 @@ bool CDXRLightmapBaker::BakeVolumetricLightmap(
         }
     }
 
-    return false;
     // Get mutable access to bricks for writing results
     auto& mutableBricks = const_cast<std::vector<SBrick>&>(bricks);
 
@@ -607,35 +632,63 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
     params.brickIndex = brickIndex;
     params.totalBricks = m_totalBricks;
 
-    // Map and update constant buffer
-    void* cbData = m_constantBuffer->Map();
-    if (cbData) {
-        memcpy(cbData, &params, sizeof(params));
-        m_constantBuffer->Unmap();
-    } else {
-        CFFLog::Error("[DXRBaker] Failed to map constant buffer!");
-    }
+    // ============================================
+    // Simplified RHI-based Resource Binding
+    // (Refer to TestDXRReadback.cpp pattern)
+    // ============================================
 
-    // Set ray tracing pipeline state
+    // Set ray tracing pipeline state (also sets root signature)
     cmdList->SetRayTracingPipelineState(m_pipeline.get());
 
-    // TODO: Resource binding for ray tracing requires root signature modifications
-    // For now, the resources are not properly bound. Full implementation needs:
-    // 1. Create a ray tracing root signature with:
-    //    - CBV for CB_BakeParams (b0)
-    //    - SRV for TLAS (t0)
-    //    - SRV for Skybox texture (t1)
-    //    - Sampler (s0)
-    //    - SRV for Materials, Lights, Instances (t2-t4)
-    //    - UAV for output buffer (u0)
-    // 2. Bind resources via SetComputeRootDescriptorTable or SetComputeRootShaderResourceView
+    // b0: Constant buffer - use SetConstantBufferData for automatic ring buffer allocation
+    cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &params, sizeof(params));
 
-    // Bind TLAS (this is partially implemented)
+    // t0: TLAS - using RHI interface
     auto* tlas = m_asManager->GetTLAS();
     if (tlas) {
         cmdList->SetAccelerationStructure(0, tlas);
     } else {
         CFFLog::Error("[DXRBaker] Cannot bind NULL TLAS!");
+    }
+
+    // t1: Skybox texture
+    if (m_skyboxTexture) {
+        cmdList->SetShaderResource(RHI::EShaderStage::Compute, 1, m_skyboxTexture);
+    }
+
+    // t2: Materials buffer
+    if (m_materialBuffer) {
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 2, m_materialBuffer.get());
+    }
+
+    // t3: Lights buffer
+    if (m_lightBuffer) {
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 3, m_lightBuffer.get());
+    }
+
+    // t4: Instances buffer
+    if (m_instanceBuffer) {
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 4, m_instanceBuffer.get());
+    }
+
+    // u0: Output buffer
+    cmdList->SetUnorderedAccess(0, m_outputBuffer.get());
+
+    // s0: Linear sampler for skybox
+    if (m_skyboxTextureSample) {
+        cmdList->SetSampler(RHI::EShaderStage::Compute, 0, m_skyboxTextureSample);
+    }
+
+    if (shouldLog && config.debug.logResourceBinding) {
+        CFFLog::Info("[DXRBaker] Resources bound via RHI interface:");
+        CFFLog::Info("[DXRBaker]   b0: CB_BakeParams (via SetConstantBufferData)");
+        CFFLog::Info("[DXRBaker]   t0: TLAS");
+        CFFLog::Info("[DXRBaker]   t1: Skybox %s", m_skyboxTexture ? "BOUND" : "NULL");
+        CFFLog::Info("[DXRBaker]   t2: Materials %s", m_materialBuffer ? "BOUND" : "NULL");
+        CFFLog::Info("[DXRBaker]   t3: Lights %s (%u lights)", m_lightBuffer ? "BOUND" : "NULL", m_numLights);
+        CFFLog::Info("[DXRBaker]   t4: Instances %s", m_instanceBuffer ? "BOUND" : "NULL");
+        CFFLog::Info("[DXRBaker]   u0: Output buffer");
+        CFFLog::Info("[DXRBaker]   s0: Linear sampler %s", m_skyboxTextureSample ? "BOUND" : "NULL");
     }
 
     // Dispatch rays: 4x4x4 = 64 threads per brick
@@ -657,9 +710,18 @@ void CDXRLightmapBaker::DispatchBakeBrick(uint32_t brickIndex, const SBrick& bri
 
     cmdList->DispatchRays(dispatchDesc);
 
+    // UAV barrier: ensure DispatchRays write completes before copy
+    cmdList->UAVBarrier(m_outputBuffer.get());
+
+    // Transition output buffer from UAV to COPY_SOURCE for readback
+    cmdList->Barrier(m_outputBuffer.get(), RHI::EResourceState::UnorderedAccess, RHI::EResourceState::CopySource);
+
     // Copy output buffer to readback buffer
     cmdList->CopyBuffer(m_readbackBuffer.get(), 0, m_outputBuffer.get(), 0,
                         VL_BRICK_VOXEL_COUNT * sizeof(SVoxelSHOutput));
+
+    // Transition back to UAV for next brick
+    cmdList->Barrier(m_outputBuffer.get(), RHI::EResourceState::CopySource, RHI::EResourceState::UnorderedAccess);
 
     // Execute and wait for completion
     // Note: This is synchronous per-brick, which is simpler but not optimal

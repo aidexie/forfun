@@ -58,8 +58,7 @@ public:
     static void Warning(const char* format, ...);
     static void Error(const char* format, ...);
 
-    // Set runtime log path (for test mode)
-    static void SetRuntimeLogPath(const char* path);
+    static void SetTestLogPath(const char* path);
     static const char* GetRuntimeLogPath();
 
     // Initialize logging system (clears old log file)

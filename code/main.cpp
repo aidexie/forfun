@@ -47,6 +47,16 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
 // -----------------------------------------------------------------------------
+// Code-Configurable Test Mode
+// -----------------------------------------------------------------------------
+// Set this to a test name to auto-run that test on startup (bypasses command line)
+// Set to nullptr or empty string "" to disable and use normal command line parsing
+// Examples:
+//   static const char* CODE_TEST_NAME = "TestGPUReadback";  // Run TestGPUReadback
+  static const char* CODE_TEST_NAME = nullptr;            // Normal mode
+// static const char* CODE_TEST_NAME = "TestDXRReadback";
+
+// -----------------------------------------------------------------------------
 // 全局
 // -----------------------------------------------------------------------------
 static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
@@ -193,28 +203,38 @@ static void ListAllTests() {
 // Parse command line for test mode
 // -----------------------------------------------------------------------------
 static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
-    std::wstring cmdLine(lpCmdLine);
-    if (cmdLine.find(L"--test") == std::wstring::npos) {
-        return nullptr;  // Not in test mode
+    std::string testName;
+
+    // Priority 1: Check CODE_TEST_NAME (code-configured test)
+    if (CODE_TEST_NAME != nullptr && CODE_TEST_NAME[0] != '\0') {
+        testName = CODE_TEST_NAME;
+        CFFLog::Info("=== Code-Configured Test Mode ===");
+        CFFLog::Info("Running test from CODE_TEST_NAME: %s", testName.c_str());
+    } else {
+        // Priority 2: Check command line
+        std::wstring cmdLine(lpCmdLine);
+        if (cmdLine.find(L"--test") == std::wstring::npos) {
+            return nullptr;  // Not in test mode
+        }
+
+        // Extract test name from command line
+        size_t pos = cmdLine.find(L"--test");
+        size_t start = pos + 7;  // Skip "--test "
+        size_t end = cmdLine.find(L' ', start);
+        if (end == std::wstring::npos) end = cmdLine.length();
+
+        std::wstring testNameW = cmdLine.substr(start, end - start);
+
+        // Convert wstring to string (using Windows API)
+        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, testNameW.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        testName.resize(sizeNeeded, 0);
+        WideCharToMultiByte(CP_UTF8, 0, testNameW.c_str(), -1, &testName[0], sizeNeeded, nullptr, nullptr);
+        testName.resize(sizeNeeded - 1); // Remove null terminator
+
+        // Remove leading/trailing spaces
+        testName.erase(0, testName.find_first_not_of(" \t\n\r"));
+        testName.erase(testName.find_last_not_of(" \t\n\r") + 1);
     }
-
-    // Extract test name
-    size_t pos = cmdLine.find(L"--test");
-    size_t start = pos + 7;  // Skip "--test "
-    size_t end = cmdLine.find(L' ', start);
-    if (end == std::wstring::npos) end = cmdLine.length();
-
-    std::wstring testNameW = cmdLine.substr(start, end - start);
-
-    // ✅ 正确的 wstring → string 转换（使用 Windows API）
-    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, testNameW.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string testName(sizeNeeded, 0);
-    WideCharToMultiByte(CP_UTF8, 0, testNameW.c_str(), -1, &testName[0], sizeNeeded, nullptr, nullptr);
-    testName.resize(sizeNeeded - 1); // Remove null terminator
-
-    // Remove leading/trailing spaces
-    testName.erase(0, testName.find_first_not_of(" \t\n\r"));
-    testName.erase(testName.find_last_not_of(" \t\n\r") + 1);
 
     ITestCase* test = CTestRegistry::Instance().Get(testName);
     if (test) {
@@ -300,12 +320,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // Set test-specific runtime log path
         std::string runtimeLogPath = GetTestDebugDir(activeTest->GetName()) + "/runtime.log";
-        CFFLog::SetRuntimeLogPath(runtimeLogPath.c_str());
+        CFFLog::SetTestLogPath(runtimeLogPath.c_str());
         CFFLog::Info("Test mode: runtime log redirected to %s", runtimeLogPath.c_str());
 
         activeTest->Setup(testContext);
         CFFLog::Info("Test setup complete, starting main loop");
     }
+    
     // 0) Debug directories (ensure they exist for logging)
     CDebugPaths::EnsureDirectoriesExist();
 
@@ -474,22 +495,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // Execute test frame if in test mode
         if (activeTest)
         {
+            //  testContext.ExecuteFrame(frameCount > 10 ? 10 : frameCount);
             testContext.ExecuteFrame(frameCount);
 
             // Check if test is finished
             if (testContext.IsFinished())
             {
-                CFFLog::Info("=== Test Finished ===");
-                PostQuitMessage(testContext.testPassed ? 0 : 1);
-                break;
+              CFFLog::Info("=== Test Finished ===");
+              PostQuitMessage(testContext.testPassed ? 0 : 1);
+              break;
             }
 
             // Timeout protection
             if (frameCount > 1000)
             {
-                CFFLog::Error("Test timeout after 1000 frames");
-                PostQuitMessage(1);
-                break;
+              CFFLog::Error("Test timeout after 1000 frames");
+              PostQuitMessage(1);
+              break;
             }
         }
 
