@@ -215,6 +215,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestGPUReadback.cpp
     ${CODE_PATH}/Tests/TestDXRReadback.cpp
     ${CODE_PATH}/Tests/TestDXRBakeVisualize.cpp
+    ${CODE_PATH}/Tests/TestDXRCubemapBaker.cpp
 )
 
 add_executable(forfun WIN32
@@ -306,6 +307,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRAccelerationStructureManager.cpp
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRLightmapBaker.h
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRLightmapBaker.cpp
+    ${CODE_PATH}/Engine/Rendering/RayTracing/DXRCubemapBaker.h
+    ${CODE_PATH}/Engine/Rendering/RayTracing/DXRCubemapBaker.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h

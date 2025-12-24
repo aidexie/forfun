@@ -52,8 +52,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // Set this to a test name to auto-run that test on startup (bypasses command line)
 // Set to nullptr or empty string "" to disable and use normal command line parsing
 // Examples:
-//   static const char* CODE_TEST_NAME = "TestGPUReadback";  // Run TestGPUReadback
-  static const char* CODE_TEST_NAME = nullptr;            // Normal mode
+static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
+//   static const char* CODE_TEST_NAME = nullptr;            // Normal mode
 // static const char* CODE_TEST_NAME = "TestDXRReadback";
 
 // -----------------------------------------------------------------------------
@@ -299,7 +299,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     Core::Console::InitUTF8();
     ForceWorkDir();
-
+    //LPWSTR mylpCmdLine = L"--test TestDXRBakeVisualize";
+    // LPWSTR mylpCmdLine = const_cast<LPWSTR>(L"--test TestDXRBakeVisualize");
     // Initialize RenderDoc API (if RenderDoc is attached)
     CRenderDocCapture::Initialize();
 
@@ -309,7 +310,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         ListAllTests();
         return 0;
     }
-
     // Parse command line for test mode
     ITestCase* activeTest = ParseCommandLineForTest(lpCmdLine);
     CTestContext testContext;
@@ -493,17 +493,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         // Execute test frame if in test mode
+        bool shouldExitAfterFrame = false;
         if (activeTest)
         {
             //  testContext.ExecuteFrame(frameCount > 10 ? 10 : frameCount);
             testContext.ExecuteFrame(frameCount);
 
-            // Check if test is finished
+            // Check if test is finished - set flag to exit after frame completes
             if (testContext.IsFinished())
             {
               CFFLog::Info("=== Test Finished ===");
               PostQuitMessage(testContext.testPassed ? 0 : 1);
-              break;
+              shouldExitAfterFrame = true;
             }
 
             // Timeout protection
@@ -511,7 +512,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             {
               CFFLog::Error("Test timeout after 1000 frames");
               PostQuitMessage(1);
-              break;
+              shouldExitAfterFrame = true;
             }
         }
 
@@ -644,6 +645,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // 9. EndFrame and Present
         rhiCtx->EndFrame();
         rhiCtx->Present(true);
+
+        // Exit after frame completes cleanly (test finished or timeout)
+        if (shouldExitAfterFrame) {
+            break;
+        }
     }
 
     // Main loop finished normally

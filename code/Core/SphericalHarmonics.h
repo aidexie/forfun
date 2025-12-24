@@ -70,6 +70,16 @@ namespace SphericalHarmonics
         std::array<DirectX::XMFLOAT3, 9>& outCoeffs
     );
 
+    // 从平坦数组格式的 Cubemap 投影到 L2 球谐系数
+    // flatCubemapData: 连续存储的 6 面像素数据 [face * pixelsPerFace + y * size + x]
+    // size: cubemap 分辨率
+    // outCoeffs: 输出的 L2 球谐系数（RGB，9 个）
+    void ProjectCubemapToSH(
+        const DirectX::XMFLOAT4* flatCubemapData,
+        int size,
+        std::array<DirectX::XMFLOAT3, 9>& outCoeffs
+    );
+
     // ============================================
     // SH Evaluation (Reconstruction)
     // ============================================

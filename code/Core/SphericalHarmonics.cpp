@@ -154,6 +154,57 @@ namespace SphericalHarmonics
         // 不需要额外归一化，因为 solidAngle 已经是正确的 dω
     }
 
+    // Flat buffer overload for GPU output format
+    void ProjectCubemapToSH(
+        const XMFLOAT4* flatCubemapData,
+        int size,
+        std::array<XMFLOAT3, 9>& outCoeffs)
+    {
+        // Initialize coefficients to zero
+        for (int i = 0; i < 9; i++)
+        {
+            outCoeffs[i] = XMFLOAT3(0, 0, 0);
+        }
+
+        int pixelsPerFace = size * size;
+
+        // Iterate over 6 faces
+        for (int face = 0; face < 6; face++)
+        {
+            // Iterate over all pixels in this face
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    // 1. Compute UV and solid angle
+                    float u = ((float)x + 0.5f) / (float)size * 2.0f - 1.0f;
+                    float v = ((float)y + 0.5f) / (float)size * 2.0f - 1.0f;
+                    float solidAngle = ComputeSolidAngle(u, v, size);
+
+                    // 2. Compute direction vector
+                    XMFLOAT3 dir = CubemapTexelToDirection(face, x, y, size);
+
+                    // 3. Sample color from flat buffer
+                    int pixelIndex = face * pixelsPerFace + y * size + x;
+                    const XMFLOAT4& pixel = flatCubemapData[pixelIndex];
+                    XMFLOAT3 color(pixel.x, pixel.y, pixel.z);
+
+                    // 4. Compute SH basis functions
+                    std::array<float, 9> basis;
+                    EvaluateBasis(dir, basis);
+
+                    // 5. Accumulate to SH coefficients (Riemann sum)
+                    for (int i = 0; i < 9; i++)
+                    {
+                        outCoeffs[i].x += color.x * basis[i] * solidAngle;
+                        outCoeffs[i].y += color.y * basis[i] * solidAngle;
+                        outCoeffs[i].z += color.z * basis[i] * solidAngle;
+                    }
+                }
+            }
+        }
+    }
+
     // ============================================
     // SH Evaluation (Reconstruction)
     // ============================================
