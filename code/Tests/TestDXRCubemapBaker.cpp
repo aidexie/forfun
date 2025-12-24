@@ -8,6 +8,7 @@
 #include "Engine/Rendering/RayTracing/DXRCubemapBaker.h"
 #include <DirectXMath.h>
 #include <filesystem>
+#include <memory>
 
 using namespace DirectX;
 
@@ -16,6 +17,9 @@ using namespace DirectX;
 // ============================================
 // Uses the new cubemap-based approach: 32x32x6 = 6144 rays per voxel.
 // Matches CPU baker sampling for correctness validation.
+//
+// Frame 5: Build AS, pipeline, buffers (PrepareBakeResources)
+// Frame 10: Dispatch rays and readback (DispatchBakeAllVoxels)
 //
 // Output: E:/forfun/debug/TestDXRCubemapBaker/
 //   - cubemap_brick*_voxel*.ktx2 - Raw radiance cubemaps
@@ -33,8 +37,10 @@ public:
             std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
             CScene::Instance().LoadFromFile(scenePath);
         });
+
+        // Frame 5: Build AS, pipeline, buffers
         ctx.OnFrame(5, [&]() {
-            CFFLog::Info("[TestDXRCubemapBaker] Frame 5: Starting cubemap-based GPU bake test");
+            CFFLog::Info("[TestDXRCubemapBaker] Frame 5: Building resources...");
 
             // Get scene's volumetric lightmap
             CScene& scene = CScene::Instance();
@@ -64,39 +70,62 @@ public:
             }
 
             // Create cubemap baker
-            CDXRCubemapBaker baker;
-            if (!baker.Initialize()) {
+            m_baker = std::make_unique<CDXRCubemapBaker>();
+            if (!m_baker->Initialize()) {
                 ctx.failures.push_back("Failed to initialize cubemap baker");
                 CFFLog::Error("[TestDXRCubemapBaker] Failed to initialize cubemap baker");
                 return;
             }
 
             // Configure
-            SDXRCubemapBakeConfig config;
-            config.cubemapResolution = 32;  // 32x32x6 = 6144 rays per voxel
-            config.maxBounces = 2;
-            config.skyIntensity = 1.0f;
+            m_config.cubemapResolution = 32;  // 32x32x6 = 6144 rays per voxel
+            m_config.maxBounces = 2;
+            m_config.skyIntensity = 1.0f;
 
             // Enable debug cubemap export
-            config.debug.exportDebugCubemaps = true;
-            config.debug.maxDebugCubemaps = 3;  // Export first 3 valid voxels
-            config.debug.debugExportPath = FFPath::GetDebugDir() + "/TestDXRCubemapBaker";
-            config.debug.logDispatchInfo = true;
-            config.debug.logReadbackResults = true;
+            m_config.debug.exportDebugCubemaps = true;
+            m_config.debug.maxDebugCubemaps = 1;  // Export first 3 valid voxels
+            m_config.debug.debugExportPath = FFPath::GetDebugDir() + "/TestDXRCubemapBaker";
+            m_config.debug.logDispatchInfo = true;
+            m_config.debug.logReadbackResults = true;
 
             // Create output directory
-            std::filesystem::create_directories(config.debug.debugExportPath);
+            std::filesystem::create_directories(m_config.debug.debugExportPath);
 
-            // Bake
-            CFFLog::Info("[TestDXRCubemapBaker] Starting cubemap-based GPU bake...");
-            CFFLog::Info("[TestDXRCubemapBaker] Rays per voxel: %u (32x32x6)",
-                config.cubemapResolution * config.cubemapResolution * 6);
-
-            bool success = baker.BakeVolumetricLightmap(lightmap, scene, config);
+            // Phase 1: Build AS, pipeline, buffers
+            CFFLog::Info("[TestDXRCubemapBaker] Building acceleration structures and pipeline...");
+            bool success = m_baker->BakeVolumetricLightmap(lightmap, scene, m_config);
 
             if (!success) {
-                ctx.failures.push_back("GPU bake failed");
-                CFFLog::Error("[TestDXRCubemapBaker] GPU bake failed");
+                ctx.failures.push_back("Failed to prepare bake resources");
+                CFFLog::Error("[TestDXRCubemapBaker] Failed to prepare bake resources");
+                return;
+            }
+
+            CFFLog::Info("[TestDXRCubemapBaker] Frame 5: Resources built successfully");
+        });
+
+        // Frame 10: Dispatch rays and readback
+        ctx.OnFrame(10, [&]() {
+            CFFLog::Info("[TestDXRCubemapBaker] Frame 10: Dispatching rays...");
+
+            if (!m_baker) {
+                ctx.failures.push_back("Baker not initialized");
+                return;
+            }
+
+            CScene& scene = CScene::Instance();
+            CVolumetricLightmap& lightmap = scene.GetVolumetricLightmap();
+
+            // Phase 2: Dispatch bake for all voxels
+            CFFLog::Info("[TestDXRCubemapBaker] Rays per voxel: %u (32x32x6)",
+                m_config.cubemapResolution * m_config.cubemapResolution * 6);
+
+            bool success = m_baker->DispatchBakeAllVoxels(lightmap, m_config);
+
+            if (!success) {
+                ctx.failures.push_back("GPU bake dispatch failed");
+                CFFLog::Error("[TestDXRCubemapBaker] GPU bake dispatch failed");
                 return;
             }
 
@@ -126,36 +155,25 @@ public:
                             shCoeffs[2].x, shCoeffs[2].y, shCoeffs[2].z,
                             shCoeffs[3].x, shCoeffs[3].y, shCoeffs[3].z);
 
-                        // Export SH-reconstructed cubemap for comparison
-                        float totalMagnitude = 0.0f;
-                        for (int i = 0; i < 9; i++) {
-                            totalMagnitude += fabsf(shCoeffs[i].x) + fabsf(shCoeffs[i].y) + fabsf(shCoeffs[i].z);
-                        }
-
-                        // if (totalMagnitude > 0.001f) {
-                        //     SphericalHarmonics::DebugExportSHAsCubemap(
-                        //         shCoeffs, 32,
-                        //         config.debug.debugExportPath,
-                        //         "sh_reconstructed_brick0_voxel" + std::to_string(voxelIdx)
-                        //     );
-                        //     CFFLog::Info("[TestDXRCubemapBaker] Exported SH-reconstructed cubemap for voxel %d", voxelIdx);
-                        // }
-
                         break;  // Only log first valid voxel
                     }
                 }
             }
 
-            CFFLog::Info("[TestDXRCubemapBaker] Results exported to: %s", config.debug.debugExportPath.c_str());
-            CFFLog::Info("[TestDXRCubemapBaker] Compare raw cubemaps with SH-reconstructed cubemaps");
+            CFFLog::Info("[TestDXRCubemapBaker] Results exported to: %s", m_config.debug.debugExportPath.c_str());
         });
 
         ctx.OnFrame(60, [&]() {
             CFFLog::Info("[TestDXRCubemapBaker] Test complete");
+            m_baker.reset();  // Clean up
             ctx.testPassed = ctx.failures.empty();
             ctx.Finish();
         });
     }
+
+private:
+    std::unique_ptr<CDXRCubemapBaker> m_baker;
+    SDXRCubemapBakeConfig m_config;
 };
 
 REGISTER_TEST(CTestDXRCubemapBaker)

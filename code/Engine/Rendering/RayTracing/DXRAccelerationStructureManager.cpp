@@ -245,9 +245,9 @@ bool CDXRAccelerationStructureManager::BuildTLAS(const std::vector<SRayTracingIn
         asInst.transform[2][2] = inst.worldTransform._33;  // Fz
         asInst.transform[2][3] = inst.worldTransform._43;  // Tz (from row 3)
 
-        asInst.instanceID = inst.instanceID;
+        asInst.instanceID = inst.instanceID;  // Used in shader via InstanceID() to index into g_Instances buffer
         asInst.instanceMask = inst.instanceMask;
-        asInst.instanceContributionToHitGroupIndex = inst.materialIndex;  // Use material as hit group offset
+        asInst.instanceContributionToHitGroupIndex = 0;  // All instances use hit group 0 (primary shader)
         asInst.flags = 0;
         asInst.blas = m_blasList[inst.meshIndex]->accelerationStructure.get();
 

@@ -118,10 +118,10 @@ struct SGPUInstanceDataCubemap {
 };
 
 // ============================================
-// Cubemap Output (6144 pixels = 32x32x6)
+// Cubemap Output (98304 pixels = 128x128x6)
 // ============================================
 
-constexpr uint32_t CUBEMAP_BAKE_RES = 32;
+constexpr uint32_t CUBEMAP_BAKE_RES = 128;
 constexpr uint32_t CUBEMAP_BAKE_FACES = 6;
 constexpr uint32_t CUBEMAP_PIXELS_PER_FACE = CUBEMAP_BAKE_RES * CUBEMAP_BAKE_RES;
 constexpr uint32_t CUBEMAP_TOTAL_PIXELS = CUBEMAP_PIXELS_PER_FACE * CUBEMAP_BAKE_FACES;
@@ -191,10 +191,11 @@ private:
     // ============================================
     // Voxel Baking (One voxel at a time)
     // ============================================
-
+public:
     // Dispatch bake for all voxels in lightmap
     bool DispatchBakeAllVoxels(CVolumetricLightmap& lightmap, const SDXRCubemapBakeConfig& config);
 
+private:
     void DispatchBakeVoxel(const DirectX::XMFLOAT3& worldPos, uint32_t voxelIndex,
                            const SDXRCubemapBakeConfig& config);
     void ReadbackCubemap();

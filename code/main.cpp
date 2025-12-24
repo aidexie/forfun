@@ -53,7 +53,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // Set to nullptr or empty string "" to disable and use normal command line parsing
 // Examples:
 static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
-//   static const char* CODE_TEST_NAME = nullptr;            // Normal mode
+   //static const char* CODE_TEST_NAME = nullptr;            // Normal mode
 // static const char* CODE_TEST_NAME = "TestDXRReadback";
 
 // -----------------------------------------------------------------------------
@@ -659,6 +659,10 @@ cleanup:
     // 7) 统一清理出口（按初始化相反顺序清理）
     CFFLog::Info("=== Shutting down (exit code: %d) ===", exitCode);
 
+    if (g_renderConfig.backend == RHI::EBackend::DX12) {
+        auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
+        dx12Ctx.WaitForGPU();
+    }
     if (pipelineInitialized) {
         CFFLog::Info("Shutting down ForwardRenderPipeline...");
         g_pipeline.Shutdown();

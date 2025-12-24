@@ -73,6 +73,7 @@ bool CDXRCubemapBaker::Initialize() {
 }
 
 void CDXRCubemapBaker::Shutdown() {
+
     ReleasePerBakeResources();
 
     m_sbt.reset();
@@ -401,10 +402,12 @@ bool CDXRCubemapBaker::BakeVolumetricLightmap(
     // Phase 1: Prepare all resources (AS, pipeline, buffers)
     if (!PrepareBakeResources(sceneData)) {
         return false;
+    }else{
+        return true;
     }
 
-    // Phase 2: Dispatch bake for all voxels
-    return DispatchBakeAllVoxels(lightmap, config);
+    // // Phase 2: Dispatch bake for all voxels
+    // return DispatchBakeAllVoxels(lightmap, config);
 }
 
 // ============================================
@@ -483,11 +486,17 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
             uint32_t ly = (voxelIdx / VL_BRICK_SIZE) % VL_BRICK_SIZE;
             uint32_t lz = voxelIdx / (VL_BRICK_SIZE * VL_BRICK_SIZE);
 
-            // Calculate world position (center of voxel)
+            // Calculate world position (voxel sample point)
+            // For 4 voxels (0,1,2,3), positions are at 0, 1/3, 2/3, 1 of brick size
+            // This places voxel 0 and 3 at the brick edges
+            float tx = (VL_BRICK_SIZE > 1) ? (float)lx / (VL_BRICK_SIZE - 1) : 0.5f;
+            float ty = (VL_BRICK_SIZE > 1) ? (float)ly / (VL_BRICK_SIZE - 1) : 0.5f;
+            float tz = (VL_BRICK_SIZE > 1) ? (float)lz / (VL_BRICK_SIZE - 1) : 0.5f;
+
             DirectX::XMFLOAT3 worldPos = {
-                brick.worldMin.x + (lx + 0.5f) * voxelSize.x,
-                brick.worldMin.y + (ly + 0.5f) * voxelSize.y,
-                brick.worldMin.z + (lz + 0.5f) * voxelSize.z
+                brick.worldMin.x + tx * brickSize.x,
+                brick.worldMin.y + ty * brickSize.y,
+                brick.worldMin.z + tz * brickSize.z
             };
 
             // Check validity first

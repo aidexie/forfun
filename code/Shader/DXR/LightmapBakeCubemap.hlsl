@@ -23,10 +23,10 @@
 // Constants
 // ============================================
 
-#define CUBEMAP_RES 32
+#define CUBEMAP_RES 128
 #define CUBEMAP_FACES 6
 #define PIXELS_PER_FACE (CUBEMAP_RES * CUBEMAP_RES)
-#define TOTAL_RAYS (PIXELS_PER_FACE * CUBEMAP_FACES)  // 6144
+#define TOTAL_RAYS (PIXELS_PER_FACE * CUBEMAP_FACES)  // 98304
 
 // ============================================
 // Data Structures
@@ -144,26 +144,18 @@ float3 CubemapUVToDirection(uint face, float u, float v) {
 // ============================================
 
 float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, inout uint rng) {
-    float3 result = float3(1, 1, 1);
-    return result;
+    float3 result = float3(0, 0, 0);
     if (g_NumLights == 0) return result;
 
     SLightData light = g_Lights[0];
 
-    float3 L;
-    float lightDist;
-    float attenuation;
-
     // Directional light
-    L = -normalize(light.direction);
-    lightDist = 10000.0f;
-    attenuation = 1.0f;
+    float3 L = -normalize(light.direction);
+    float lightDist = 10000.0f;
 
     float NdotL = saturate(dot(normal, L));
-    result += light.color * light.intensity * attenuation * NdotL;
-    return result;
 
-    if (NdotL > 0.0f && attenuation > 0.0f) {
+    if (NdotL > 0.0f) {
         // Shadow ray
         RayDesc shadowRay;
         shadowRay.Origin = OffsetRayOrigin(hitPos, normal);
@@ -187,7 +179,7 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
 
         if (shadowPayload.isVisible) {
             float3 brdf = mat.albedo * INV_PI;
-            result += light.color * light.intensity * attenuation * NdotL * brdf;
+            result += light.color * light.intensity * NdotL * brdf;
         }
     }
 
@@ -200,7 +192,7 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
 
 [shader("raygeneration")]
 void RayGen() {
-    // Thread indices: x=[0,31], y=[0,31], z=[0,5] (face)
+    // Thread indices: x=[0,127], y=[0,127], z=[0,5] (face)
     uint3 idx = DispatchRaysIndex().xyz;
     uint x = idx.x;
     uint y = idx.y;
@@ -226,7 +218,7 @@ void RayGen() {
 
     // Initialize ray payload
     SRayPayload payload;
-    payload.radiance = float3(1, 0, 1);  // Magenta = TraceRay didn't modify payload (debug)
+    payload.radiance = float3(0, 0, 0);
     payload.throughput = float3(1, 1, 1);
     payload.nextOrigin = g_VoxelWorldPos;
     payload.nextDirection = dir;
@@ -234,25 +226,18 @@ void RayGen() {
     payload.bounceCount = 0;
     payload.terminated = false;
 
-    // DEBUG: Uncomment to test direction calculation (bypasses TraceRay)
-    // payload.radiance = dir * 0.5f + 0.5f;  // Map [-1,1] to [0,1] for visualization
-    // g_CubemapOutput[outputIndex] = float4(payload.radiance, 1.0f);
-    // return;
-
-    // Path tracing loop (no [unroll] needed - one ray per thread)
+    // Path tracing loop
     for (uint bounce = 0; bounce < 1; bounce++) {
-        // if (payload.terminated || payload.bounceCount >= g_MaxBounces) {
-        //     break;
-        // }
+        if (payload.terminated || payload.bounceCount >= g_MaxBounces) {
+            break;
+        }
 
         RayDesc ray;
         ray.Origin = payload.nextOrigin;
         ray.Direction = payload.nextDirection;
-        ray.TMin = 0.01f;   // Increased from 0.001f to avoid self-intersection issues
+        ray.TMin = 0.01f;
         ray.TMax = 10000.0f;
 
-        // RAY_FLAG_CULL_BACK_FACING_TRIANGLES: Ignore backfaces so rays starting
-        // inside geometry will pass through and hit front faces or miss to sky
         TraceRay(
             g_Scene,
             RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
@@ -263,8 +248,6 @@ void RayGen() {
         );
     }
 
-    // float3 skyColor = g_Skybox.SampleLevel(g_LinearSampler, dir, 0).rgb;
-    // payload.radiance = skyColor;
     // Write radiance to cubemap output
     g_CubemapOutput[outputIndex] = float4(payload.radiance, 1.0f);
 }
@@ -277,12 +260,6 @@ void RayGen() {
 void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttributes attr) {
     uint instanceID = InstanceID();
 
-    float3 dir = WorldRayDirection();
-    float3 skyColor = g_Skybox.SampleLevel(g_LinearSampler, dir, 0).rgb;
-    payload.radiance = skyColor;
-    payload.bounceCount++;
-    payload.terminated = true;
-    return;
     float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
     float3 normal = -normalize(WorldRayDirection());
 
@@ -326,8 +303,7 @@ void Miss(inout SRayPayload payload) {
     float3 dir = WorldRayDirection();
     float3 skyColor = g_Skybox.SampleLevel(g_LinearSampler, dir, 0).rgb;
 
-    // payload.radiance += payload.throughput * skyColor * g_SkyIntensity;
-    payload.radiance = skyColor;
+    payload.radiance += payload.throughput * skyColor * g_SkyIntensity;
     payload.terminated = true;
 }
 
