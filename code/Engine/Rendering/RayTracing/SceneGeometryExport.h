@@ -61,6 +61,10 @@ struct SRayTracingInstance {
 
     // Visibility mask (for ray masking)
     uint8_t instanceMask = 0xFF;
+
+    // Global buffer offsets (for geometry lookup in shader)
+    uint32_t vertexBufferOffset = 0;  // Offset into global vertex buffer (in vertices)
+    uint32_t indexBufferOffset = 0;   // Offset into global index buffer (in triangles)
 };
 
 // Material data for shaders
@@ -102,6 +106,15 @@ struct SRayTracingSceneData {
 
     // Lights
     std::vector<SRayTracingLight> lights;
+
+    // ============================================
+    // Global Geometry Buffers (for shader access)
+    // ============================================
+    // All vertex positions concatenated (float4 for alignment)
+    std::vector<DirectX::XMFLOAT4> globalVertexPositions;
+
+    // All indices concatenated
+    std::vector<uint32_t> globalIndices;
 
     // Scene bounds (for volumetric lightmap)
     DirectX::XMFLOAT3 sceneBoundsMin{0, 0, 0};

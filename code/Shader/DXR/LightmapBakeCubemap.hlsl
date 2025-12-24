@@ -55,7 +55,15 @@ struct SLightData {
 
 struct SInstanceData {
     uint materialIndex;
-    float3 padding;
+    uint vertexBufferOffset;  // Offset into global vertex buffer
+    uint indexBufferOffset;   // Offset into global index buffer (in triangles)
+    uint padding;
+};
+
+// Vertex position (float4 for alignment)
+struct SVertexPosition {
+    float3 position;
+    float padding;
 };
 
 // Ray payload for path tracing
@@ -102,9 +110,66 @@ StructuredBuffer<SMaterialData> g_Materials : register(t2);
 StructuredBuffer<SLightData> g_Lights : register(t3);
 StructuredBuffer<SInstanceData> g_Instances : register(t4);
 
+// Global geometry buffers (for normal computation)
+StructuredBuffer<SVertexPosition> g_Vertices : register(t5);
+StructuredBuffer<uint> g_Indices : register(t6);
+
 // Output: Cubemap radiance (32x32x6 = 6144 float4 values)
 // Layout: [face * 1024 + y * 32 + x]
 RWStructuredBuffer<float4> g_CubemapOutput : register(u0);
+
+// ============================================
+// Geometric Normal Computation
+// ============================================
+
+// Compute flat normal from triangle vertices (no smooth shading)
+float3 ComputeGeometricNormal(uint instanceID, uint primitiveID) {
+    SInstanceData inst = g_Instances[instanceID];
+
+    // Get global index offset for this triangle
+    // indexBufferOffset is in triangles, primitiveID is also triangle index
+    uint indexOffset = (inst.indexBufferOffset + primitiveID) * 3;
+
+    // Load triangle indices (local vertex indices within mesh)
+    uint i0 = g_Indices[indexOffset + 0];
+    uint i1 = g_Indices[indexOffset + 1];
+    uint i2 = g_Indices[indexOffset + 2];
+
+    // Get global vertex offset
+    uint vertexOffset = inst.vertexBufferOffset;
+
+    // Load vertex positions
+    float3 v0 = g_Vertices[vertexOffset + i0].position;
+    float3 v1 = g_Vertices[vertexOffset + i1].position;
+    float3 v2 = g_Vertices[vertexOffset + i2].position;
+
+    // Compute edges
+    float3 edge1 = v1 - v0;
+    float3 edge2 = v2 - v0;
+
+    // Cross product gives normal (in local/object space)
+    float3 localNormal = normalize(cross(edge1, edge2));
+
+    return localNormal;
+}
+
+// Transform local normal to world space
+float3 LocalToWorldNormal(float3 localNormal) {
+    // ObjectToWorld3x4() is DXR built-in intrinsic
+    // Returns the instance's object-to-world transform
+    float3x4 objectToWorld = ObjectToWorld3x4();
+
+    // Extract 3x3 rotation/scale matrix
+    float3x3 normalMatrix = float3x3(
+        objectToWorld[0].xyz,
+        objectToWorld[1].xyz,
+        objectToWorld[2].xyz
+    );
+
+    // For non-uniform scale, should use inverse transpose
+    // But for uniform scale/rotation only, this works:
+    return normalize(mul(localNormal, normalMatrix));
+}
 
 // ============================================
 // Cubemap Direction Calculation
@@ -164,13 +229,14 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
         shadowRay.TMax = lightDist - 0.001f;
 
         SShadowPayload shadowPayload;
-        shadowPayload.isVisible = true;
+        shadowPayload.isVisible = false;
 
         TraceRay(
             g_Scene,
-            RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+            RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER |
+            RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
             0xFF,
-            1,      // Shadow hit group index
+            1,      // Shadow hit group index(never call because of set RAY_FLAG_FORCE_OPAQUE)
             0,
             1,      // Shadow miss shader index
             shadowRay,
@@ -259,16 +325,27 @@ void RayGen() {
 [shader("closesthit")]
 void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttributes attr) {
     uint instanceID = InstanceID();
+    uint primitiveID = PrimitiveIndex();
 
+    // Compute hit position
     float3 hitPos = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-    float3 normal = -normalize(WorldRayDirection());
+
+    // Compute geometric normal from triangle vertices (flat shading)
+    float3 localNormal = ComputeGeometricNormal(instanceID, primitiveID);
+    float3 worldNormal = LocalToWorldNormal(localNormal);
+    // payload.radiance = localNormal;
+
+    // Ensure normal faces the ray (for double-sided geometry)
+    if (dot(worldNormal, WorldRayDirection()) > 0) {
+        worldNormal = -worldNormal;
+    }
 
     // Get material from buffer
     uint materialIndex = g_Instances[instanceID].materialIndex;
     SMaterialData mat = g_Materials[materialIndex];
 
     // Evaluate direct lighting
-    float3 directLight = EvaluateDirectLighting(hitPos, normal, mat, payload.rngState);
+    float3 directLight = EvaluateDirectLighting(hitPos, worldNormal, mat, payload.rngState);
 
     payload.radiance += payload.throughput * directLight;
     payload.bounceCount++;
@@ -287,9 +364,9 @@ void ClosestHit(inout SRayPayload payload, in BuiltInTriangleIntersectionAttribu
     }
 
     // Sample next bounce direction
-    float3 bounceDir = SampleHemisphereCosineWorld(normal, payload.rngState);
+    float3 bounceDir = SampleHemisphereCosineWorld(worldNormal, payload.rngState);
 
-    payload.nextOrigin = OffsetRayOrigin(hitPos, normal);
+    payload.nextOrigin = OffsetRayOrigin(hitPos, worldNormal);
     payload.nextDirection = bounceDir;
     payload.throughput *= mat.albedo;
 }

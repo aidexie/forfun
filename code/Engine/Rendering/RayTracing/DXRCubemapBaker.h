@@ -114,7 +114,9 @@ struct SGPULightDataCubemap {
 
 struct SGPUInstanceDataCubemap {
     uint32_t materialIndex;
-    float padding[3];
+    uint32_t vertexBufferOffset;  // Offset into global vertex buffer
+    uint32_t indexBufferOffset;   // Offset into global index buffer (in triangles)
+    uint32_t padding;
 };
 
 // ============================================
@@ -233,6 +235,10 @@ private:
     std::unique_ptr<RHI::IBuffer> m_materialBuffer;
     std::unique_ptr<RHI::IBuffer> m_lightBuffer;
     std::unique_ptr<RHI::IBuffer> m_instanceBuffer;
+
+    // Global geometry buffers (for normal computation in shader)
+    std::unique_ptr<RHI::IBuffer> m_vertexBuffer;   // All vertex positions
+    std::unique_ptr<RHI::IBuffer> m_indexBuffer;    // All indices
 
     // Cubemap output buffer (UAV - 32x32x6 = 6144 float4)
     std::unique_ptr<RHI::IBuffer> m_cubemapOutputBuffer;

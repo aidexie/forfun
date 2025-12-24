@@ -176,7 +176,7 @@ std::unique_ptr<SRayTracingSceneData> CSceneGeometryExporter::ExportScene(CScene
                 rtMat.metallic = materialAsset->metallic;
                 rtMat.roughness = materialAsset->roughness;
 
-                instance.materialIndex = static_cast<uint32_t>(result->materials.size());
+                 instance.materialIndex = 0;
                 result->materials.push_back(rtMat);
 
                 result->instances.push_back(instance);
@@ -258,6 +258,54 @@ std::unique_ptr<SRayTracingSceneData> CSceneGeometryExporter::ExportScene(CScene
         result->sceneBoundsMin = DirectX::XMFLOAT3(-10, -10, -10);
         result->sceneBoundsMax = DirectX::XMFLOAT3(10, 10, 10);
     }
+
+    // ============================================
+    // Build Global Geometry Buffers
+    // ============================================
+    // Each mesh's vertices/indices are concatenated into global buffers.
+    // Instance data stores offsets for shader lookup.
+
+    // Track per-mesh offsets
+    struct SMeshOffsets {
+        uint32_t vertexOffset = 0;
+        uint32_t indexOffset = 0;  // In triangles (not indices)
+    };
+    std::vector<SMeshOffsets> meshOffsets(result->meshes.size());
+
+    uint32_t currentVertexOffset = 0;
+    uint32_t currentIndexOffset = 0;
+
+    for (size_t meshIdx = 0; meshIdx < result->meshes.size(); ++meshIdx) {
+        const SRayTracingMeshData& mesh = result->meshes[meshIdx];
+
+        // Store offsets for this mesh
+        meshOffsets[meshIdx].vertexOffset = currentVertexOffset;
+        meshOffsets[meshIdx].indexOffset = currentIndexOffset;
+
+        // Copy vertex positions (as float4 for GPU alignment)
+        for (const auto& pos : mesh.positions) {
+            result->globalVertexPositions.push_back({pos.x, pos.y, pos.z, 0.0f});
+        }
+
+        // Copy indices
+        for (uint32_t idx : mesh.indices) {
+            result->globalIndices.push_back(idx);
+        }
+
+        currentVertexOffset += static_cast<uint32_t>(mesh.positions.size());
+        currentIndexOffset += static_cast<uint32_t>(mesh.indices.size()) / 3;  // Triangle count
+    }
+
+    // Update instance data with offsets
+    for (auto& inst : result->instances) {
+        if (inst.meshIndex < meshOffsets.size()) {
+            inst.vertexBufferOffset = meshOffsets[inst.meshIndex].vertexOffset;
+            inst.indexBufferOffset = meshOffsets[inst.meshIndex].indexOffset;
+        }
+    }
+
+    CFFLog::Info("[SceneGeometryExport] Global buffers: %zu vertices, %zu indices",
+                 result->globalVertexPositions.size(), result->globalIndices.size());
 
     CFFLog::Info("[SceneGeometryExport] Exported scene: %zu meshes, %zu instances, %zu materials, %zu lights",
                  result->meshes.size(), result->instances.size(),

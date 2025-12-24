@@ -281,6 +281,8 @@ bool CDXRCubemapBaker::UploadSceneData(const SRayTracingSceneData& sceneData) {
     m_materialBuffer.reset();
     m_lightBuffer.reset();
     m_instanceBuffer.reset();
+    m_vertexBuffer.reset();
+    m_indexBuffer.reset();
 
     // Upload materials
     if (!sceneData.materials.empty()) {
@@ -300,6 +302,7 @@ bool CDXRCubemapBaker::UploadSceneData(const SRayTracingSceneData& sceneData) {
         matDesc.usage = RHI::EBufferUsage::Structured;
         matDesc.cpuAccess = RHI::ECPUAccess::None;
         matDesc.structureByteStride = sizeof(SGPUMaterialDataCubemap);
+        matDesc.debugName = "gpuMaterials";
 
         m_materialBuffer.reset(ctx->CreateBuffer(matDesc, gpuMaterials.data()));
     }
@@ -326,6 +329,7 @@ bool CDXRCubemapBaker::UploadSceneData(const SRayTracingSceneData& sceneData) {
         lightDesc.usage = RHI::EBufferUsage::Structured;
         lightDesc.cpuAccess = RHI::ECPUAccess::None;
         lightDesc.structureByteStride = sizeof(SGPULightDataCubemap);
+        lightDesc.debugName = "gpuLights";
 
         m_lightBuffer.reset(ctx->CreateBuffer(lightDesc, gpuLights.data()));
         m_numLights = static_cast<uint32_t>(gpuLights.size());
@@ -333,7 +337,7 @@ bool CDXRCubemapBaker::UploadSceneData(const SRayTracingSceneData& sceneData) {
         m_numLights = 0;
     }
 
-    // Upload instances
+    // Upload instances (with buffer offsets for geometry lookup)
     if (!sceneData.instances.empty()) {
         std::vector<SGPUInstanceDataCubemap> gpuInstances;
         gpuInstances.reserve(sceneData.instances.size());
@@ -341,6 +345,8 @@ bool CDXRCubemapBaker::UploadSceneData(const SRayTracingSceneData& sceneData) {
         for (const auto& inst : sceneData.instances) {
             SGPUInstanceDataCubemap gpuInst = {};
             gpuInst.materialIndex = inst.materialIndex;
+            gpuInst.vertexBufferOffset = inst.vertexBufferOffset;
+            gpuInst.indexBufferOffset = inst.indexBufferOffset;
             gpuInstances.push_back(gpuInst);
         }
 
@@ -349,8 +355,35 @@ bool CDXRCubemapBaker::UploadSceneData(const SRayTracingSceneData& sceneData) {
         instDesc.usage = RHI::EBufferUsage::Structured;
         instDesc.cpuAccess = RHI::ECPUAccess::None;
         instDesc.structureByteStride = sizeof(SGPUInstanceDataCubemap);
+        instDesc.debugName = "gpuInstances";
 
         m_instanceBuffer.reset(ctx->CreateBuffer(instDesc, gpuInstances.data()));
+    }
+
+    // Upload global vertex positions (float4 for alignment)
+    if (!sceneData.globalVertexPositions.empty()) {
+        RHI::BufferDesc vertexDesc;
+        vertexDesc.size = static_cast<uint32_t>(sceneData.globalVertexPositions.size() * sizeof(DirectX::XMFLOAT4));
+        vertexDesc.usage = RHI::EBufferUsage::Structured;
+        vertexDesc.cpuAccess = RHI::ECPUAccess::None;
+        vertexDesc.structureByteStride = sizeof(DirectX::XMFLOAT4);
+        vertexDesc.debugName = "globalVertexPositions";
+
+        m_vertexBuffer.reset(ctx->CreateBuffer(vertexDesc, sceneData.globalVertexPositions.data()));
+        CFFLog::Info("[CubemapBaker] Uploaded %zu vertex positions", sceneData.globalVertexPositions.size());
+    }
+
+    // Upload global indices
+    if (!sceneData.globalIndices.empty()) {
+        RHI::BufferDesc indexDesc;
+        indexDesc.size = static_cast<uint32_t>(sceneData.globalIndices.size() * sizeof(uint32_t));
+        indexDesc.usage = RHI::EBufferUsage::Structured;
+        indexDesc.cpuAccess = RHI::ECPUAccess::None;
+        indexDesc.structureByteStride = sizeof(uint32_t);
+        indexDesc.debugName = "globalIndices";
+
+        m_indexBuffer.reset(ctx->CreateBuffer(indexDesc, sceneData.globalIndices.data()));
+        CFFLog::Info("[CubemapBaker] Uploaded %zu indices", sceneData.globalIndices.size());
     }
 
     return true;
@@ -615,6 +648,14 @@ void CDXRCubemapBaker::DispatchBakeVoxel(
         cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 4, m_instanceBuffer.get());
     }
 
+    // t5-t6: Global geometry buffers (for normal computation)
+    if (m_vertexBuffer) {
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 5, m_vertexBuffer.get());
+    }
+    if (m_indexBuffer) {
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 6, m_indexBuffer.get());
+    }
+
     // u0: Cubemap output
     cmdList->SetUnorderedAccess(0, m_cubemapOutputBuffer.get());
 
@@ -752,5 +793,7 @@ void CDXRCubemapBaker::ReleasePerBakeResources() {
     m_materialBuffer.reset();
     m_lightBuffer.reset();
     m_instanceBuffer.reset();
+    m_vertexBuffer.reset();
+    m_indexBuffer.reset();
     m_numLights = 0;
 }
