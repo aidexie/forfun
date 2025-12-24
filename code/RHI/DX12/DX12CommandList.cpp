@@ -918,12 +918,9 @@ void CDX12CommandList::BindPendingResourcesRayTracing() {
         m_cbvDirty = false;
     }
 
-    // Bind SRV table (parameter 1) - t0-t4
     if (m_srvDirty) {
-        // Ray tracing uses 5 SRV slots (t0-t4)
-        const uint32_t rtSrvCount = 5;
         uint32_t maxBoundSlot = 0;
-        for (uint32_t i = 0; i < rtSrvCount; ++i) {
+        for (uint32_t i = 0; i < MAX_SRV_SLOTS; ++i) {
             if (m_pendingSRVCpuHandles[i].ptr != 0) {
                 maxBoundSlot = i + 1;
             }
@@ -934,13 +931,14 @@ void CDX12CommandList::BindPendingResourcesRayTracing() {
 
         if (maxBoundSlot > 0) {
             auto& stagingRing = heapMgr.GetSRVStagingRing();
-            SDescriptorHandle staging = stagingRing.AllocateContiguous(rtSrvCount);
+            SDescriptorHandle staging = stagingRing.AllocateContiguous(maxBoundSlot);
 
             if (staging.IsValid()) {
                 CFFLog::Info("[BindPendingResourcesRayTracing] SRV staging: gpuHandle=0x%llX", staging.gpuHandle.ptr);
                 uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-                for (uint32_t i = 0; i < rtSrvCount; ++i) {
+                for (uint32_t i = 0; i < maxBoundSlot; ++i)
+                {
                     D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
                     if (m_pendingSRVCpuHandles[i].ptr != 0) {
                         device->CopyDescriptorsSimple(1, dest, m_pendingSRVCpuHandles[i],
