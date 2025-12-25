@@ -5,7 +5,7 @@
 #include "Core/PathManager.h"
 #include "Engine/Scene.h"
 #include "Engine/Rendering/VolumetricLightmap.h"
-#include "Engine/Rendering/RayTracing/DXRLightmapBaker.h"
+#include "Engine/Rendering/RayTracing/DXRCubemapBaker.h"
 #include <DirectXMath.h>
 #include <filesystem>
 
@@ -57,17 +57,16 @@ public:
                 return;
             }
 
-            // Create DXR baker
-            CDXRLightmapBaker baker;
+            // Create DXR cubemap baker
+            CDXRCubemapBaker baker;
             if (!baker.Initialize()) {
-                ctx.failures.push_back("Failed to initialize DXR baker");
-                CFFLog::Error("[TestDXRBakeVisualize] Failed to initialize DXR baker");
+                ctx.failures.push_back("Failed to initialize DXR cubemap baker");
+                CFFLog::Error("[TestDXRBakeVisualize] Failed to initialize DXR cubemap baker");
                 return;
             }
 
             // Configure for quick test
-            SDXRBakeConfig config;
-            config.samplesPerVoxel = 16;
+            SDXRCubemapBakeConfig config;
             config.maxBounces = 2;
             config.skyIntensity = 1.0f;
             config.debug.logReadbackResults = true;

@@ -305,8 +305,6 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/RayTracing/SceneGeometryExport.cpp
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRAccelerationStructureManager.h
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRAccelerationStructureManager.cpp
-    ${CODE_PATH}/Engine/Rendering/RayTracing/DXRLightmapBaker.h
-    ${CODE_PATH}/Engine/Rendering/RayTracing/DXRLightmapBaker.cpp
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRCubemapBaker.h
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRCubemapBaker.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
