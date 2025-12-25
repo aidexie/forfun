@@ -1,21 +1,25 @@
 // ============================================
-// DXR Lightmap Baking Shader (Cubemap-Based)
+// DXR Lightmap Baking Shader (Cubemap-Based, Batched)
 // ============================================
 // GPU-accelerated path tracing for volumetric lightmap baking.
-// Uses cubemap-based ray dispatch: 32x32x6 = 6144 rays per voxel.
-// This matches the CPU baker's sampling pattern for correctness.
+// Uses cubemap-based ray dispatch with batching for performance.
+//
+// Batch Mode (default):
+// - Dispatch (128, 128, 6 * batchSize) threads
+// - Process entire brick (64 voxels) in single dispatch
+// - Single GPU->CPU readback per brick
 //
 // Algorithm:
-// 1. Dispatch (32, 32, 6) threads per voxel
-// 2. Each thread computes ray direction from cubemap UV
-// 3. Trace ray and write radiance to cubemap UAV
-// 4. CPU/Compute shader projects cubemap to SH
+// 1. Dispatch (128, 128, 6 * batchSize) threads
+// 2. Each thread: voxelIdx = z / 6, face = z % 6
+// 3. Get voxel position from g_VoxelPositions[voxelIdx]
+// 4. Trace ray and write radiance to batched cubemap UAV
+// 5. CPU reads back all cubemaps and projects to SH
 //
 // Benefits:
-// - Sample parity with CPU baker (6144 vs 16 samples)
-// - Direct cubemap output for debugging
-// - No [unroll] limitation (one ray per thread)
-// - Better GPU utilization
+// - 64x fewer GPU->CPU sync points (1 per brick vs 1 per voxel)
+// - Better GPU utilization (more threads per dispatch)
+// - Maintains debug cubemap export capability
 
 #include "LightmapBakeCommon.hlsl"
 
@@ -23,9 +27,9 @@
 // Constants
 // ============================================
 
-#define CUBEMAP_RES 128
+#define CUBEMAP_BAKE_RES 32
 #define CUBEMAP_FACES 6
-#define PIXELS_PER_FACE (CUBEMAP_RES * CUBEMAP_RES)
+#define PIXELS_PER_FACE (CUBEMAP_BAKE_RES * CUBEMAP_BAKE_RES)
 #define TOTAL_RAYS (PIXELS_PER_FACE * CUBEMAP_FACES)  // 98304
 
 // ============================================
@@ -83,20 +87,18 @@ struct SShadowPayload {
 };
 
 // ============================================
-// Constant Buffer
+// Constant Buffer (Batch Mode)
 // ============================================
 
-cbuffer CB_CubemapBakeParams : register(b0) {
-    float3 g_VoxelWorldPos;   // World position of current voxel
-    float g_Padding0;
-
+cbuffer CB_BatchBakeParams : register(b0) {
+    uint g_BatchSize;         // Number of voxels in this batch (typically 64)
     uint g_MaxBounces;
-    uint g_FrameIndex;        // For RNG seeding
     uint g_NumLights;
     float g_SkyIntensity;
 
-    uint g_VoxelIndex;        // For debugging/RNG seeding
-    uint3 g_Padding1;
+    uint g_FrameIndex;        // For RNG seeding
+    uint g_BrickIndex;        // For debugging/RNG seeding
+    uint2 g_Padding;
 };
 
 // ============================================
@@ -114,8 +116,13 @@ StructuredBuffer<SInstanceData> g_Instances : register(t4);
 StructuredBuffer<SVertexPosition> g_Vertices : register(t5);
 StructuredBuffer<uint> g_Indices : register(t6);
 
-// Output: Cubemap radiance (32x32x6 = 6144 float4 values)
-// Layout: [face * 1024 + y * 32 + x]
+// Voxel positions buffer (batch mode)
+// Each float4: xyz = world position, w = validity (>0.5 = valid)
+StructuredBuffer<float4> g_VoxelPositions : register(t7);
+
+// Output: Batched cubemap radiance
+// Layout: [voxelIdx * PIXELS_PER_VOXEL + face * PIXELS_PER_FACE + y * RES + x]
+// For 64 voxels: 64 * 6144 = 393216 float4 values
 RWStructuredBuffer<float4> g_CubemapOutput : register(u0);
 
 // ============================================
@@ -253,47 +260,64 @@ float3 EvaluateDirectLighting(float3 hitPos, float3 normal, SMaterialData mat, i
 }
 
 // ============================================
-// Ray Generation Shader (Cubemap-Based)
+// Ray Generation Shader (Cubemap-Based, Batched)
 // ============================================
 
 [shader("raygeneration")]
 void RayGen() {
-    // Thread indices: x=[0,127], y=[0,127], z=[0,5] (face)
+    // Thread indices: x=[0,127], y=[0,127], z=[0, 6*batchSize-1]
     uint3 idx = DispatchRaysIndex().xyz;
     uint x = idx.x;
     uint y = idx.y;
-    uint face = idx.z;
+
+    // Batch mode: z encodes both voxel index and face
+    uint voxelIdx = idx.z / CUBEMAP_FACES;  // Which voxel in batch (0-63)
+    uint face = idx.z % CUBEMAP_FACES;       // Which face (0-5)
 
     // Bounds check
-    if (x >= CUBEMAP_RES || y >= CUBEMAP_RES || face >= CUBEMAP_FACES) {
+    if (x >= CUBEMAP_BAKE_RES || y >= CUBEMAP_BAKE_RES || voxelIdx >= g_BatchSize) {
         return;
     }
 
-    // Compute output index
-    uint outputIndex = face * PIXELS_PER_FACE + y * CUBEMAP_RES + x;
+    // Get voxel world position from batch buffer
+    float4 voxelData = g_VoxelPositions[voxelIdx];
+    float3 voxelWorldPos = voxelData.xyz;
+    float validity = voxelData.w;
+
+    // Skip invalid voxels (inside geometry)
+    if (validity <= 0.5f) {
+        // Write zero radiance for invalid voxels
+        uint outputIndex = voxelIdx * TOTAL_RAYS + face * PIXELS_PER_FACE + y * CUBEMAP_BAKE_RES + x;
+        g_CubemapOutput[outputIndex] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    // Compute output index for batched layout
+    // Layout: [voxelIdx * TOTAL_RAYS + face * PIXELS_PER_FACE + y * RES + x]
+    uint outputIndex = voxelIdx * TOTAL_RAYS + face * PIXELS_PER_FACE + y * CUBEMAP_BAKE_RES + x;
 
     // Compute UV (pixel center)
-    float u = (float(x) + 0.5f) / float(CUBEMAP_RES);
-    float v = (float(y) + 0.5f) / float(CUBEMAP_RES);
+    float u = (float(x) + 0.5f) / float(CUBEMAP_BAKE_RES);
+    float v = (float(y) + 0.5f) / float(CUBEMAP_BAKE_RES);
 
     // Compute ray direction from cubemap UV
     float3 dir = CubemapUVToDirection(face, u, v);
 
-    // Initialize RNG with unique seed per ray
-    uint rngState = InitRNG(uint3(x, y, face), g_FrameIndex ^ g_VoxelIndex);
+    // Initialize RNG with unique seed per ray (include voxelIdx for uniqueness)
+    uint rngState = InitRNG(uint3(x, y, voxelIdx * CUBEMAP_FACES + face), g_FrameIndex ^ g_BrickIndex);
 
     // Initialize ray payload
     SRayPayload payload;
     payload.radiance = float3(0, 0, 0);
     payload.throughput = float3(1, 1, 1);
-    payload.nextOrigin = g_VoxelWorldPos;
+    payload.nextOrigin = voxelWorldPos;
     payload.nextDirection = dir;
     payload.rngState = rngState;
     payload.bounceCount = 0;
     payload.terminated = false;
 
     // Path tracing loop
-    for (uint bounce = 0; bounce < 1; bounce++) {
+    for (uint bounce = 0; bounce < 4; bounce++) {
         if (payload.terminated || payload.bounceCount >= g_MaxBounces) {
             break;
         }
@@ -314,7 +338,7 @@ void RayGen() {
         );
     }
 
-    // Write radiance to cubemap output
+    // Write radiance to batched cubemap output
     g_CubemapOutput[outputIndex] = float4(payload.radiance, 1.0f);
 }
 

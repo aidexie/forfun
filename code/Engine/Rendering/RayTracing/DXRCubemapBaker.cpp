@@ -82,8 +82,10 @@ void CDXRCubemapBaker::Shutdown() {
     m_pipeline.reset();
     m_shaderLibrary.reset();
     m_constantBuffer.reset();
+    m_voxelPositionsBuffer.reset();
     m_cubemapOutputBuffer.reset();
     m_cubemapReadbackBuffer.reset();
+    m_currentBatchSize = 0;
 
     if (m_asManager) {
         m_asManager->Shutdown();
@@ -106,7 +108,7 @@ bool CDXRCubemapBaker::CreateConstantBuffer() {
     if (!ctx) return false;
 
     RHI::BufferDesc cbDesc;
-    cbDesc.size = sizeof(CB_CubemapBakeParams);
+    cbDesc.size = sizeof(CB_BatchBakeParams);
     cbDesc.usage = RHI::EBufferUsage::Constant;
     cbDesc.cpuAccess = RHI::ECPUAccess::Write;
 
@@ -115,41 +117,93 @@ bool CDXRCubemapBaker::CreateConstantBuffer() {
 }
 
 bool CDXRCubemapBaker::CreateCubemapOutputBuffer() {
-    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return false;
-
-    // 32x32x6 = 6144 pixels, each float4 (16 bytes)
-    const uint32_t bufferSize = CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4);
-
-    RHI::BufferDesc bufDesc;
-    bufDesc.size = bufferSize;
-    bufDesc.usage = RHI::EBufferUsage::UnorderedAccess | RHI::EBufferUsage::Structured;
-    bufDesc.cpuAccess = RHI::ECPUAccess::None;
-    bufDesc.structureByteStride = sizeof(DirectX::XMFLOAT4);
-    bufDesc.debugName = "CubemapBaker_Output";
-
-    m_cubemapOutputBuffer.reset(ctx->CreateBuffer(bufDesc, nullptr));
-    return m_cubemapOutputBuffer != nullptr;
+    // Will be created with proper size when batchSize is known
+    // See CreateVoxelPositionsBuffer for batch-aware buffer creation
+    return true;
 }
 
 bool CDXRCubemapBaker::CreateCubemapReadbackBuffer() {
+    // Will be created with proper size when batchSize is known
+    return true;
+}
+
+bool CDXRCubemapBaker::CreateVoxelPositionsBuffer(uint32_t batchSize) {
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!ctx) return false;
 
-    const uint32_t bufferSize = CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4);
+    // Only recreate if batch size changed
+    if (m_currentBatchSize == batchSize && m_voxelPositionsBuffer && m_cubemapOutputBuffer) {
+        return true;
+    }
 
-    RHI::BufferDesc bufDesc;
-    bufDesc.size = bufferSize;
-    bufDesc.usage = RHI::EBufferUsage::Staging;
-    bufDesc.cpuAccess = RHI::ECPUAccess::Read;
-    bufDesc.debugName = "CubemapBaker_Readback";
+    m_currentBatchSize = batchSize;
 
-    m_cubemapReadbackBuffer.reset(ctx->CreateBuffer(bufDesc, nullptr));
-    if (!m_cubemapReadbackBuffer) return false;
+    // Voxel positions buffer: batchSize * float4 (xyz = position, w = validity)
+    {
+        RHI::BufferDesc bufDesc;
+        bufDesc.size = batchSize * sizeof(DirectX::XMFLOAT4);
+        bufDesc.usage = RHI::EBufferUsage::Structured;
+        bufDesc.cpuAccess = RHI::ECPUAccess::None;
+        bufDesc.structureByteStride = sizeof(DirectX::XMFLOAT4);
+        bufDesc.debugName = "CubemapBaker_VoxelPositions";
 
-    // Allocate CPU-side storage
-    m_cubemapData.resize(CUBEMAP_TOTAL_PIXELS);
+        m_voxelPositionsBuffer.reset(ctx->CreateBuffer(bufDesc, nullptr));
+        if (!m_voxelPositionsBuffer) return false;
+    }
+
+    // Batched cubemap output buffer: batchSize * 32x32x6 float4
+    {
+        const uint32_t bufferSize = batchSize * CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4);
+
+        RHI::BufferDesc bufDesc;
+        bufDesc.size = bufferSize;
+        bufDesc.usage = RHI::EBufferUsage::UnorderedAccess | RHI::EBufferUsage::Structured;
+        bufDesc.cpuAccess = RHI::ECPUAccess::None;
+        bufDesc.structureByteStride = sizeof(DirectX::XMFLOAT4);
+        bufDesc.debugName = "CubemapBaker_BatchOutput";
+
+        m_cubemapOutputBuffer.reset(ctx->CreateBuffer(bufDesc, nullptr));
+        if (!m_cubemapOutputBuffer) return false;
+    }
+
+    // Batched readback buffer
+    {
+        const uint32_t bufferSize = batchSize * CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4);
+
+        RHI::BufferDesc bufDesc;
+        bufDesc.size = bufferSize;
+        bufDesc.usage = RHI::EBufferUsage::Staging;
+        bufDesc.cpuAccess = RHI::ECPUAccess::Read;
+        bufDesc.debugName = "CubemapBaker_BatchReadback";
+
+        m_cubemapReadbackBuffer.reset(ctx->CreateBuffer(bufDesc, nullptr));
+        if (!m_cubemapReadbackBuffer) return false;
+    }
+
+    // Allocate CPU-side storage for entire batch
+    m_cubemapData.resize(batchSize * CUBEMAP_TOTAL_PIXELS);
+
+    CFFLog::Info("[CubemapBaker] Created batch buffers for %u voxels (%.2f MB)",
+                 batchSize, (batchSize * CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4)) / (1024.0f * 1024.0f));
+
     return true;
+}
+
+void CDXRCubemapBaker::UploadVoxelPositions(const std::vector<DirectX::XMFLOAT4>& positions) {
+    if (positions.empty()) return;
+
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Recreate buffer with new data (no UpdateBuffer in RHI interface)
+    RHI::BufferDesc bufDesc;
+    bufDesc.size = static_cast<uint32_t>(positions.size() * sizeof(DirectX::XMFLOAT4));
+    bufDesc.usage = RHI::EBufferUsage::Structured;
+    bufDesc.cpuAccess = RHI::ECPUAccess::None;
+    bufDesc.structureByteStride = sizeof(DirectX::XMFLOAT4);
+    bufDesc.debugName = "CubemapBaker_VoxelPositions";
+
+    m_voxelPositionsBuffer.reset(ctx->CreateBuffer(bufDesc, positions.data()));
 }
 
 bool CDXRCubemapBaker::CreatePipeline() {
@@ -479,7 +533,7 @@ bool CDXRCubemapBaker::PrepareBakeResources(const SRayTracingSceneData& sceneDat
 }
 
 // ============================================
-// Voxel Dispatch Loop
+// Brick Dispatch Loop (Batched)
 // ============================================
 
 bool CDXRCubemapBaker::DispatchBakeAllVoxels(
@@ -489,32 +543,37 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
     const auto& bricks = lightmap.GetBricks();
     auto& mutableBricks = const_cast<std::vector<SBrick>&>(bricks);
 
+    const uint32_t batchSize = config.batchSize;  // Typically 64 (1 brick)
+
+    // Create batch buffers if needed
+    if (!CreateVoxelPositionsBuffer(batchSize)) {
+        CFFLog::Error("[CubemapBaker] Failed to create batch buffers");
+        return false;
+    }
+
     auto startTime = std::chrono::high_resolution_clock::now();
 
     uint32_t totalVoxels = static_cast<uint32_t>(bricks.size()) * VL_BRICK_VOXEL_COUNT;
     uint32_t processedVoxels = 0;
     uint32_t debugCubemapsExported = 0;
 
-    CFFLog::Info("[CubemapBaker] Starting cubemap-based bake: %zu bricks, %u voxels",
-                 bricks.size(), totalVoxels);
+    CFFLog::Info("[CubemapBaker] Starting batched cubemap bake: %zu bricks, %u voxels, batch size %u",
+                 bricks.size(), totalVoxels, batchSize);
 
-    // Process each brick
+    // Process each brick as a batch
     for (size_t brickIdx = 0; brickIdx < mutableBricks.size(); brickIdx++) {
         SBrick& brick = mutableBricks[brickIdx];
 
-        // Calculate voxel size
+        // Calculate brick size
         DirectX::XMFLOAT3 brickSize = {
             brick.worldMax.x - brick.worldMin.x,
             brick.worldMax.y - brick.worldMin.y,
             brick.worldMax.z - brick.worldMin.z
         };
-        DirectX::XMFLOAT3 voxelSize = {
-            brickSize.x / VL_BRICK_SIZE,
-            brickSize.y / VL_BRICK_SIZE,
-            brickSize.z / VL_BRICK_SIZE
-        };
 
-        // Process each voxel in the brick (4x4x4 = 64)
+        // 1. Collect all voxel positions for this brick
+        std::vector<DirectX::XMFLOAT4> voxelPositions(VL_BRICK_VOXEL_COUNT);
+
         for (uint32_t voxelIdx = 0; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {
             // Calculate voxel local position
             uint32_t lx = voxelIdx % VL_BRICK_SIZE;
@@ -522,8 +581,6 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
             uint32_t lz = voxelIdx / (VL_BRICK_SIZE * VL_BRICK_SIZE);
 
             // Calculate world position (voxel sample point)
-            // For 4 voxels (0,1,2,3), positions are at 0, 1/3, 2/3, 1 of brick size
-            // This places voxel 0 and 3 at the brick edges
             float tx = (VL_BRICK_SIZE > 1) ? (float)lx / (VL_BRICK_SIZE - 1) : 0.5f;
             float ty = (VL_BRICK_SIZE > 1) ? (float)ly / (VL_BRICK_SIZE - 1) : 0.5f;
             float tz = (VL_BRICK_SIZE > 1) ? (float)lz / (VL_BRICK_SIZE - 1) : 0.5f;
@@ -534,47 +591,52 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
                 brick.worldMin.z + tz * brickSize.z
             };
 
-            // Check validity first
+            // Check validity
             float validity = CheckVoxelValidity(worldPos);
             brick.validity[voxelIdx] = (validity > 0.5f);
 
-            if (validity <= 0.5f) {
+            // Store position + validity in float4
+            voxelPositions[voxelIdx] = { worldPos.x, worldPos.y, worldPos.z, validity };
+        }
+
+        // 2. Upload voxel positions for this brick
+        UploadVoxelPositions(voxelPositions);
+
+        // 3. Single dispatch for entire brick
+        DispatchBakeBrick(VL_BRICK_VOXEL_COUNT, static_cast<uint32_t>(brickIdx), config);
+
+        // 4. Single readback for entire brick
+        ReadbackBatchCubemaps(VL_BRICK_VOXEL_COUNT);
+
+        // 5. CPU SH projection for each voxel in the batch
+        for (uint32_t voxelIdx = 0; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {
+            if (!brick.validity[voxelIdx]) {
                 // Invalid voxel - set zero SH
                 for (int i = 0; i < VL_SH_COEFF_COUNT; i++) {
                     brick.shData[voxelIdx][i] = {0, 0, 0};
                 }
-                processedVoxels++;
-                continue;
+            } else {
+                // Project cubemap to SH
+                std::array<DirectX::XMFLOAT3, 9> sh;
+                ProjectCubemapToSH(voxelIdx, sh);
+
+                // Store SH in brick
+                for (int i = 0; i < VL_SH_COEFF_COUNT; i++) {
+                    brick.shData[voxelIdx][i] = sh[i];
+                }
+
+                // Export debug cubemap if requested
+                if (config.debug.exportDebugCubemaps &&
+                    (config.debug.maxDebugCubemaps == 0 || debugCubemapsExported < config.debug.maxDebugCubemaps)) {
+
+                    std::string exportPath = config.debug.debugExportPath.empty()
+                        ? FFPath::GetDebugDir() + "/CubemapBaker"
+                        : config.debug.debugExportPath;
+
+                    ExportDebugCubemap(exportPath, static_cast<uint32_t>(brickIdx), voxelIdx);
+                    debugCubemapsExported++;
+                }
             }
-
-            // Dispatch cubemap bake for this voxel
-            uint32_t globalVoxelIdx = static_cast<uint32_t>(brickIdx) * VL_BRICK_VOXEL_COUNT + voxelIdx;
-            DispatchBakeVoxel(worldPos, globalVoxelIdx, config);
-
-            // Readback cubemap
-            ReadbackCubemap();
-
-            // Project cubemap to SH
-            std::array<DirectX::XMFLOAT3, 9> sh;
-            ProjectCubemapToSH(sh);
-
-            // Store SH in brick
-            for (int i = 0; i < VL_SH_COEFF_COUNT; i++) {
-                brick.shData[voxelIdx][i] = sh[i];
-            }
-
-            // Export debug cubemap if requested
-            if (config.debug.exportDebugCubemaps &&
-                (config.debug.maxDebugCubemaps == 0 || debugCubemapsExported < config.debug.maxDebugCubemaps)) {
-
-                std::string exportPath = config.debug.debugExportPath.empty()
-                    ? FFPath::GetDebugDir() + "/CubemapBaker"
-                    : config.debug.debugExportPath;
-
-                ExportDebugCubemap(exportPath, static_cast<uint32_t>(brickIdx), voxelIdx);
-                debugCubemapsExported++;
-            }
-
             processedVoxels++;
         }
 
@@ -593,7 +655,7 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
     auto endTime = std::chrono::high_resolution_clock::now();
     float elapsedSec = std::chrono::duration<float>(endTime - startTime).count();
 
-    CFFLog::Info("[CubemapBaker] Bake complete in %.2f seconds", elapsedSec);
+    CFFLog::Info("[CubemapBaker] Batched bake complete in %.2f seconds", elapsedSec);
     CFFLog::Info("[CubemapBaker] Processed %u voxels (%.1f voxels/sec)",
                  processedVoxels, processedVoxels / elapsedSec);
 
@@ -609,26 +671,26 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
 }
 
 // ============================================
-// Voxel Baking
+// Brick Baking (Batched)
 // ============================================
 
-void CDXRCubemapBaker::DispatchBakeVoxel(
-    const DirectX::XMFLOAT3& worldPos,
-    uint32_t voxelIndex,
+void CDXRCubemapBaker::DispatchBakeBrick(
+    uint32_t batchSize,
+    uint32_t brickIndex,
     const SDXRCubemapBakeConfig& config)
 {
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     auto* cmdList = ctx ? ctx->GetCommandList() : nullptr;
     if (!cmdList || !m_pipeline || !m_sbt) return;
 
-    // Update constant buffer
-    CB_CubemapBakeParams params = {};
-    params.voxelWorldPos = worldPos;
+    // Update constant buffer with batch params
+    CB_BatchBakeParams params = {};
+    params.batchSize = batchSize;
     params.maxBounces = config.maxBounces;
-    params.frameIndex = 0;
     params.numLights = m_numLights;
     params.skyIntensity = config.skyIntensity;
-    params.voxelIndex = voxelIndex;
+    params.frameIndex = 0;
+    params.brickIndex = brickIndex;
 
     // Set pipeline
     cmdList->SetRayTracingPipelineState(m_pipeline.get());
@@ -666,7 +728,12 @@ void CDXRCubemapBaker::DispatchBakeVoxel(
         cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 6, m_indexBuffer.get());
     }
 
-    // u0: Cubemap output
+    // t7: Voxel positions buffer
+    if (m_voxelPositionsBuffer) {
+        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 7, m_voxelPositionsBuffer.get());
+    }
+
+    // u0: Batched cubemap output
     cmdList->SetUnorderedAccess(0, m_cubemapOutputBuffer.get());
 
     // s0: Sampler
@@ -674,45 +741,51 @@ void CDXRCubemapBaker::DispatchBakeVoxel(
         cmdList->SetSampler(RHI::EShaderStage::Compute, 0, m_skyboxTextureSampler);
     }
 
-    // Dispatch: 32 x 32 x 6 (cubemap resolution x faces)
+    // Dispatch: 32 x 32 x (6 * batchSize)
+    // For 64 voxels: 32 x 32 x 384 = 393216 threads
     RHI::DispatchRaysDesc dispatchDesc;
     dispatchDesc.shaderBindingTable = m_sbt.get();
     dispatchDesc.width = CUBEMAP_BAKE_RES;
     dispatchDesc.height = CUBEMAP_BAKE_RES;
-    dispatchDesc.depth = CUBEMAP_BAKE_FACES;
+    dispatchDesc.depth = CUBEMAP_BAKE_FACES * batchSize;
 
     cmdList->DispatchRays(dispatchDesc);
 
-    // Barriers and copy
+    // Barriers and copy entire batch
+    const uint32_t totalBytes = batchSize * CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4);
+
     cmdList->UAVBarrier(m_cubemapOutputBuffer.get());
     cmdList->Barrier(m_cubemapOutputBuffer.get(), RHI::EResourceState::UnorderedAccess, RHI::EResourceState::CopySource);
-    cmdList->CopyBuffer(m_cubemapReadbackBuffer.get(), 0, m_cubemapOutputBuffer.get(), 0,
-                        CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4));
+    cmdList->CopyBuffer(m_cubemapReadbackBuffer.get(), 0, m_cubemapOutputBuffer.get(), 0, totalBytes);
     cmdList->Barrier(m_cubemapOutputBuffer.get(), RHI::EResourceState::CopySource, RHI::EResourceState::UnorderedAccess);
 
     ctx->ExecuteAndWait();
 }
 
-void CDXRCubemapBaker::ReadbackCubemap() {
+void CDXRCubemapBaker::ReadbackBatchCubemaps(uint32_t batchSize) {
     if (!m_cubemapReadbackBuffer) return;
+
+    const uint32_t totalBytes = batchSize * CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4);
 
     void* mappedData = m_cubemapReadbackBuffer->Map();
     if (mappedData) {
-        memcpy(m_cubemapData.data(), mappedData, CUBEMAP_TOTAL_PIXELS * sizeof(DirectX::XMFLOAT4));
+        memcpy(m_cubemapData.data(), mappedData, totalBytes);
         m_cubemapReadbackBuffer->Unmap();
     }
 }
 
-void CDXRCubemapBaker::ProjectCubemapToSH(std::array<DirectX::XMFLOAT3, 9>& outSH) {
+void CDXRCubemapBaker::ProjectCubemapToSH(uint32_t voxelIdxInBatch, std::array<DirectX::XMFLOAT3, 9>& outSH) {
     // Initialize SH to zero
     for (auto& coeff : outSH) {
         coeff = {0, 0, 0};
     }
 
+    // Get pointer to this voxel's cubemap data within the batch
+    const DirectX::XMFLOAT4* voxelCubemapData = m_cubemapData.data() + (voxelIdxInBatch * CUBEMAP_TOTAL_PIXELS);
+
     // Project cubemap to SH using SphericalHarmonics utility
-    // This matches the CPU baker's approach
     SphericalHarmonics::ProjectCubemapToSH(
-        m_cubemapData.data(),
+        voxelCubemapData,
         CUBEMAP_BAKE_RES,
         outSH
     );
@@ -746,13 +819,17 @@ void CDXRCubemapBaker::ExportDebugCubemap(const std::string& path, uint32_t bric
         return (uint16_t)(sign | (exp << 10) | mant);
     };
 
+    // voxelIdx is the index within the current batch (brick)
+    // Offset into batch cubemap data
+    const uint32_t voxelOffset = voxelIdx * CUBEMAP_TOTAL_PIXELS;
+
     // Prepare face data (RGBA16F)
     std::vector<std::vector<uint16_t>> faceData(6);
     for (int f = 0; f < 6; f++) {
         faceData[f].resize(CUBEMAP_BAKE_RES * CUBEMAP_BAKE_RES * 4);
 
         for (uint32_t i = 0; i < CUBEMAP_PIXELS_PER_FACE; i++) {
-            uint32_t pixelIdx = f * CUBEMAP_PIXELS_PER_FACE + i;
+            uint32_t pixelIdx = voxelOffset + f * CUBEMAP_PIXELS_PER_FACE + i;
             const auto& pixel = m_cubemapData[pixelIdx];
 
             int idx = i * 4;

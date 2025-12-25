@@ -7,17 +7,20 @@
 #include <array>
 
 // ============================================
-// DXR Cubemap-Based Lightmap Baker
+// DXR Cubemap-Based Lightmap Baker (Batched)
 // ============================================
-// GPU-accelerated lightmap baking using cubemap ray dispatch.
-// Each voxel dispatches 32x32x6 = 6144 rays (matching CPU baker).
-// Output is a cubemap per voxel, then projected to SH on CPU.
+// GPU-accelerated lightmap baking using batched cubemap ray dispatch.
+// Processes entire brick (64 voxels) in single dispatch for performance.
 //
-// Advantages over random sampling:
-// - Sample parity with CPU baker for validation
-// - Direct cubemap output for debugging
-// - No [unroll] loop limitations
-// - Better GPU utilization (6144 parallel rays)
+// Architecture:
+// - Dispatch (128, 128, 6 * batchSize) threads per brick
+// - Single GPU->CPU readback per brick (vs per voxel)
+// - CPU SH projection for all voxels in batch
+//
+// Performance:
+// - 64x fewer sync points (1 per brick vs 1 per voxel)
+// - Better GPU utilization (more threads per dispatch)
+// - Maintains debug cubemap export capability
 
 namespace RHI {
     class IRenderContext;
@@ -60,6 +63,9 @@ struct SDXRCubemapBakeConfig {
     // Cubemap resolution per face (32x32 = 1024 rays per face)
     uint32_t cubemapResolution = 32;
 
+    // Batch size (voxels per dispatch, 64 = 1 brick)
+    uint32_t batchSize = 64;
+
     // Maximum ray bounces
     uint32_t maxBounces = 3;
 
@@ -74,20 +80,18 @@ struct SDXRCubemapBakeConfig {
 };
 
 // ============================================
-// Cubemap Bake Constant Buffer (matches shader)
+// Batch Bake Constant Buffer (matches shader CB_BatchBakeParams)
 // ============================================
 
-struct CB_CubemapBakeParams {
-    DirectX::XMFLOAT3 voxelWorldPos;
-    float padding0;
-
+struct CB_BatchBakeParams {
+    uint32_t batchSize;       // Number of voxels in this batch (typically 64)
     uint32_t maxBounces;
-    uint32_t frameIndex;
     uint32_t numLights;
     float skyIntensity;
 
-    uint32_t voxelIndex;
-    uint32_t padding1[3];
+    uint32_t frameIndex;      // For RNG seeding
+    uint32_t brickIndex;      // For debugging/RNG seeding
+    uint32_t padding[2];
 };
 
 // ============================================
@@ -123,10 +127,10 @@ struct SGPUInstanceDataCubemap {
 };
 
 // ============================================
-// Cubemap Output (98304 pixels = 128x128x6)
+// Cubemap Output (6144 pixels = 32x32x6)
 // ============================================
 
-constexpr uint32_t CUBEMAP_BAKE_RES = 128;
+constexpr uint32_t CUBEMAP_BAKE_RES = 32;
 constexpr uint32_t CUBEMAP_BAKE_FACES = 6;
 constexpr uint32_t CUBEMAP_PIXELS_PER_FACE = CUBEMAP_BAKE_RES * CUBEMAP_BAKE_RES;
 constexpr uint32_t CUBEMAP_TOTAL_PIXELS = CUBEMAP_PIXELS_PER_FACE * CUBEMAP_BAKE_FACES;
@@ -194,24 +198,27 @@ private:
     bool BuildAccelerationStructures(const SRayTracingSceneData& sceneData);
 
     // ============================================
-    // Voxel Baking (One voxel at a time)
+    // Brick Baking (Batched - 64 voxels per dispatch)
     // ============================================
 public:
     // Dispatch bake for all voxels in lightmap
     bool DispatchBakeAllVoxels(CVolumetricLightmap& lightmap, const SDXRCubemapBakeConfig& config);
 
 private:
-    void DispatchBakeVoxel(const DirectX::XMFLOAT3& worldPos, uint32_t voxelIndex,
+    // Batch operations
+    bool CreateVoxelPositionsBuffer(uint32_t batchSize);
+    void UploadVoxelPositions(const std::vector<DirectX::XMFLOAT4>& positions);
+    void DispatchBakeBrick(uint32_t batchSize, uint32_t brickIndex,
                            const SDXRCubemapBakeConfig& config);
-    void ReadbackCubemap();
+    void ReadbackBatchCubemaps(uint32_t batchSize);
 
-    // Project cubemap to SH coefficients
-    void ProjectCubemapToSH(std::array<DirectX::XMFLOAT3, 9>& outSH);
+    // Project cubemap to SH coefficients (with voxel offset for batch)
+    void ProjectCubemapToSH(uint32_t voxelIdxInBatch, std::array<DirectX::XMFLOAT3, 9>& outSH);
 
     // Check voxel validity (inside geometry check)
     float CheckVoxelValidity(const DirectX::XMFLOAT3& worldPos);
 
-    // Export cubemap for debugging
+    // Export cubemap for debugging (with voxel offset for batch)
     void ExportDebugCubemap(const std::string& path, uint32_t brickIdx, uint32_t voxelIdx);
 
     // Export all SH values to text file for verification
@@ -246,14 +253,21 @@ private:
     std::unique_ptr<RHI::IBuffer> m_vertexBuffer;   // All vertex positions
     std::unique_ptr<RHI::IBuffer> m_indexBuffer;    // All indices
 
-    // Cubemap output buffer (UAV - 32x32x6 = 6144 float4)
+    // Voxel positions buffer (batch mode - 64 float4 for positions + validity)
+    std::unique_ptr<RHI::IBuffer> m_voxelPositionsBuffer;
+
+    // Batched cubemap output buffer (UAV - batchSize * 32x32x6 float4)
+    // For 64 voxels: 64 * 6144 = 393216 float4 values (~6 MB)
     std::unique_ptr<RHI::IBuffer> m_cubemapOutputBuffer;
 
-    // Readback buffer (CPU-readable staging)
+    // Readback buffer (CPU-readable staging, same size as output)
     std::unique_ptr<RHI::IBuffer> m_cubemapReadbackBuffer;
 
-    // CPU-side cubemap data (RGBA per pixel)
+    // CPU-side batched cubemap data (RGBA per pixel, for entire batch)
     std::vector<DirectX::XMFLOAT4> m_cubemapData;
+
+    // Current batch size (for buffer sizing)
+    uint32_t m_currentBatchSize = 0;
 
     // State
     uint32_t m_numLights = 0;
