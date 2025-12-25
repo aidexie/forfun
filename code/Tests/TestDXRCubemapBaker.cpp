@@ -88,6 +88,7 @@ public:
             m_config.debug.debugExportPath = FFPath::GetDebugDir() + "/TestDXRCubemapBaker";
             m_config.debug.logDispatchInfo = true;
             m_config.debug.logReadbackResults = true;
+            m_config.debug.exportSHToText = true;
 
             // Create output directory
             std::filesystem::create_directories(m_config.debug.debugExportPath);
@@ -163,7 +164,7 @@ public:
             CFFLog::Info("[TestDXRCubemapBaker] Results exported to: %s", m_config.debug.debugExportPath.c_str());
         });
 
-        ctx.OnFrame(60, [&]() {
+        ctx.OnFrame(15, [&]() {
             CFFLog::Info("[TestDXRCubemapBaker] Test complete");
             m_baker.reset();  // Clean up
             ctx.testPassed = ctx.failures.empty();

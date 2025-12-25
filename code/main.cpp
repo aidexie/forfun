@@ -52,9 +52,9 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // Set this to a test name to auto-run that test on startup (bypasses command line)
 // Set to nullptr or empty string "" to disable and use normal command line parsing
 // Examples:
-static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
-   //static const char* CODE_TEST_NAME = nullptr;            // Normal mode
-// static const char* CODE_TEST_NAME = "TestDXRReadback";
+   static const char* CODE_TEST_NAME = nullptr;            // Normal mode
+ //static const char* CODE_TEST_NAME = "TestDXRReadback";
+//static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
 
 // -----------------------------------------------------------------------------
 // 全局

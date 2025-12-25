@@ -1242,7 +1242,7 @@ bool CDX12RenderContext::CreateRootSignatures() {
     // Parameter 1: SRV table (t0-t6: TLAS, Skybox, Materials, Lights, Instances, Vertices, Indices)
     D3D12_DESCRIPTOR_RANGE rtSrvRange = {};
     rtSrvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    rtSrvRange.NumDescriptors = 7;  // t0-t6
+    rtSrvRange.NumDescriptors = 12;
     rtSrvRange.BaseShaderRegister = 0;
     rtSrvRange.RegisterSpace = 0;
     rtSrvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;

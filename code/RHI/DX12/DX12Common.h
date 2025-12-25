@@ -40,7 +40,7 @@ constexpr uint32_t DSV_HEAP_SIZE = 32;
 // A 512x512 texture with 10 mips needs ~100 descriptors per texture
 // Increased to handle multiple textures loaded at startup before first frame
 constexpr uint32_t SRV_STAGING_PER_FRAME = 4096*4;       // SRV descriptors per frame
-constexpr uint32_t SAMPLER_STAGING_PER_FRAME = 128;    // Sampler descriptors per frame
+constexpr uint32_t SAMPLER_STAGING_PER_FRAME = 512;    // Sampler descriptors per frame
 
 // ============================================
 // Error Handling

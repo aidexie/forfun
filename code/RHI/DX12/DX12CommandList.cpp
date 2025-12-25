@@ -904,9 +904,6 @@ void CDX12CommandList::BindPendingResourcesRayTracing() {
     // Parameter 2: UAV Descriptor Table (u0)
     // Parameter 3: Sampler Descriptor Table (s0)
 
-    CFFLog::Info("[BindPendingResourcesRayTracing] cbvDirty=%d, srvDirty=%d, uavDirty=%d, samplerDirty=%d",
-                 m_cbvDirty, m_srvDirty, m_uavDirty, m_samplerDirty);
-
     auto& heapMgr = CDX12DescriptorHeapManager::Instance();
     auto device = CDX12Context::Instance().GetDevice();
 
@@ -926,15 +923,11 @@ void CDX12CommandList::BindPendingResourcesRayTracing() {
             }
         }
 
-        CFFLog::Info("[BindPendingResourcesRayTracing] SRV: maxBoundSlot=%u, pendingSRV[0].ptr=0x%llX",
-                     maxBoundSlot, m_pendingSRVCpuHandles[0].ptr);
-
         if (maxBoundSlot > 0) {
             auto& stagingRing = heapMgr.GetSRVStagingRing();
             SDescriptorHandle staging = stagingRing.AllocateContiguous(maxBoundSlot);
 
             if (staging.IsValid()) {
-                CFFLog::Info("[BindPendingResourcesRayTracing] SRV staging: gpuHandle=0x%llX", staging.gpuHandle.ptr);
                 uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
                 for (uint32_t i = 0; i < maxBoundSlot; ++i)
@@ -964,13 +957,11 @@ void CDX12CommandList::BindPendingResourcesRayTracing() {
 
     // Bind UAV table (parameter 2) - u0
     if (m_uavDirty) {
-        CFFLog::Info("[BindPendingResourcesRayTracing] UAV: pendingUAV[0].ptr=0x%llX", m_pendingUAVCpuHandles[0].ptr);
         if (m_pendingUAVCpuHandles[0].ptr != 0) {
             auto& stagingRing = heapMgr.GetSRVStagingRing();
             SDescriptorHandle staging = stagingRing.AllocateContiguous(1);
 
             if (staging.IsValid()) {
-                CFFLog::Info("[BindPendingResourcesRayTracing] UAV staging: gpuHandle=0x%llX", staging.gpuHandle.ptr);
                 device->CopyDescriptorsSimple(1, staging.cpuHandle, m_pendingUAVCpuHandles[0],
                                               D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
                 m_commandList4->SetComputeRootDescriptorTable(2, staging.gpuHandle);
