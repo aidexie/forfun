@@ -318,7 +318,67 @@ struct SReflectionProbe : public IComponent {
 
 **验收标准**: TestDXRBakeVisualize 通过
 
-### 2.5 Deferred 渲染 (Hybrid) - 1周
+**时间估计**: Phase 2 总计 3-4 周
+- Point Light + Forward+: 1-1.5周
+- Spot Light: 3-4天
+- Reflection Probe: 1周
+- Light Probe (Volumetric Lightmap): ✅ 已完成
+
+---
+
+## Phase 3: 渲染进阶 (预计 8-10周)
+
+**目标**: 高级渲染特性、后处理和架构升级
+
+**实现顺序** (基于依赖关系):
+```
+3.1 Lightmap ──────────────────────────────────────┐
+                                                    │
+3.2 Deferred (G-Buffer) ──► 3.3 后处理 (SSAO/SSR) │
+                                                    │
+3.4 Instancing ────────────────────────────────────┤
+                                                    │
+3.5 RDG ──► 3.6 Descriptor Set ──► 3.7 Vulkan ────┘
+```
+
+### 3.1 Lightmap 支持 - 3-4天
+
+**目标**: 烘焙静态光照到纹理，提升静态场景性能和视觉质量
+
+**核心技术**:
+
+1. **UV2 生成（Lightmap UV）**
+   - 独立的 UV 通道（不重叠，均匀分布）
+   - 工具：xatlas 库自动生成
+
+   ```cpp
+   struct Vertex {
+       XMFLOAT3 position;
+       XMFLOAT3 normal;
+       XMFLOAT2 uv;        // 原始 UV（用于 Albedo 等纹理）
+       XMFLOAT2 lightmapUV; // Lightmap UV（用于烘焙光照）
+   };
+   ```
+
+2. **Lightmap Baking（编辑器工具）**
+   - 复用 DXR 烘焙基础设施（CDXRCubemapBaker）
+   - 输出：Lightmap 纹理（HDR 格式，R16G16B16A16_FLOAT）
+
+3. **Shader 集成**
+   ```hlsl
+   Texture2D gLightmap : register(t5);
+
+   float4 PSMain(PSInput input) : SV_Target {
+       float3 bakedLighting = gLightmap.Sample(gSampler, input.lightmapUV).rgb;
+       float3 dynamicLighting = CalculateDynamicLights(...);
+       float3 finalColor = albedo * (bakedLighting + dynamicLighting);
+       return float4(finalColor, 1.0);
+   }
+   ```
+
+**验收标准**: TestLightmap 通过
+
+### 3.2 Deferred 渲染 (Hybrid) - 1周
 
 **目标**: 添加 G-Buffer 支持 SSAO 和 SSR 等屏幕空间效果
 
@@ -334,11 +394,6 @@ RT2: Emissive.rgb + AO.a          (R8G8B8A8_UNORM)
 Depth: D24S8 或 D32F
 ```
 
-**核心技术**:
-1. **G-Buffer Pass**: 输出几何信息到 MRT
-2. **Lighting Pass**: 延迟光照计算 (可选，Forward+ 已足够)
-3. **Screen-Space Effects**: SSAO, SSR 读取 G-Buffer
-
 **实现步骤**:
 1. 创建 G-Buffer 纹理和 RTV
 2. 实现 G-Buffer Pass shader
@@ -346,221 +401,57 @@ Depth: D24S8 或 D32F
 4. 透明物体仍走 Forward+ 路径
 
 **验收标准**: TestDeferredGBuffer 通过
-- G-Buffer 正确输出 albedo, normal, depth
-- SSAO 能够读取 G-Buffer 产生正确遮蔽
 
-**注意事项**:
-- 透明物体需要单独 Forward pass
-- MSAA 需要特殊处理（resolve 或 per-sample shading）
+### 3.3 后处理栈 - 1-2周
 
-### 2.6 渲染优化：Batching & Instancing - 2-3天
+**目标**: 现代后处理效果（依赖 3.2 G-Buffer）
+
+#### 3.3.1 Bloom + ACES Tonemapping - 4-5天
+
+**实现**:
+- Bright Pass
+- Gaussian Blur (3-pass)
+- ACES Tonemapping
+- 曝光控制
+
+**验收标准**: TestBloom 通过
+
+#### 3.3.2 SSAO - 2-3天
+
+**依赖**: G-Buffer (depth + normal)
+
+#### 3.3.3 SSR - 3-4天
+
+**依赖**: G-Buffer (depth + normal + roughness)
+
+### 3.4 GPU Instancing - 2-3天
 
 **目标**: 减少 Draw Call，提升大量物体渲染性能
 
-**优先级**: 中等（性能优化）
-
 **核心技术**:
+- 单次 Draw Call 渲染多个相同 Mesh 的实例
+- 使用 `DrawIndexedInstanced()`
+- Per-instance 数据：Transform Matrix, Material ID
 
-1. **Static Batching（静态合批）**
-   - 合并静态物体的 Mesh 到单个 VB/IB
-   - 适用场景：建筑、地形装饰、静态道具
-   - 限制：物体不能移动，共享材质
+```hlsl
+struct InstanceData {
+    float4x4 worldMatrix;
+    uint materialID;
+};
+StructuredBuffer<InstanceData> gInstanceData : register(t10);
 
-2. **GPU Instancing（GPU 实例化）**
-   - 单次 Draw Call 渲染多个相同 Mesh 的实例
-   - 使用 `DrawIndexedInstanced()`
-   - Per-instance 数据：Transform Matrix, Material ID
-
-   ```hlsl
-   // Vertex Shader
-   struct InstanceData {
-       float4x4 worldMatrix;
-       uint materialID;
-   };
-   StructuredBuffer<InstanceData> gInstanceData : register(t10);
-
-   VSOutput main(VSInput input, uint instanceID : SV_InstanceID) {
-       InstanceData inst = gInstanceData[instanceID];
-       float4 worldPos = mul(float4(input.position, 1.0), inst.worldMatrix);
-       // ...
-   }
-   ```
-
-3. **Dynamic Batching（动态合批，可选）**
-   - 运行时合并小 Mesh（< 300 顶点）
-   - CPU 开销较大，需谨慎使用
-
-**实现步骤**:
-1. 添加 `SInstancedMeshRenderer` 组件
-2. 修改 MainPass 支持 Instanced Draw Call
-3. 实现 Instance Data Buffer 管理
-4. 添加材质兼容性检查（相同材质才能合批）
+VSOutput main(VSInput input, uint instanceID : SV_InstanceID) {
+    InstanceData inst = gInstanceData[instanceID];
+    float4 worldPos = mul(float4(input.position, 1.0), inst.worldMatrix);
+    // ...
+}
+```
 
 **验收标准**: TestInstancing 通过
-- 场景：1000 个相同的立方体（不同位置/旋转）
-- 性能：Draw Call 从 1000 降低到 1
-- ASSERT: Draw Call Count == 1
+- 场景：1000 个相同的立方体
+- Draw Call 从 1000 降低到 1
 
-**测试场景**: 森林（大量树木）、城市（重复建筑）
-
-### 2.7 Lightmap 支持 - 3-4天
-
-**目标**: 烘焙静态光照到纹理，提升静态场景性能和视觉质量
-
-**优先级**: 中等（静态场景优化）
-
-**核心技术**:
-
-1. **UV2 生成（Lightmap UV）**
-   - 独立的 UV 通道（不重叠，均匀分布）
-   - 工具：手动展 UV 或使用 xatlas 库自动生成
-
-   ```cpp
-   struct Vertex {
-       XMFLOAT3 position;
-       XMFLOAT3 normal;
-       XMFLOAT2 uv;        // 原始 UV（用于 Albedo 等纹理）
-       XMFLOAT2 lightmapUV; // Lightmap UV（用于烘焙光照）
-   };
-   ```
-
-2. **Lightmap Baking（编辑器工具）**
-   - 对每个静态物体，渲染其 Lightmap UV 空间的光照
-   - 输入：场景中所有光源（Directional, Point, Spot）
-   - 输出：Lightmap 纹理（HDR 格式，如 R16G16B16A16_FLOAT）
-   - 算法：光线追踪或光栅化（简化版可用 Shadow Map）
-
-3. **Shader 集成**
-   ```hlsl
-   // MainPass.ps.hlsl
-   Texture2D gLightmap : register(t5);
-
-   float4 PSMain(PSInput input) : SV_Target {
-       // 采样 Lightmap
-       float3 bakedLighting = gLightmap.Sample(gSampler, input.lightmapUV).rgb;
-
-       // 混合动态光照和烘焙光照
-       float3 dynamicLighting = CalculateDynamicLights(...);
-       float3 finalColor = albedo * (bakedLighting + dynamicLighting);
-
-       return float4(finalColor, 1.0);
-   }
-   ```
-
-4. **组件支持**
-   ```cpp
-   struct SMeshRenderer : public IComponent {
-       std::string meshPath;
-       std::string materialPath;
-       bool isStatic = false;           // 是否参与 Lightmap 烘焙
-       std::string lightmapPath;        // 烘焙后的 Lightmap 纹理路径
-       XMFLOAT4 lightmapScaleOffset;    // Lightmap UV 的缩放和偏移（支持 Atlas）
-   };
-   ```
-
-**实现步骤**:
-1. 扩展 Vertex 结构，添加 `lightmapUV`
-2. 实现 Lightmap Baking 工具（编辑器 Panel）
-3. 修改 Shader 支持 Lightmap 采样
-4. 添加 Lightmap Atlas 管理（多个物体共享一张大纹理）
-
-**验收标准**: TestLightmap 通过
-- 场景：静态房间 + 1 个 Directional Light + 2 个 Point Light
-- 烘焙后：关闭动态光源，场景仍然正确显示光照和阴影
-- VISUAL_EXPECTATION: 烘焙光照与动态光照视觉一致
-
-**测试场景**: 室内场景（静态墙壁、地板、家具）
-
-**与 Light Probe 的区别**:
-- **Lightmap**: 静态物体的烘焙光照（高分辨率纹理）
-- **Light Probe**: 动态物体的环境光（低频球谐系数）
-- **配合使用**: Lightmap 用于静态场景，Light Probe 用于动态角色
-
-**时间估计**: Phase 2 总计 4-5 周
-- Point Light + Forward+: 1-1.5周
-- Spot Light: 3-4天
-- Reflection Probe: 1周
-- Light Probe: 3-4天
-- Batching & Instancing: 2-3天
-- Lightmap: 3-4天
-
----
-
-## 🎯 实现顺序 (2.7 → 3.4)
-
-**决定的实现顺序** (基于依赖关系和视觉效果优先):
-
-| 顺序 | 功能 | 时间 | 理由 |
-|-----|------|------|------|
-| 1 | **2.7 Lightmap** | 3-4天 | 复用 DXR 烘焙基础设施 |
-| 2 | **2.5 Deferred (Hybrid)** | 1周 | G-Buffer 支持 SSAO/SSR |
-| 3 | **3.4 后处理栈** | 1-2周 | Bloom + SSAO + SSR |
-| 4 | **2.6 Instancing** | 2-3天 | 独立性能优化 |
-| 5 | **3.3 RDG** | 1周 | 清理 Pass 管理 |
-| 6 | **3.1 Descriptor Set** | 1周 | 为 Vulkan 做准备 |
-| 7 | **3.2 Vulkan** | 2周 | 验证 RHI 抽象 |
-
-**依赖关系**:
-```
-Lightmap (DXR) ─────────────────────────────────┐
-                                                 │
-Deferred (G-Buffer) ──► 后处理栈 (SSAO/SSR)     │
-                                                 │
-Instancing ─────────────────────────────────────┤
-                                                 │
-RDG ──► Descriptor Set ──► Vulkan ──────────────┘
-```
-
----
-
-## Phase 3: 渲染架构升级 (预计 5-6周)
-
-**目标**: 现代化渲染架构，支持多后端、高级特性和后处理
-
-### 3.1 Descriptor Set 抽象 - 1周
-
-**目标**: 统一 DX12 Root Signature / Vulkan Descriptor Set 管理
-
-**核心设计**:
-```cpp
-struct SDescriptorSetLayout {
-    std::vector<SDescriptorBinding> bindings;  // CBV, SRV, UAV, Sampler
-};
-
-class IDescriptorSet {
-    virtual void SetConstantBuffer(uint32_t binding, IBuffer* buffer) = 0;
-    virtual void SetTexture(uint32_t binding, ITexture* texture) = 0;
-    virtual void SetSampler(uint32_t binding, ISampler* sampler) = 0;
-};
-```
-
-**实现任务**:
-1. 定义 `SDescriptorSetLayout` 和 `IDescriptorSet` 接口
-2. DX12: 映射到 Root Signature + Descriptor Table
-3. 预留 Vulkan 接口
-
-**验收标准**: TestDescriptorSet 通过
-
-### 3.2 Vulkan 后端 - 2周
-
-**目标**: 添加 Vulkan 渲染后端，验证 RHI 抽象
-
-**核心组件**:
-- `VulkanContext` - Instance, Device, Queue
-- `VulkanRenderContext` - Pipeline, Descriptor Pool
-- `VulkanCommandList` - Command Buffer
-- `VulkanSwapChain` - Surface, Present
-
-**实现任务**:
-1. Vulkan 初始化和设备选择
-2. Swapchain 管理
-3. Pipeline 创建 (复用 SPIR-V 或 HLSL→SPIR-V)
-4. Descriptor Set 绑定
-5. 资源管理 (Buffer, Texture)
-
-**验收标准**: TestVulkanBasic 通过，基础场景在 Vulkan 下渲染
-
-### 3.3 Render Dependency Graph (RDG) - 1周
+### 3.5 Render Dependency Graph (RDG) - 1周
 
 **目标**: 自动化资源屏障和渲染 Pass 依赖管理
 
@@ -585,25 +476,38 @@ class CRenderGraph {
 3. 自动屏障插入 (DX12: ResourceBarrier, Vulkan: Pipeline Barrier)
 4. 资源别名 (Aliasing) 优化
 
-**验收标准**: TestRDG 通过，MainPass + ShadowPass 通过 RDG 执行
+**验收标准**: TestRDG 通过
 
-### 3.4 后处理栈 - 1-2周
+### 3.6 Descriptor Set 抽象 - 1周
 
-**目标**: 现代后处理效果
+**目标**: 统一 DX12 Root Signature / Vulkan Descriptor Set 管理
 
-#### 3.4.1 Bloom + ACES Tonemapping - 4-5天
+**核心设计**:
+```cpp
+struct SDescriptorSetLayout {
+    std::vector<SDescriptorBinding> bindings;
+};
 
-**实现**:
-- Bright Pass
-- Gaussian Blur (3-pass)
-- ACES Tonemapping
-- 曝光控制
+class IDescriptorSet {
+    virtual void SetConstantBuffer(uint32_t binding, IBuffer* buffer) = 0;
+    virtual void SetTexture(uint32_t binding, ITexture* texture) = 0;
+    virtual void SetSampler(uint32_t binding, ISampler* sampler) = 0;
+};
+```
 
-**验收标准**: TestBloom 通过
+**验收标准**: TestDescriptorSet 通过
 
-#### 3.4.2 SSAO (可选) - 2-3天
+### 3.7 Vulkan 后端 - 2周
 
-#### 3.4.3 SSR (可选) - 3-4天
+**目标**: 添加 Vulkan 渲染后端，验证 RHI 抽象
+
+**核心组件**:
+- `VulkanContext` - Instance, Device, Queue
+- `VulkanRenderContext` - Pipeline, Descriptor Pool
+- `VulkanCommandList` - Command Buffer
+- `VulkanSwapChain` - Surface, Present
+
+**验收标准**: TestVulkanBasic 通过
 
 ---
 
