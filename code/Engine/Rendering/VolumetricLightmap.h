@@ -17,7 +17,7 @@ namespace RHI {
 class CScene;
 class CPathTraceBaker;
 struct SPathTraceConfig;
-class CDXRLightmapBaker;
+class CDXRCubemapBaker;
 
 // ============================================
 // Volumetric Lightmap Constants
@@ -32,7 +32,7 @@ static const int VL_MAX_LEVEL = 8;                     // 最大细分级别限�
 // ============================================
 enum class ELightmapBakeBackend {
     CPU,        // CPathTraceBaker - CPU-based path tracing (default, always available)
-    GPU_DXR     // CDXRLightmapBaker - GPU DXR ray tracing (requires RTX/DXR support)
+    GPU_DXR     // CDXRCubemapBaker - GPU DXR ray tracing (requires RTX/DXR support)
 };
 
 // Bake configuration
@@ -237,7 +237,7 @@ public:
     // 生命周期
     // ============================================
     CVolumetricLightmap();
-    ~CVolumetricLightmap();  // Defined in .cpp due to unique_ptr<CDXRLightmapBaker>
+    ~CVolumetricLightmap();  // Defined in .cpp due to unique_ptr<CDXRCubemapBaker>
 
     bool Initialize(const Config& config);
     void Shutdown();
@@ -409,7 +409,7 @@ private:
     // ============================================
     // DXR Baker (lazy initialized)
     // ============================================
-    std::unique_ptr<CDXRLightmapBaker> m_dxrBaker;
+    std::unique_ptr<CDXRCubemapBaker> m_dxrBaker;
 
     // Backend-specific baking
     void bakeWithCPU(CScene& scene, const SLightmapBakeConfig& config);

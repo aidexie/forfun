@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iomanip>
 #include <ktx.h>
 
 // ============================================
@@ -513,7 +515,7 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
         };
 
         // Process each voxel in the brick (4x4x4 = 64)
-        for (uint32_t voxelIdx = VL_BRICK_VOXEL_COUNT-1; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {
+        for (uint32_t voxelIdx = 0; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {
             // Calculate voxel local position
             uint32_t lx = voxelIdx % VL_BRICK_SIZE;
             uint32_t ly = (voxelIdx / VL_BRICK_SIZE) % VL_BRICK_SIZE;
@@ -594,6 +596,14 @@ bool CDXRCubemapBaker::DispatchBakeAllVoxels(
     CFFLog::Info("[CubemapBaker] Bake complete in %.2f seconds", elapsedSec);
     CFFLog::Info("[CubemapBaker] Processed %u voxels (%.1f voxels/sec)",
                  processedVoxels, processedVoxels / elapsedSec);
+
+    // Export SH values for verification if requested
+    if (config.debug.exportSHToText) {
+        std::string exportPath = config.debug.debugExportPath.empty()
+            ? FFPath::GetDebugDir() + "/CubemapBaker"
+            : config.debug.debugExportPath;
+        ExportSHToText(lightmap, exportPath);
+    }
 
     return true;
 }
@@ -796,4 +806,53 @@ void CDXRCubemapBaker::ReleasePerBakeResources() {
     m_vertexBuffer.reset();
     m_indexBuffer.reset();
     m_numLights = 0;
+}
+
+// ============================================
+// SH Export for Verification
+// ============================================
+
+void CDXRCubemapBaker::ExportSHToText(const CVolumetricLightmap& lightmap, const std::string& path) {
+    std::filesystem::create_directories(path);
+
+    std::string filename = path + "/sh_values.txt";
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        CFFLog::Error("[CubemapBaker] Failed to open SH export file: %s", filename.c_str());
+        return;
+    }
+
+    const auto& bricks = lightmap.GetBricks();
+
+    // Write header with metadata
+    file << "# Volumetric Lightmap SH Export\n";
+    file << "# Format: brick_idx, voxel_idx, valid, L0(rgb), L1_1(rgb), L1_0(rgb), L1_m1(rgb), L2_2(rgb), L2_1(rgb), L2_0(rgb), L2_m1(rgb), L2_m2(rgb)\n";
+    file << "# Total bricks: " << bricks.size() << "\n";
+    file << "# Voxels per brick: " << VL_BRICK_VOXEL_COUNT << "\n";
+    file << "# SH coefficients: " << VL_SH_COEFF_COUNT << " (L1 band)\n";
+    file << "#\n";
+
+    // Export all voxels
+    for (size_t brickIdx = 0; brickIdx < bricks.size(); brickIdx++) {
+        const SBrick& brick = bricks[brickIdx];
+
+        for (uint32_t voxelIdx = 0; voxelIdx < VL_BRICK_VOXEL_COUNT; voxelIdx++) {
+            bool valid = brick.validity[voxelIdx];
+
+            // Format: brick_idx, voxel_idx, valid, SH[0..8] (each as r,g,b)
+            file << brickIdx << "," << voxelIdx << "," << (valid ? 1 : 0);
+
+            for (int sh = 0; sh < VL_SH_COEFF_COUNT; sh++) {
+                const auto& coeff = brick.shData[voxelIdx][sh];
+                // Use high precision for verification
+                file << "," << std::fixed << std::setprecision(6)
+                     << coeff.x << "," << coeff.y << "," << coeff.z;
+            }
+            file << "\n";
+        }
+    }
+
+    file.close();
+    CFFLog::Info("[CubemapBaker] Exported SH values to: %s", filename.c_str());
+    CFFLog::Info("[CubemapBaker]   Total voxels: %zu", bricks.size() * VL_BRICK_VOXEL_COUNT);
 }

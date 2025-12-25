@@ -1,6 +1,6 @@
 #include "VolumetricLightmap.h"
 #include "RayTracing/PathTraceBaker.h"
-#include "RayTracing/DXRLightmapBaker.h"
+#include "RayTracing/DXRCubemapBaker.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/Transform.h"
@@ -61,7 +61,7 @@ bool CVolumetricLightmap::Initialize(const Config& config)
     m_initialized = true;
     if (!m_dxrBaker)
     {
-        m_dxrBaker = std::make_unique<CDXRLightmapBaker>();
+        m_dxrBaker = std::make_unique<CDXRCubemapBaker>();
     }
 
     if (!m_dxrBaker->IsReady())
@@ -547,16 +547,15 @@ void CVolumetricLightmap::bakeWithCPU(CScene& scene, const SLightmapBakeConfig& 
 void CVolumetricLightmap::bakeWithGPU(CScene& scene, const SLightmapBakeConfig& config)
 {
     CFFLog::Info("[VolumetricLightmap] ========================================");
-    CFFLog::Info("[VolumetricLightmap] Starting GPU DXR bake...");
-    CFFLog::Info("[VolumetricLightmap]   Samples per pass: %d", config.gpuSamplesPerVoxel);
-    CFFLog::Info("[VolumetricLightmap]   Accumulation passes: %d", config.gpuAccumulationPasses);
-    CFFLog::Info("[VolumetricLightmap]   Total samples per voxel: %d", config.gpuSamplesPerVoxel * config.gpuAccumulationPasses);
+    CFFLog::Info("[VolumetricLightmap] Starting GPU DXR cubemap bake...");
+    CFFLog::Info("[VolumetricLightmap]   Cubemap resolution: %dx%dx6", CUBEMAP_BAKE_RES, CUBEMAP_BAKE_RES);
+    CFFLog::Info("[VolumetricLightmap]   Rays per voxel: %d", CUBEMAP_TOTAL_PIXELS);
     CFFLog::Info("[VolumetricLightmap]   Max bounces: %d", config.gpuMaxBounces);
     CFFLog::Info("[VolumetricLightmap] ========================================");
 
     // Lazy initialize DXR baker
     if (!m_dxrBaker) {
-        m_dxrBaker = std::make_unique<CDXRLightmapBaker>();
+        m_dxrBaker = std::make_unique<CDXRCubemapBaker>();
     }
 
     if (!m_dxrBaker->IsReady()) {
@@ -566,10 +565,9 @@ void CVolumetricLightmap::bakeWithGPU(CScene& scene, const SLightmapBakeConfig& 
         }
     }
 
-    // Configure DXR bake
-    SDXRBakeConfig dxrConfig;
-    dxrConfig.samplesPerVoxel = config.gpuSamplesPerVoxel;
-    dxrConfig.accumulationPasses = config.gpuAccumulationPasses;
+    // Configure DXR cubemap bake
+    SDXRCubemapBakeConfig dxrConfig;
+    dxrConfig.cubemapResolution = CUBEMAP_BAKE_RES;
     dxrConfig.maxBounces = config.gpuMaxBounces;
     dxrConfig.skyIntensity = config.gpuSkyIntensity;
     dxrConfig.progressCallback = config.progressCallback;
@@ -580,8 +578,18 @@ void CVolumetricLightmap::bakeWithGPU(CScene& scene, const SLightmapBakeConfig& 
         return;
     }
 
+    // Phase 2: Dispatch bake for all voxels
+    CFFLog::Info("[VolumetricLightmap] Rays per voxel: %u (32x32x6)",
+                 dxrConfig.cubemapResolution * dxrConfig.cubemapResolution * 6);
+
+    bool success = m_dxrBaker->DispatchBakeAllVoxels(*this, dxrConfig);
+
+    if (!success) {
+        CFFLog::Error("[VolumetricLightmap] GPU bake dispatch failed");
+        return;
+    }
     CFFLog::Info("[VolumetricLightmap] ========================================");
-    CFFLog::Info("[VolumetricLightmap] GPU DXR bake complete!");
+    CFFLog::Info("[VolumetricLightmap] GPU DXR cubemap bake complete!");
     CFFLog::Info("[VolumetricLightmap] ========================================");
 }
 

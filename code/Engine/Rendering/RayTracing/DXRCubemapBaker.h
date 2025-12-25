@@ -49,6 +49,9 @@ struct SDXRCubemapBakeDebugFlags {
     // Max number of cubemaps to export (0 = all valid voxels)
     uint32_t maxDebugCubemaps = 1;
 
+    // Export SH values to text file for verification
+    bool exportSHToText = false;
+
     // Export path (directory)
     std::string debugExportPath;
 };
@@ -210,6 +213,9 @@ private:
 
     // Export cubemap for debugging
     void ExportDebugCubemap(const std::string& path, uint32_t brickIdx, uint32_t voxelIdx);
+
+    // Export all SH values to text file for verification
+    void ExportSHToText(const CVolumetricLightmap& lightmap, const std::string& path);
 
     // ============================================
     // Cleanup
