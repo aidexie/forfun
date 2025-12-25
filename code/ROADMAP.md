@@ -9,19 +9,10 @@
 
 ## 🐛 已知问题 (Known Issues)
 
-### DX12 后端
-1. **纹理初始数据上传未完成** - CreateTexture 的 initialData 需要通过 Upload Heap 复制
-2. **Buffer 初始数据上传未完成** - 非 Upload Heap 的 Buffer 需要额外复制步骤
-3. **资源状态跟踪警告** - 某些资源创建后未注册到 ResourceStateTracker
-
 ### Volumetric Lightmap
 1. **Descriptor Heap Overflow** - 单帧内 bake 多个 brick 会超出限制
 2. **Edge Discontinuity** - 边缘 probe 采样数量不足时方差较大
 3. **Light Leaking** - 需要实现 Visibility/Occlusion 烘焙
-
-### 其他
-- **无 Probe 混合**: Reflection Probe 边界有跳变
-- **无实时更新**: Probe 必须手动烘焙
 
 ---
 
