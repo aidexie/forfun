@@ -7,7 +7,7 @@
 
 ---
 
-## 当前进度 (2025-12-12)
+## 当前进度 (2025-12-25)
 
 ### ✅ 已完成
 
@@ -139,20 +139,23 @@
 
 ### Volumetric Lightmap
 
-1. **室内边缘漏光 (Light Leaking)**
+1. **Descriptor Heap Overflow During Baking**
+   - **现象**: 单帧内 bake 多个 brick 会超出 descriptor heap 限制
+   - **原因**: 当前每次 dispatch 创建大量 descriptor
+   - **解决方案**: 实现 descriptor 复用或分帧烘焙
+   - **状态**: 待修复
+
+2. **Edge Discontinuity (边缘不连续)**
+   - **现象**: 相邻 brick 边缘有明显接缝
+   - **原因**: 边缘 probe 采样数量不足时方差较大，RNG 不同导致结果差异
+   - **解决方案**: 增加采样数量或实现边缘 probe 共享烘焙
+   - **状态**: 待优化
+
+3. **室内边缘漏光 (Light Leaking)**
    - **现象**: 室内墙壁边缘有室外光线渗入
-   - **原因**: 当前使用 Cubemap 渲染方式，体素位置可能穿墙"看到"室外
-   - **解决方案**: 将 Cubemap 方式改为 Ray Tracing，对每个方向发射射线检测遮挡
-
-2. **室外场景亮度与 Global IBL 不同**
-   - **现象**: VL 模式下室外比 Global IBL 模式亮度不一致
-   - **原因**: 这是**预期行为**。VL 烘焙的是场景中物体反射的 1-bounce 间接光，而 Global IBL 是从 Skybox 预积分的环境光。两者计算来源不同，结果自然不同
-   - **状态**: 非 Bug，无需修复
-
-3. **仅支持 1-Bounce 间接光**
-   - **现象**: 室内只有被直接光照射的表面会贡献间接光，深处区域较暗
-   - **原因**: 当前只烘焙直接光的一次反弹
-   - **解决方案**: 将 Cubemap 方式改为 Ray Tracing，实现多 Bounce 光线追踪
+   - **原因**: 体素位置可能穿墙"看到"室外
+   - **解决方案**: 需要实现 Visibility/Occlusion 烘焙
+   - **状态**: 待实现
 
 ### 其他
 
@@ -350,49 +353,20 @@ struct SReflectionProbe : public IComponent {
 
 **测试场景**: 室内走廊，金属门把手
 
-### 2.4 Light Probe (球谐光照) - 🚧 进行中，3-4天
+### 2.4 Light Probe (球谐光照) - ✅ 已完成 (升级为 Volumetric Lightmap + DXR)
 
-**优先级**: ⚠️ **低优先级，但用户选择实现**
+**原方案**: 单点 Light Probe 采样
+**实际方案**: Volumetric Lightmap + GPU DXR 烘焙（更优解决方案）
 
-**原因**:
-- 实现复杂（SH编码/解码，数学密集）
-- 视觉效果微妙（漫反射环境光）
-- 调试困难（SH系数难以可视化）
-- 当前全局IBL已满足大部分需求
+**升级内容**:
+- **Volumetric Lightmap**: 自适应八叉树 Brick 系统，Per-Pixel 采样（比 Per-Object 更精细）
+- **GPU DXR 烘焙**: CDXRCubemapBaker 实现，64 voxels 批量 dispatch
+- **多 Bounce GI**: GPU Path Tracing 支持多次反弹
+- **L2 SH 编码**: 9 系数 × RGB，硬件 Trilinear 插值
 
-**何时需要**:
-- 大型开放世界（需要per-region环境光）
-- 完整GI解决方案
+**详细文档**: `docs/VOLUMETRIC_LIGHTMAP.md`
 
-**数学前置知识** (详见下方 Math Prerequisites 章节):
-1. 球坐标系 (Spherical Coordinates)
-2. 勒让德多项式 (Legendre Polynomials)
-3. 球谐函数 (Spherical Harmonics)
-4. 球面积分 (Spherical Integration)
-5. 正交基函数 (Orthogonal Basis Functions)
-
-**组件**:
-```cpp
-struct SLightProbe : public IComponent {
-    float sh[9][3];  // 9个球谐系数 × RGB (L0-L2)
-    XMFLOAT3 boxMin{-5, -5, -5};
-    XMFLOAT3 boxMax{5, 5, 5};
-    float blendDistance = 1.0f;
-};
-```
-
-**核心技术**:
-1. **SH Encoding** - 将cubemap投影到球谐基函数
-2. **SH Decoding in Shader** - 从SH系数重建辐照度
-3. **Probe Blending** - 多Probe基于距离的权重混合
-
-**与 Reflection Probe 区别**:
-- **Reflection Probe**: 镜面反射（高频），cubemap，用于金属
-- **Light Probe**: 漫反射（低频），球谐，用于非金属
-
-**验收标准**: TestLightProbe 通过
-- 场景：红墙（左）+ 蓝墙（右）+ 白色漫反射球体（中间）
-- VISUAL_EXPECTATION: 球体左侧偏红，右侧偏蓝，中间平滑过渡
+**验收标准**: TestDXRBakeVisualize 通过
 
 ### 2.5 Deferred 渲染 - ❌ 不推荐实现
 
@@ -541,11 +515,105 @@ struct SLightProbe : public IComponent {
 
 ---
 
-## Phase 3: 动画系统 (预计 2-3周)
+## Phase 3: 渲染架构升级 (预计 5-6周)
+
+**目标**: 现代化渲染架构，支持多后端、高级特性和后处理
+
+### 3.1 Descriptor Set 抽象 - 1周
+
+**目标**: 统一 DX12 Root Signature / Vulkan Descriptor Set 管理
+
+**核心设计**:
+```cpp
+struct SDescriptorSetLayout {
+    std::vector<SDescriptorBinding> bindings;  // CBV, SRV, UAV, Sampler
+};
+
+class IDescriptorSet {
+    virtual void SetConstantBuffer(uint32_t binding, IBuffer* buffer) = 0;
+    virtual void SetTexture(uint32_t binding, ITexture* texture) = 0;
+    virtual void SetSampler(uint32_t binding, ISampler* sampler) = 0;
+};
+```
+
+**实现任务**:
+1. 定义 `SDescriptorSetLayout` 和 `IDescriptorSet` 接口
+2. DX12: 映射到 Root Signature + Descriptor Table
+3. 预留 Vulkan 接口
+
+**验收标准**: TestDescriptorSet 通过
+
+### 3.2 Vulkan 后端 - 2周
+
+**目标**: 添加 Vulkan 渲染后端，验证 RHI 抽象
+
+**核心组件**:
+- `VulkanContext` - Instance, Device, Queue
+- `VulkanRenderContext` - Pipeline, Descriptor Pool
+- `VulkanCommandList` - Command Buffer
+- `VulkanSwapChain` - Surface, Present
+
+**实现任务**:
+1. Vulkan 初始化和设备选择
+2. Swapchain 管理
+3. Pipeline 创建 (复用 SPIR-V 或 HLSL→SPIR-V)
+4. Descriptor Set 绑定
+5. 资源管理 (Buffer, Texture)
+
+**验收标准**: TestVulkanBasic 通过，基础场景在 Vulkan 下渲染
+
+### 3.3 Render Dependency Graph (RDG) - 1周
+
+**目标**: 自动化资源屏障和渲染 Pass 依赖管理
+
+**核心设计**:
+```cpp
+class CRenderGraph {
+    RGTextureHandle CreateTexture(const RGTextureDesc& desc);
+    RGBufferHandle CreateBuffer(const RGBufferDesc& desc);
+
+    void AddPass(const char* name,
+                 std::function<void(RGPassBuilder&)> setup,
+                 std::function<void(ICommandList*)> execute);
+
+    void Compile();   // 分析依赖，生成屏障
+    void Execute();   // 执行所有 Pass
+};
+```
+
+**实现任务**:
+1. Pass 声明和依赖跟踪
+2. 资源生命周期分析
+3. 自动屏障插入 (DX12: ResourceBarrier, Vulkan: Pipeline Barrier)
+4. 资源别名 (Aliasing) 优化
+
+**验收标准**: TestRDG 通过，MainPass + ShadowPass 通过 RDG 执行
+
+### 3.4 后处理栈 - 1-2周
+
+**目标**: 现代后处理效果
+
+#### 3.4.1 Bloom + ACES Tonemapping - 4-5天
+
+**实现**:
+- Bright Pass
+- Gaussian Blur (3-pass)
+- ACES Tonemapping
+- 曝光控制
+
+**验收标准**: TestBloom 通过
+
+#### 3.4.2 SSAO (可选) - 2-3天
+
+#### 3.4.3 SSR (可选) - 3-4天
+
+---
+
+## Phase 4: 动画系统 (预计 2-3周)
 
 **目标**: 骨骼动画和动画混合
 
-### 3.1 骨骼动画管线 - 1.5-2周
+### 4.1 骨骼动画管线 - 1.5-2周
 
 **数据结构**:
 - CSkeleton (joints, globalTransforms)
@@ -556,29 +624,11 @@ struct SLightProbe : public IComponent {
 
 **验收标准**: TestSkeletalAnimation 通过
 
-### 3.2 动画混合 (可选) - 3-4天
+### 4.2 动画混合 (可选) - 3-4天
 
 **功能**: Blend(clipA, clipB, weight)
 
 **验收标准**: TestAnimationBlending 通过
-
----
-
-## Phase 4: 后处理栈 (预计 1-2周)
-
-### 4.1 Bloom + ACES Tonemapping - 4-5天
-
-**实现**:
-- Bright Pass
-- Gaussian Blur (3-pass)
-- ACES Tonemapping
-- 曝光控制
-
-**验收标准**: TestBloom 通过
-
-### 4.2 SSAO (可选) - 2-3天
-
-### 4.3 SSR (可选) - 3-4天
 
 ---
 
@@ -650,4 +700,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2025-12-12
+**Last Updated**: 2025-12-25
