@@ -229,6 +229,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestDXRBakeVisualize.cpp
     ${CODE_PATH}/Tests/TestDXRCubemapBaker.cpp
     ${CODE_PATH}/Tests/TestLightmapUV2.cpp
+    ${CODE_PATH}/Tests/TestLightmap2D.cpp
 )
 
 add_executable(forfun WIN32
