@@ -9,7 +9,8 @@ enum class EDiffuseGIMode : int
 {
     VolumetricLightmap = 0,  // 使用 Volumetric Lightmap（需要烘焙数据）
     GlobalIBL = 1,           // 使用 Global IBL（Skybox Irradiance）
-    None = 2                 // 禁用漫反射 GI（烘焙首次/调试用）
+    None = 2,                // 禁用漫反射 GI（烘焙首次/调试用）
+    Lightmap2D = 3           // 使用 2D Lightmap（UV2 纹理采样）
 };
 
 // ============================================

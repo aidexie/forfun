@@ -15,6 +15,7 @@ set(IMGUI_DIR ${THIRD_PARTY_PATH}/imgui)
 set(IMGUI_BACK ${IMGUI_DIR}/backends)
 set(IMGUIZMO_DIR ${THIRD_PARTY_PATH}/ImGuizmo)
 set(KTX_DIR ${THIRD_PARTY_PATH}/KTX-Software)
+set(XATLAS_DIR ${THIRD_PARTY_PATH}/xatlas/source/xatlas)
 
 add_library(imgui_docking STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -46,6 +47,17 @@ target_include_directories(imguizmo PUBLIC
 )
 if (MSVC)
     target_compile_options(imguizmo PRIVATE /utf-8)
+endif()
+
+# xatlas library (UV2 generation for lightmaps)
+add_library(xatlas STATIC
+    ${XATLAS_DIR}/xatlas.cpp
+)
+target_include_directories(xatlas PUBLIC
+    ${XATLAS_DIR}
+)
+if (MSVC)
+    target_compile_options(xatlas PRIVATE /utf-8 /W0)  # Disable warnings for thirdparty
 endif()
 
 # Core sources - explicitly listed (no GLOB)
@@ -216,6 +228,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestDXRReadback.cpp
     ${CODE_PATH}/Tests/TestDXRBakeVisualize.cpp
     ${CODE_PATH}/Tests/TestDXRCubemapBaker.cpp
+    ${CODE_PATH}/Tests/TestLightmapUV2.cpp
 )
 
 add_executable(forfun WIN32
@@ -239,6 +252,7 @@ target_link_libraries(forfun
     PRIVATE
         imgui_docking
         imguizmo
+        xatlas
         d3d11 d3d12 dxgi d3dcompiler dxguid
         ${KTX_DIR}/lib/ktx.lib
 )
@@ -307,6 +321,15 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRAccelerationStructureManager.cpp
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRCubemapBaker.h
     ${CODE_PATH}/Engine/Rendering/RayTracing/DXRCubemapBaker.cpp
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapTypes.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapUV2.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapUV2.cpp
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapAtlas.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapAtlas.cpp
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapRasterizer.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapRasterizer.cpp
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapBaker.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapBaker.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h

@@ -54,6 +54,7 @@ bool LoadOBJ_PNT(const std::string& path, SMeshCPU_PNT& out, bool flipZ, bool fl
                         if (it>=0){ v.u=T[it*2+0]; v.v=T[it*2+1]; } else { v.u=0; v.v=0; }
                         v.tx=v.ty=v.tz=0; v.tw=1;
                         v.r=v.g=v.b=v.a=1.0f;  // OBJ doesn't support vertex colors, default to white
+                        v.u2=0.0f; v.v2=0.0f;  // UV2 for lightmap (default 0, set by lightmap baker)
                         oi=(uint32_t)out.vertices.size(); out.vertices.push_back(v); map.emplace(key,oi);
                     } else oi=itK->second;
                     out.indices.push_back(oi);

@@ -469,7 +469,8 @@ void CSceneRenderer::createPipeline()
         { EVertexSemantic::Normal,   0, EVertexFormat::Float3, 12, 0 },
         { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 24, 0 },
         { EVertexSemantic::Tangent,  0, EVertexFormat::Float4, 32, 0 },
-        { EVertexSemantic::Color,    0, EVertexFormat::Float4, 48, 0 }
+        { EVertexSemantic::Color,    0, EVertexFormat::Float4, 48, 0 },
+        { EVertexSemantic::Texcoord, 1, EVertexFormat::Float2, 64, 0 }  // UV2 for lightmap
     };
 
     // ============================================

@@ -102,6 +102,7 @@ static void AppendPrimitive(const cgltf_primitive* prim,
         v.u=uv[0]; v.v=uv[1];
         v.tx=t[0]; v.ty=t[1]; v.tz=t[2]; v.tw=t[3]; // 若 glTF 带切线，直接拿来用
         v.r=c[0]; v.g=c[1]; v.b=c[2]; v.a=c[3];     // Vertex color (default white if not present)
+        v.u2=0.0f; v.v2=0.0f;  // UV2 for lightmap (default 0, set by lightmap baker)
 
         if (flipZ) ApplyFlipLH(v);
         verts[i]=v;

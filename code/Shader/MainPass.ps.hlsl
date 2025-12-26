@@ -3,6 +3,7 @@
 
 #include "ClusteredShading.hlsl"      // Clustered point light support
 #include "VolumetricLightmap.hlsl"    // Volumetric Lightmap (Per-Pixel GI)
+#include "Lightmap2D.hlsl"            // 2D Lightmap (UV2-based)
 
 // Material textures (per-object, contiguous t0-t3)
 Texture2D gAlbedo : register(t0);
@@ -45,6 +46,7 @@ cbuffer CB_Frame : register(b0) {
 static const int DIFFUSE_GI_VOLUMETRIC_LIGHTMAP = 0;
 static const int DIFFUSE_GI_GLOBAL_IBL = 1;
 static const int DIFFUSE_GI_NONE = 2;
+static const int DIFFUSE_GI_LIGHTMAP_2D = 3;
 
 cbuffer CB_Object : register(b1) {
     float4x4 gWorld;
@@ -85,6 +87,7 @@ struct PSIn {
     float4 posLS1 : TEXCOORD6;
     float4 posLS2 : TEXCOORD7;
     float4 color : COLOR0;  // Vertex color (moved from TEXCOORD9 to COLOR0)
+    float2 uv2 : TEXCOORD8;  // UV2 for lightmap
 };
 
 // ============================================
@@ -297,6 +300,7 @@ float4 main(PSIn i) : SV_Target {
     // Mode 0: Volumetric Lightmap (Per-Pixel GI)
     // Mode 1: Global IBL (Skybox Irradiance)
     // Mode 2: None (Disabled, for baking)
+    // Mode 3: 2D Lightmap (UV2-based)
     // ============================================
     float3 diffuseIBL = float3(0, 0, 0);
 
@@ -311,6 +315,12 @@ float4 main(PSIn i) : SV_Target {
         // Global IBL mode (Skybox Irradiance)
         float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
         diffuseIBL = irradiance * albedo;
+    } else if (gDiffuseGIMode == DIFFUSE_GI_LIGHTMAP_2D) {
+        // 2D Lightmap mode (UV2-based)
+        if (IsLightmap2DEnabled()) {
+            float3 lmIrradiance = SampleLightmap2D(i.uv2, gSamp);
+            diffuseIBL = lmIrradiance * albedo;
+        }
     }
 
     // else: DIFFUSE_GI_NONE - diffuseIBL stays at 0 (no diffuse GI)

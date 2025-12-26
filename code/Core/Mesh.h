@@ -10,6 +10,7 @@ struct SVertexPNT {
     float tx, ty, tz;
     float tw;
     float r, g, b, a;  // Vertex color (for baked AO or other per-vertex data)
+    float u2, v2;      // UV2 for lightmap (optional, 0 if unused)
 };
 
 struct SMeshCPU_PNT {

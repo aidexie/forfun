@@ -3,6 +3,7 @@
 #include "Engine/Scene.h"
 #include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Engine/Rendering/VolumetricLightmap.h"
+#include "Engine/Rendering/Lightmap/LightmapBaker.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"  // FFPath namespace
 #include <windows.h>
@@ -10,6 +11,11 @@
 
 static bool s_showWindow = true;  // Default: hidden (user opens via menu)
 static bool s_isBaking = false;    // Volumetric Lightmap baking state
+static bool s_is2DLightmapBaking = false;  // 2D Lightmap baking state
+
+// 2D Lightmap baker and config
+static CLightmapBaker s_lightmap2DBaker;
+static CLightmapBaker::Config s_lightmap2DConfig;
 
 // Bake configuration state (persisted across frames)
 static SLightmapBakeConfig s_bakeConfig;
@@ -77,7 +83,7 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         ImGui::Separator();
 
         // Diffuse GI Mode dropdown
-        const char* diffuseGIModes[] = { "Volumetric Lightmap", "Global IBL", "None" };
+        const char* diffuseGIModes[] = { "Volumetric Lightmap", "Global IBL", "None", "2D Lightmap" };
         int currentMode = static_cast<int>(settings.diffuseGIMode);
         ImGui::PushItemWidth(200);
         if (ImGui::Combo("Diffuse GI Mode", &currentMode, diffuseGIModes, IM_ARRAYSIZE(diffuseGIModes))) {
@@ -90,9 +96,10 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(
-                "Volumetric Lightmap: Per-pixel GI from baked lightmap\n"
+                "Volumetric Lightmap: Per-pixel GI from baked 3D lightmap\n"
                 "Global IBL: Use skybox irradiance (ambient)\n"
-                "None: Disable diffuse GI (for baking first pass)");
+                "None: Disable diffuse GI (for baking first pass)\n"
+                "2D Lightmap: UV2-based baked diffuse GI texture");
         }
 
         ImGui::Spacing();
@@ -259,6 +266,75 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Visualize the octree brick structure.\nColors indicate subdivision levels:\nRed=0, Orange=1, Yellow=2, Green=3, etc.");
             }
+        }
+
+        ImGui::Spacing();
+        ImGui::Spacing();
+
+        // ============================================
+        // 2D Lightmap Section
+        // ============================================
+        ImGui::Text("2D Lightmap (UV2-based)");
+        ImGui::Separator();
+
+        // Atlas settings
+        ImGui::Text("Atlas Settings:");
+        ImGui::PushItemWidth(150);
+        ImGui::SliderInt("Resolution##LM2D", &s_lightmap2DConfig.atlasConfig.resolution, 256, 4096);
+        ImGui::SliderInt("Texels/Unit##LM2D", &s_lightmap2DConfig.atlasConfig.texelsPerUnit, 4, 64);
+        ImGui::SliderInt("Padding##LM2D", &s_lightmap2DConfig.atlasConfig.padding, 1, 8);
+        ImGui::PopItemWidth();
+
+        ImGui::Spacing();
+
+        // Bake settings
+        ImGui::Text("Bake Settings:");
+        ImGui::PushItemWidth(150);
+        ImGui::SliderInt("Samples/Texel##LM2D", &s_lightmap2DConfig.bakeConfig.samplesPerTexel, 16, 512);
+        ImGui::SliderInt("Max Bounces##LM2D", &s_lightmap2DConfig.bakeConfig.maxBounces, 1, 8);
+        ImGui::SliderFloat("Sky Intensity##LM2D", &s_lightmap2DConfig.bakeConfig.skyIntensity, 0.0f, 5.0f, "%.2f");
+        ImGui::PopItemWidth();
+
+        ImGui::Spacing();
+
+        // Bake button
+        if (s_is2DLightmapBaking) {
+            ImGui::BeginDisabled();
+            ImGui::Button("Baking 2D Lightmap...", ImVec2(200, 30));
+            ImGui::EndDisabled();
+        } else {
+            if (ImGui::Button("Bake 2D Lightmap", ImVec2(200, 30))) {
+                s_is2DLightmapBaking = true;
+                CFFLog::Info("[Lightmap2D] Starting 2D lightmap bake...");
+
+                // Set progress callback
+                s_lightmap2DBaker.SetProgressCallback([](float progress, const char* stage) {
+                    // Progress is logged by the baker itself
+                });
+
+                // Execute bake
+                if (s_lightmap2DBaker.Bake(CScene::Instance(), s_lightmap2DConfig)) {
+                    CFFLog::Info("[Lightmap2D] Bake complete! Atlas size: %dx%d",
+                                s_lightmap2DBaker.GetAtlasWidth(),
+                                s_lightmap2DBaker.GetAtlasHeight());
+
+                    // TODO: Create GPU texture and bind to shader
+                    // RHI::TexturePtr lightmapTex = s_lightmap2DBaker.CreateGPUTexture();
+                } else {
+                    CFFLog::Error("[Lightmap2D] Bake failed!");
+                }
+
+                s_is2DLightmapBaking = false;
+            }
+        }
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Bakes diffuse GI into a 2D texture atlas.\n"
+                "Requires UV2 coordinates on meshes.\n"
+                "Uses CPU path tracing for irradiance calculation.");
         }
 
         ImGui::Spacing();

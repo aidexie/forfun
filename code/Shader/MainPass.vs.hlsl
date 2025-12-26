@@ -38,6 +38,7 @@ struct VSIn {
     float2 uv : TEXCOORD0;
     float4 t : TANGENT;
     float4 color : COLOR;  // Vertex color (for baked AO or other per-vertex data)
+    float2 uv2 : TEXCOORD1;  // UV2 for lightmap
 };
 
 struct VSOut {
@@ -50,6 +51,7 @@ struct VSOut {
     float4 posLS1 : TEXCOORD6;
     float4 posLS2 : TEXCOORD7;
     float4 color : COLOR0;  // Vertex color (moved from TEXCOORD9 to COLOR0)
+    float2 uv2 : TEXCOORD8;  // UV2 for lightmap
 };
 
 VSOut main(VSIn i) {
@@ -61,6 +63,7 @@ VSOut main(VSIn i) {
     o.TBN = float3x3(tWS, bWS, nWS);
     o.posWS = posWS.xyz;
     o.uv = i.uv;
+    o.uv2 = i.uv2;  // Pass UV2 to pixel shader
     o.color = i.color;  // Pass vertex color to pixel shader
     float4 posV = mul(posWS, gView);
     o.posH = mul(posV, gProj);
