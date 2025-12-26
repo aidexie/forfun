@@ -764,8 +764,8 @@ void CDX12CommandList::BindPendingResources() {
                     // Note: Unbound slots will have garbage, but shader won't read them if slot is unused
                 }
 
-                // Bind the contiguous staging region as the descriptor table
-                m_commandList->SetGraphicsRootDescriptorTable(7, staging.gpuHandle);
+                // Bind the contiguous staging region as the descriptor table (parameter 11)
+                m_commandList->SetGraphicsRootDescriptorTable(11, staging.gpuHandle);
             } else {
                 CFFLog::Error("[DX12CommandList] Failed to allocate SRV staging descriptors");
             }
@@ -802,8 +802,8 @@ void CDX12CommandList::BindPendingResources() {
                     // Note: Unbound slots will have garbage, but shader won't read them if slot is unused
                 }
 
-                // Bind the contiguous staging region as the sampler descriptor table
-                m_commandList->SetGraphicsRootDescriptorTable(9, staging.gpuHandle);
+                // Bind the contiguous staging region as the sampler descriptor table (parameter 13)
+                m_commandList->SetGraphicsRootDescriptorTable(13, staging.gpuHandle);
             } else {
                 CFFLog::Error("[DX12CommandList] Failed to allocate Sampler staging descriptors");
             }

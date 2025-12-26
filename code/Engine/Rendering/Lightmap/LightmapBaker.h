@@ -44,23 +44,13 @@ public:
     bool BakeIrradiance(CScene& scene, const SLightmap2DBakeConfig& config);
 
     // ============================================
-    // Post-processing
-    // ============================================
-
-    // Dilate invalid texels to prevent seam bleeding
-    void Dilate(int radius = 4);
-
-    // ============================================
     // Results
     // ============================================
 
-    // Get baked lightmap texture (CPU data)
-    const std::vector<DirectX::XMFLOAT4>& GetIrradianceData() const { return m_irradiance; }
+    // Get baked lightmap texture (GPU texture from GPU baker)
+    RHI::ITexture* GetLightmapTexture() const { return m_gpuTexture.get(); }
     int GetAtlasWidth() const { return m_atlasWidth; }
     int GetAtlasHeight() const { return m_atlasHeight; }
-
-    // Create GPU texture from baked data
-    RHI::TexturePtr CreateGPUTexture();
 
     // Get lightmap info for each MeshRenderer (for shader binding)
     const std::vector<SLightmapInfo>& GetLightmapInfos() const { return m_lightmapInfos; }
@@ -77,7 +67,7 @@ private:
     // Baking data
     CLightmapAtlasBuilder m_atlasBuilder;
     CLightmapRasterizer m_rasterizer;
-    std::vector<DirectX::XMFLOAT4> m_irradiance;
+    RHI::TexturePtr m_gpuTexture;  // GPU-baked lightmap texture
     std::vector<SLightmapInfo> m_lightmapInfos;
 
     int m_atlasWidth = 0;

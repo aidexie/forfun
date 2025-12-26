@@ -133,12 +133,9 @@ float3 EvaluateSHIrradiance(SHCoeffsL2 sh, float3 normal)
     // For diffuse irradiance from radiance stored in SH:
     // E(n) = A_0 * Y_0^0 * L_00 + A_1 * (Y_1^-1 * L_1-1 + Y_1^0 * L_10 + Y_1^1 * L_11)
 
-    // Simplified coefficients after incorporating everything:
-    // c0 = 0.886227 (sqrt(π/4) for L0)
-    // c1 = 1.023327 (sqrt(π/3) for L1)
 
-    float c0 = 0.886227f;   // L0 coefficient
-    float c1 = 1.023327f;   // L1 coefficient
+    float c0 = 0.282095f;   // L0 coefficient
+    float c1 = 0.488603f;   // L1 coefficient
 
     float3 irradiance = float3(0, 0, 0);
 

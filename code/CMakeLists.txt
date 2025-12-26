@@ -331,6 +331,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapRasterizer.cpp
     ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapBaker.h
     ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapBaker.cpp
+    ${CODE_PATH}/Engine/Rendering/Lightmap/Lightmap2DGPUBaker.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/Lightmap2DGPUBaker.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h

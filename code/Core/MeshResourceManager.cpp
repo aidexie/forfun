@@ -18,10 +18,12 @@ void CMeshResourceManager::CacheMeshForRayTracing(const SMeshCPU_PNT& cpu, const
     rtData.vertexCount = static_cast<uint32_t>(cpu.vertices.size());
     rtData.indexCount = static_cast<uint32_t>(cpu.indices.size());
 
-    // Extract positions
+    // Extract positions and normals
     rtData.positions.reserve(cpu.vertices.size());
+    rtData.normals.reserve(cpu.vertices.size());
     for (const auto& v : cpu.vertices) {
         rtData.positions.push_back(DirectX::XMFLOAT3(v.px, v.py, v.pz));
+        rtData.normals.push_back(DirectX::XMFLOAT3(v.nx, v.ny, v.nz));
     }
 
     // Copy indices

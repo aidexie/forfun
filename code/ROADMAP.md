@@ -47,10 +47,12 @@
 3.1 Lightmap ──────────────────────────────────────┐
                                                     │
 3.2 Deferred (G-Buffer) ──► 3.3 后处理 (SSAO/SSR) │
+                            │                       │
+                            └──► 3.4 RTGI ─────────┤
                                                     │
-3.4 Instancing ────────────────────────────────────┤
+3.5 Instancing ────────────────────────────────────┤
                                                     │
-3.5 RDG ──► 3.6 Descriptor Set ──► 3.7 Vulkan ────┘
+3.6 RDG ──► 3.7 Descriptor Set ──► 3.8 Vulkan ────┘
 ```
 
 ### 3.1 Lightmap 支持 - 3-4天
@@ -82,13 +84,36 @@ Hybrid Deferred: Forward+ 主渲染 + G-Buffer Pre-pass
 
 **验收标准**: TestBloom, TestSSAO, TestSSR 通过
 
-### 3.4 GPU Instancing - 2-3天
+### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
+
+依赖 3.2 G-Buffer，渐进式实现实时全局光照。
+
+**阶段 A: SSGI** (屏幕空间 GI) - 3-4天
+- 屏幕空间光线步进，采样击中点颜色
+- 仅需 G-Buffer，无额外数据结构
+- 限制：屏幕外物体无贡献
+
+**阶段 B: DDGI** (Dynamic Diffuse GI) - 1-2周
+- 实时更新 Light Probe 网格
+- 复用 DXR 基础设施
+- 每探针 64-256 rays/帧 + 时间滤波
+- 存储: Irradiance (8×8 八面体) + Depth
+
+**阶段 C: Lumen-like** (可选，研究性) - 2-3周
+- Mesh SDF 预计算
+- 软件光追 (Sphere Trace SDF)
+- Radiance Cache 探针系统
+- 混合：近距离屏幕追踪 + 远距离 SDF
+
+**验收标准**: TestSSGI, TestDDGI 通过
+
+### 3.5 GPU Instancing - 2-3天
 
 单次 Draw Call 渲染多个相同 Mesh 实例，Per-instance Transform + Material ID。
 
 **验收标准**: TestInstancing 通过 (1000 立方体, 1 Draw Call)
 
-### 3.5 Render Dependency Graph (RDG) - 1周
+### 3.6 Render Dependency Graph (RDG) - 1周
 
 自动化资源屏障和 Pass 依赖管理。
 
@@ -96,13 +121,13 @@ Hybrid Deferred: Forward+ 主渲染 + G-Buffer Pre-pass
 
 **验收标准**: TestRDG 通过
 
-### 3.6 Descriptor Set 抽象 - 1周
+### 3.7 Descriptor Set 抽象 - 1周
 
 统一 DX12 Root Signature / Vulkan Descriptor Set 管理。
 
 **验收标准**: TestDescriptorSet 通过
 
-### 3.7 Vulkan 后端 - 2周
+### 3.8 Vulkan 后端 - 2周
 
 添加 Vulkan 渲染后端，验证 RHI 抽象。
 

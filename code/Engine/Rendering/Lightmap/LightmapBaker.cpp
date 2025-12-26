@@ -1,9 +1,10 @@
 #include "LightmapBaker.h"
 #include "LightmapUV2.h"
+#include "Lightmap2DGPUBaker.h"
 #include "Engine/Scene.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
-#include "Engine/Rendering/RayTracing/PathTraceBaker.h"
+#include "Engine/Rendering/RayTracing/SceneGeometryExport.h"
 #include "Core/FFLog.h"
 #include "Core/Mesh.h"
 #include <algorithm>
@@ -54,10 +55,6 @@ bool CLightmapBaker::Bake(CScene& scene, const Config& config)
         return false;
     }
 
-    // Step 5: Post-process (dilation)
-    reportProgress(0.95f, "Post-processing (dilation)");
-    Dilate(4);
-
     reportProgress(1.0f, "Bake complete");
     return true;
 }
@@ -89,12 +86,16 @@ bool CLightmapBaker::PackAtlas(CScene& scene, const SLightmapAtlasConfig& config
         // TODO: Check if mesh is marked as static for lightmapping
         // For now, include all meshes
 
-        // Get world-space AABB
-        XMMATRIX worldMatrix = transform->WorldMatrix();
+        // Get local-space AABB from mesh resource
+        XMFLOAT3 boundsMin, boundsMax;
+        if (!meshRenderer->GetLocalBounds(boundsMin, boundsMax)) {
+            // Fallback to unit cube if bounds not available
+            boundsMin = {-0.5f, -0.5f, -0.5f};
+            boundsMax = {0.5f, 0.5f, 0.5f};
+        }
 
-        // Simple AABB estimation based on unit cube transformed
-        XMFLOAT3 boundsMin = {-0.5f, -0.5f, -0.5f};
-        XMFLOAT3 boundsMax = {0.5f, 0.5f, 0.5f};
+        // Get world-space AABB by transforming local bounds
+        XMMATRIX worldMatrix = transform->WorldMatrix();
 
         // Transform corners and find new AABB
         XMFLOAT3 corners[8] = {
@@ -168,6 +169,7 @@ bool CLightmapBaker::Rasterize(CScene& scene)
     const auto& atlas = m_atlasBuilder.GetAtlas();
     const auto& entries = atlas.GetEntries();
     auto& world = scene.GetWorld();
+    auto& meshCache = CRayTracingMeshCache::Instance();
 
     for (size_t i = 0; i < entries.size(); i++) {
         const auto& entry = entries[i];
@@ -178,27 +180,34 @@ bool CLightmapBaker::Rasterize(CScene& scene)
         auto* transform = obj->GetComponent<STransform>();
         if (!meshRenderer || !transform) continue;
 
-        // TODO: Get actual mesh data with UV2
-        // For now, create a simple placeholder
-        // In production, we'd get this from MeshResourceManager
+        // Get mesh data from ray tracing cache
+        // Note: Mesh must be loaded with cacheForRayTracing=true
+        const SRayTracingMeshData* meshData = meshCache.GetMeshData(meshRenderer->path, 0);
+        if (!meshData) {
+            CFFLog::Warning("[LightmapBaker] Mesh data not cached: %s (skipping)", meshRenderer->path.c_str());
+            continue;
+        }
 
-        // Create simple quad as placeholder
-        std::vector<XMFLOAT3> positions = {
-            {-0.5f, 0.0f, -0.5f},
-            { 0.5f, 0.0f, -0.5f},
-            { 0.5f, 0.0f,  0.5f},
-            {-0.5f, 0.0f,  0.5f},
-        };
-        std::vector<XMFLOAT3> normals = {
-            {0, 1, 0}, {0, 1, 0}, {0, 1, 0}, {0, 1, 0}
-        };
-        std::vector<XMFLOAT2> uv2 = {
-            {0, 0}, {1, 0}, {1, 1}, {0, 1}
-        };
-        std::vector<uint32_t> indices = {0, 1, 2, 0, 2, 3};
+        // Generate UV2 for this mesh using xatlas
+        SUV2GenerationResult uv2Result = GenerateUV2(
+            meshData->positions,
+            meshData->normals,
+            std::vector<XMFLOAT2>(meshData->positions.size(), XMFLOAT2{0, 0}),  // No UV1 needed
+            meshData->indices,
+            m_atlasBuilder.GetAtlas().GetAtlasResolution() / 4  // texelsPerUnit based on atlas
+        );
 
+        if (!uv2Result.success) {
+            CFFLog::Warning("[LightmapBaker] UV2 generation failed for mesh: %s", meshRenderer->path.c_str());
+            continue;
+        }
+
+        // Rasterize using generated UV2 data
         m_rasterizer.RasterizeMesh(
-            positions, normals, uv2, indices,
+            uv2Result.positions,
+            uv2Result.normals,
+            uv2Result.uv2,
+            uv2Result.indices,
             transform->WorldMatrix(),
             entry.atlasX, entry.atlasY,
             entry.width, entry.height
@@ -213,124 +222,40 @@ bool CLightmapBaker::Rasterize(CScene& scene)
 
 bool CLightmapBaker::BakeIrradiance(CScene& scene, const SLightmap2DBakeConfig& config)
 {
-    const auto& texels = m_rasterizer.GetTexels();
-    int texelCount = static_cast<int>(texels.size());
+    // Use GPU baker (DXR-based)
+    CLightmap2DGPUBaker gpuBaker;
 
-    m_irradiance.resize(texelCount);
-
-    // Initialize path tracer
-    CPathTraceBaker baker;
-    SPathTraceConfig ptConfig;
-    ptConfig.samplesPerVoxel = config.samplesPerTexel;
-    ptConfig.maxBounces = config.maxBounces;
-
-    if (!baker.Initialize(scene, ptConfig)) {
-        CFFLog::Error("[LightmapBaker] Failed to initialize path tracer");
+    if (!gpuBaker.Initialize()) {
+        CFFLog::Error("[LightmapBaker] Failed to initialize GPU baker");
         return false;
     }
 
-    // Bake each valid texel
-    int validCount = 0;
-    int progressInterval = std::max(1, texelCount / 100);
-
-    for (int i = 0; i < texelCount; i++) {
-        if (!texels[i].valid) {
-            m_irradiance[i] = {0, 0, 0, 0};
-            continue;
-        }
-
-        // Bake irradiance at this texel
-        std::array<XMFLOAT3, 9> sh;
-        baker.BakeVoxel(texels[i].worldPos, scene, sh);
-
-        // Convert SH to irradiance in the normal direction
-        // For diffuse, we only need the DC term (L0) and directional term (L1)
-        // E(n) ≈ π * (c0 * Y0 + c1 * Y1)
-        // Simplified: just use L0 term for now
-        float irradianceScale = 3.14159f;
-        m_irradiance[i] = {
-            sh[0].x * irradianceScale,
-            sh[0].y * irradianceScale,
-            sh[0].z * irradianceScale,
-            1.0f
-        };
-
-        validCount++;
-
-        // Report progress
-        if (i % progressInterval == 0) {
-            float progress = 0.30f + 0.65f * (static_cast<float>(i) / texelCount);
-            reportProgress(progress, "Baking irradiance");
-        }
+    if (!gpuBaker.IsAvailable()) {
+        CFFLog::Error("[LightmapBaker] DXR not available for GPU baking");
+        return false;
     }
 
-    CFFLog::Info("[LightmapBaker] Baked %d texels", validCount);
-    baker.Shutdown();
+    // Configure GPU bake
+    SLightmap2DGPUBakeConfig gpuConfig;
+    gpuConfig.samplesPerTexel = config.samplesPerTexel;
+    gpuConfig.maxBounces = config.maxBounces;
+    gpuConfig.skyIntensity = 1.0f;
+    gpuConfig.progressCallback = [this](float progress, const char* stage) {
+        // Map GPU baker progress (0-1) to our progress range (0.30 - 0.95)
+        float mappedProgress = 0.30f + progress * 0.65f;
+        reportProgress(mappedProgress, stage);
+    };
 
+    // Bake using GPU
+    m_gpuTexture = gpuBaker.BakeLightmap(scene, m_rasterizer, gpuConfig);
+
+    if (!m_gpuTexture) {
+        CFFLog::Error("[LightmapBaker] GPU baking failed");
+        return false;
+    }
+
+    CFFLog::Info("[LightmapBaker] GPU baking complete (%dx%d)", m_atlasWidth, m_atlasHeight);
+
+    gpuBaker.Shutdown();
     return true;
-}
-
-void CLightmapBaker::Dilate(int radius)
-{
-    auto& texels = m_rasterizer.GetTexelsMutable();
-    std::vector<XMFLOAT4> dilated = m_irradiance;
-
-    int width = m_rasterizer.GetWidth();
-    int height = m_rasterizer.GetHeight();
-
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            int idx = y * width + x;
-            if (texels[idx].valid) continue;  // Already valid
-
-            // Search for nearest valid neighbor
-            float accumR = 0, accumG = 0, accumB = 0;
-            int count = 0;
-
-            for (int r = 1; r <= radius && count == 0; r++) {
-                for (int dy = -r; dy <= r; dy++) {
-                    for (int dx = -r; dx <= r; dx++) {
-                        // Only check border of current radius
-                        if (std::abs(dx) != r && std::abs(dy) != r) continue;
-
-                        int nx = x + dx;
-                        int ny = y + dy;
-                        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-
-                        int nidx = ny * width + nx;
-                        if (texels[nidx].valid) {
-                            accumR += m_irradiance[nidx].x;
-                            accumG += m_irradiance[nidx].y;
-                            accumB += m_irradiance[nidx].z;
-                            count++;
-                        }
-                    }
-                }
-            }
-
-            if (count > 0) {
-                dilated[idx] = {
-                    accumR / count,
-                    accumG / count,
-                    accumB / count,
-                    1.0f
-                };
-            }
-        }
-    }
-
-    m_irradiance = dilated;
-}
-
-RHI::TexturePtr CLightmapBaker::CreateGPUTexture()
-{
-    if (m_irradiance.empty() || m_atlasWidth == 0 || m_atlasHeight == 0) {
-        CFFLog::Error("[LightmapBaker] No data to create GPU texture");
-        return nullptr;
-    }
-
-    // TODO: Implement GPU texture creation
-    // Need to include proper RHI headers and use CreateTexture
-    CFFLog::Info("[LightmapBaker] GPU texture creation not yet implemented");
-    return nullptr;
 }

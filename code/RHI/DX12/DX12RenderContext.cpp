@@ -1087,17 +1087,18 @@ bool CDX12RenderContext::CreateRootSignatures() {
     ID3D12Device* device = CDX12Context::Instance().GetDevice();
 
     // Graphics Root Signature
-    // Parameter 0-6: Root CBV b0-b6
+    // Parameter 0-10: Root CBV b0-b10
     //   b0 (PerFrame), b1 (PerObject), b2 (Material), b3 (ClusteredParams),
-    //   b4 (CB_Probes), b5 (CB_LightProbeParams), b6 (CB_VolumetricLightmap)
-    // Parameter 7: SRV Descriptor Table t0-t15
-    // Parameter 8: UAV Descriptor Table u0-u7
-    // Parameter 9: Sampler Descriptor Table s0-s7
+    //   b4 (CB_Probes), b5 (CB_LightProbeParams), b6 (CB_VolumetricLightmap),
+    //   b7 (CB_Lightmap2D), b8-b10 (reserved for future use)
+    // Parameter 11: SRV Descriptor Table t0-t24
+    // Parameter 12: UAV Descriptor Table u0-u7
+    // Parameter 13: Sampler Descriptor Table s0-s7
 
-    D3D12_ROOT_PARAMETER rootParams[10] = {};
+    D3D12_ROOT_PARAMETER rootParams[14] = {};
 
-    // CBV parameters (b0-b6)
-    for (int i = 0; i < 7; ++i) {
+    // CBV parameters (b0-b10)
+    for (int i = 0; i < 11; ++i) {
         rootParams[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         rootParams[i].Descriptor.ShaderRegister = i;
         rootParams[i].Descriptor.RegisterSpace = 0;
@@ -1112,10 +1113,10 @@ bool CDX12RenderContext::CreateRootSignatures() {
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    rootParams[7].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[7].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[7].DescriptorTable.pDescriptorRanges = &srvRange;
-    rootParams[7].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[11].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[11].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[11].DescriptorTable.pDescriptorRanges = &srvRange;
+    rootParams[11].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // UAV table
     D3D12_DESCRIPTOR_RANGE uavRange = {};
@@ -1125,10 +1126,10 @@ bool CDX12RenderContext::CreateRootSignatures() {
     uavRange.RegisterSpace = 0;
     uavRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    rootParams[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[8].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[8].DescriptorTable.pDescriptorRanges = &uavRange;
-    rootParams[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[12].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[12].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[12].DescriptorTable.pDescriptorRanges = &uavRange;
+    rootParams[12].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     // Sampler table
     D3D12_DESCRIPTOR_RANGE samplerRange = {};
@@ -1138,13 +1139,13 @@ bool CDX12RenderContext::CreateRootSignatures() {
     samplerRange.RegisterSpace = 0;
     samplerRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-    rootParams[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-    rootParams[9].DescriptorTable.NumDescriptorRanges = 1;
-    rootParams[9].DescriptorTable.pDescriptorRanges = &samplerRange;
-    rootParams[9].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[13].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[13].DescriptorTable.NumDescriptorRanges = 1;
+    rootParams[13].DescriptorTable.pDescriptorRanges = &samplerRange;
+    rootParams[13].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-    rootSigDesc.NumParameters = 10;
+    rootSigDesc.NumParameters = 14;
     rootSigDesc.pParameters = rootParams;
     rootSigDesc.NumStaticSamplers = 0;
     rootSigDesc.pStaticSamplers = nullptr;
