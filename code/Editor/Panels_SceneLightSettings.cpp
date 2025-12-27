@@ -99,8 +99,8 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
                     size_t dotPos = scenePath.find_last_of('.');
                     std::string lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
 
-                    if (!CLightmap2DManager::Instance().IsLoaded()) {
-                        if (CLightmap2DManager::Instance().LoadLightmap(lightmapPath)) {
+                    if (!CScene::Instance().GetLightmap2D().IsLoaded()) {
+                        if (CScene::Instance().GetLightmap2D().LoadLightmap(lightmapPath)) {
                             CFFLog::Info("[Lightmap2D] Auto-loaded lightmap: %s", lightmapPath.c_str());
                         } else {
                             CFFLog::Warning("[Lightmap2D] No lightmap found, mode will be disabled");
@@ -358,14 +358,14 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
                         size_t dotPos = scenePath.find_last_of('.');
                         std::string lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
 
-                        if (CLightmap2DManager::Instance().SaveLightmap(
+                        if (CScene::Instance().GetLightmap2D().SaveLightmap(
                                 lightmapPath,
                                 infos,
                                 s_lightmap2DBaker.GetLightmapTexture())) {
                             CFFLog::Info("[Lightmap2D] Saved lightmap to: %s", lightmapPath.c_str());
 
                             // Auto-load for immediate preview
-                            CLightmap2DManager::Instance().LoadLightmap(lightmapPath);
+                            CScene::Instance().GetLightmap2D().LoadLightmap(lightmapPath);
                         } else {
                             CFFLog::Error("[Lightmap2D] Failed to save lightmap");
                         }

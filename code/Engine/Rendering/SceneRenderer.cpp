@@ -3,7 +3,6 @@
 #include "ShadowPass.h"
 #include "ShowFlags.h"
 #include "ReflectionProbeManager.h"
-#include "Lightmap/Lightmap2DManager.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
@@ -373,23 +372,8 @@ void CSceneRenderer::Render(
     auto& volumetricLightmap = scene.GetVolumetricLightmap();
     volumetricLightmap.Bind(cmdList);
 
-    // Bind 2D Lightmap (t16=atlas, t17=scaleOffsets, b7=CB_Lightmap2D)
-    auto& lightmap2D = CLightmap2DManager::Instance();
-    if (lightmap2D.IsLoaded()) {
-        cmdList->SetShaderResource(EShaderStage::Pixel, 16, lightmap2D.GetAtlasTexture());
-        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 17, lightmap2D.GetScaleOffsetBuffer());
-
-        // CB_Lightmap2D (b7): enabled flag + intensity
-        struct CB_Lightmap2D {
-            int enabled;
-            float intensity;
-            float pad[2];
-        };
-        CB_Lightmap2D cb{};
-        cb.enabled = 1;
-        cb.intensity = 1.0f;
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D));
-    }
+    // Bind 2D Lightmap (t16, t17, b7)
+    scene.GetLightmap2D().Bind(cmdList);
 
     // Bind sampler (s0)
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());

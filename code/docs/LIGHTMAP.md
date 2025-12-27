@@ -317,32 +317,38 @@ struct SLightmapDataHeader {
 
 ### Save/Load System
 
-**CLightmap2DManager** (singleton) manages runtime lightmap data:
+**CLightmap2DManager** (owned by CScene) manages runtime lightmap data:
 
 ```cpp
 // Save after baking
-CLightmap2DManager::Instance().SaveLightmap(
+CScene::Instance().GetLightmap2D().SaveLightmap(
     "scenes/MyScene.lightmap",
     lightmapInfos,
     atlasTexture
 );
 
 // Auto-load when enabling Lightmap2D mode
-CLightmap2DManager::Instance().LoadLightmap("scenes/MyScene.lightmap");
+CScene::Instance().GetLightmap2D().LoadLightmap("scenes/MyScene.lightmap");
 
 // Query
-bool isLoaded = CLightmap2DManager::Instance().IsLoaded();
-RHI::ITexture* atlas = CLightmap2DManager::Instance().GetAtlasTexture();
-RHI::IBuffer* buffer = CLightmap2DManager::Instance().GetScaleOffsetBuffer();
+bool isLoaded = CScene::Instance().GetLightmap2D().IsLoaded();
+RHI::ITexture* atlas = CScene::Instance().GetLightmap2D().GetAtlasTexture();
+RHI::IBuffer* buffer = CScene::Instance().GetLightmap2D().GetScaleOffsetBuffer();
 ```
 
 **Binding in SceneRenderer:**
 ```cpp
+// Bind 2D Lightmap (t16, t17, b7)
+scene.GetLightmap2D().Bind(cmdList);
+```
+
+The Bind() method encapsulates:
+```cpp
 // t16: Atlas texture
-cmdList->SetShaderResource(EShaderStage::Pixel, 16, lightmap2D.GetAtlasTexture());
+cmdList->SetShaderResource(EShaderStage::Pixel, 16, m_atlasTexture.get());
 
 // t17: ScaleOffset structured buffer
-cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 17, lightmap2D.GetScaleOffsetBuffer());
+cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
 
 // b7: CB_Lightmap2D (enabled flag + intensity)
 CB_Lightmap2D cb{};

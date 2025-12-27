@@ -5,6 +5,7 @@
 #include "Core/TextureManager.h"
 #include "RHI/RHIManager.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/ICommandList.h"
 #include <fstream>
 #include <filesystem>
 
@@ -22,12 +23,30 @@ struct SLightmapDataHeader {
 };
 
 // ============================================
-// Singleton
+// Bind
 // ============================================
 
-CLightmap2DManager& CLightmap2DManager::Instance() {
-    static CLightmap2DManager instance;
-    return instance;
+void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
+    if (!m_isLoaded || !cmdList) {
+        return;
+    }
+
+    // Bind t16: Atlas texture
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 16, m_atlasTexture.get());
+
+    // Bind t17: ScaleOffset structured buffer
+    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
+
+    // Bind b7: CB_Lightmap2D (enabled flag + intensity)
+    struct CB_Lightmap2D {
+        int enabled;
+        float intensity;
+        float pad[2];
+    };
+    CB_Lightmap2D cb{};
+    cb.enabled = 1;
+    cb.intensity = 1.0f;
+    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D));
 }
 
 // ============================================

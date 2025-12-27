@@ -6,6 +6,7 @@
 #include "Rendering/ReflectionProbeManager.h"
 #include "Rendering/LightProbeManager.h"
 #include "Rendering/VolumetricLightmap.h"
+#include "Rendering/Lightmap/Lightmap2DManager.h"
 #include "SceneLightSettings.h"
 #include "Camera.h"
 
@@ -74,6 +75,10 @@ public:
     CVolumetricLightmap& GetVolumetricLightmap() { return m_volumetricLightmap; }
     const CVolumetricLightmap& GetVolumetricLightmap() const { return m_volumetricLightmap; }
 
+    // 2D Lightmap access
+    CLightmap2DManager& GetLightmap2D() { return m_lightmap2D; }
+    const CLightmap2DManager& GetLightmap2D() const { return m_lightmap2D; }
+
     // Light settings access
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
@@ -107,6 +112,7 @@ private:
     CReflectionProbeManager m_probeManager;
     CLightProbeManager m_lightProbeManager;
     CVolumetricLightmap m_volumetricLightmap;
+    CLightmap2DManager m_lightmap2D;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
 

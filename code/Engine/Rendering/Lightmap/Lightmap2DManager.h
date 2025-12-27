@@ -4,15 +4,21 @@
 #include <vector>
 #include <string>
 
+// Forward declarations
+namespace RHI {
+    class ICommandList;
+}
+
 // ============================================
 // Lightmap 2D Manager
 // ============================================
 // Manages runtime 2D lightmap data (atlas texture + per-object scaleOffset)
-// Singleton pattern for global access
+// Owned by CScene
 
 class CLightmap2DManager {
 public:
-    static CLightmap2DManager& Instance();
+    CLightmap2DManager() = default;
+    ~CLightmap2DManager() = default;
 
     // ============================================
     // Save (called after baking in Editor)
@@ -39,6 +45,13 @@ public:
     void UnloadLightmap();
 
     // ============================================
+    // Bind to command list (called in SceneRenderer)
+    // ============================================
+
+    // Bind lightmap resources to shader (t16, t17, b7)
+    void Bind(RHI::ICommandList* cmdList);
+
+    // ============================================
     // Query
     // ============================================
 
@@ -51,13 +64,6 @@ public:
     int GetLightmapInfoCount() const { return static_cast<int>(m_lightmapInfos.size()); }
 
 private:
-    CLightmap2DManager() = default;
-    ~CLightmap2DManager() = default;
-
-    // Non-copyable
-    CLightmap2DManager(const CLightmap2DManager&) = delete;
-    CLightmap2DManager& operator=(const CLightmap2DManager&) = delete;
-
     // Save helpers
     bool SaveLightmapData(const std::string& dataPath, const std::vector<SLightmapInfo>& infos);
     bool SaveAtlasTexture(const std::string& atlasPath, RHI::ITexture* texture);
