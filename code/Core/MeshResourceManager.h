@@ -20,9 +20,11 @@ public:
     // Supports .obj and .gltf files
     // For glTF files with multiple sub-meshes, returns a vector
     // If cacheForRayTracing is true, also stores mesh data in CRayTracingMeshCache
+    // If generateLightmapUV2 is true, generates UV2 coordinates using xatlas
     std::vector<std::shared_ptr<GpuMeshResource>> GetOrLoad(
         const std::string& path,
-        bool cacheForRayTracing = false
+        bool cacheForRayTracing = false,
+        bool generateLightmapUV2 = false
     );
 
     // Remove unused resources from cache (resources only held by weak_ptr)

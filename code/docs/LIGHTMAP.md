@@ -49,8 +49,9 @@ Engine/Rendering/Lightmap/
 ├── LightmapUV2.h/cpp          # xatlas UV2 generation
 ├── LightmapAtlas.h/cpp        # Atlas packing (row-based algorithm)
 ├── LightmapRasterizer.h/cpp   # Barycentric triangle rasterization
-├── LightmapBaker.h/cpp        # CPU baking orchestration (legacy)
-└── Lightmap2DGPUBaker.h/cpp   # GPU DXR baking (recommended)
+├── LightmapBaker.h/cpp        # Main orchestration (UV2→Atlas→Raster→Bake)
+├── Lightmap2DGPUBaker.h/cpp   # GPU DXR baking backend
+└── Lightmap2DManager.h/cpp    # Runtime lightmap data manager (singleton)
 
 Shader/
 ├── DXR/Lightmap2DBake.hlsl    # DXR ray tracing shader
@@ -223,23 +224,51 @@ int validCount = rasterizer.GetValidTexelCount();
 ### Shader Include (Lightmap2D.hlsl)
 
 ```hlsl
-// Resources (t16, b7)
+// Resources
 Texture2D<float4> g_Lightmap2D : register(t16);
-SamplerState g_LightmapSampler : register(s3);
+StructuredBuffer<float4> g_LightmapScaleOffsets : register(t17);
 
 cbuffer CB_Lightmap2D : register(b7) {
-    float4 g_LightmapScaleOffset;  // xy: scale, zw: offset
-    int g_UseLightmap2D;
-    int3 _pad;
+    int lm_enabled;
+    float lm_intensity;
+    float2 _lm_pad;
 };
 
 // Sample lightmap in pixel shader
-float3 SampleLightmap2D(float2 uv2) {
-    if (!g_UseLightmap2D) return float3(0, 0, 0);
+float3 SampleLightmap2D(float2 uv2, int lightmapIndex, SamplerState samp) {
+    if (lm_enabled == 0 || lightmapIndex < 0) {
+        return float3(0, 0, 0);
+    }
 
-    float2 atlasUV = uv2 * g_LightmapScaleOffset.xy + g_LightmapScaleOffset.zw;
-    return g_Lightmap2D.Sample(g_LightmapSampler, atlasUV).rgb;
+    // Fetch per-object scale/offset from structured buffer
+    float4 scaleOffset = g_LightmapScaleOffsets[lightmapIndex];
+
+    // Transform UV2 with per-object scale/offset
+    float2 atlasUV = uv2 * scaleOffset.xy + scaleOffset.zw;
+
+    // Sample lightmap (HDR, linear space)
+    float3 irradiance = g_Lightmap2D.Sample(samp, atlasUV).rgb;
+
+    return irradiance * lm_intensity;
 }
+```
+
+### Per-Object Lightmap Index
+
+```cpp
+// SMeshRenderer component
+struct SMeshRenderer : public CComponent {
+    std::string path;
+    std::string materialPath;
+    int lightmapInfosIndex = -1;  // Index into CLightmap2DManager buffer
+    // ...
+};
+
+// CB_Object in shader
+cbuffer CB_Object : register(b1) {
+    // ...
+    int gLightmapIndex;  // Per-object lightmap index (-1 = no lightmap)
+};
 ```
 
 ### Vertex Format (UV2)
@@ -263,6 +292,67 @@ D3D11_INPUT_ELEMENT_DESC layout[] = {
 
 ---
 
+## Lightmap Persistence
+
+### File Format
+
+```
+SceneName.lightmap/
+├── data.bin      # Binary: SLightmapDataHeader + SLightmapInfo[]
+└── atlas.ktx2    # Atlas texture (R16G16B16A16_FLOAT)
+```
+
+**data.bin structure:**
+```cpp
+struct SLightmapDataHeader {
+    uint32_t magic = 0x4C4D3244;  // "LM2D"
+    uint32_t version = 1;
+    uint32_t infoCount = 0;
+    uint32_t atlasWidth = 0;
+    uint32_t atlasHeight = 0;
+    uint32_t reserved[3] = {0, 0, 0};
+};
+// Followed by: SLightmapInfo[infoCount]
+```
+
+### Save/Load System
+
+**CLightmap2DManager** (singleton) manages runtime lightmap data:
+
+```cpp
+// Save after baking
+CLightmap2DManager::Instance().SaveLightmap(
+    "scenes/MyScene.lightmap",
+    lightmapInfos,
+    atlasTexture
+);
+
+// Auto-load when enabling Lightmap2D mode
+CLightmap2DManager::Instance().LoadLightmap("scenes/MyScene.lightmap");
+
+// Query
+bool isLoaded = CLightmap2DManager::Instance().IsLoaded();
+RHI::ITexture* atlas = CLightmap2DManager::Instance().GetAtlasTexture();
+RHI::IBuffer* buffer = CLightmap2DManager::Instance().GetScaleOffsetBuffer();
+```
+
+**Binding in SceneRenderer:**
+```cpp
+// t16: Atlas texture
+cmdList->SetShaderResource(EShaderStage::Pixel, 16, lightmap2D.GetAtlasTexture());
+
+// t17: ScaleOffset structured buffer
+cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 17, lightmap2D.GetScaleOffsetBuffer());
+
+// b7: CB_Lightmap2D (enabled flag + intensity)
+CB_Lightmap2D cb{};
+cb.enabled = 1;
+cb.intensity = 1.0f;
+cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D));
+```
+
+---
+
 ## Known Issues
 
 ### Baking
@@ -270,8 +360,7 @@ D3D11_INPUT_ELEMENT_DESC layout[] = {
 2. **Dilation not GPU-accelerated**: Currently placeholder, needs compute shader implementation.
 
 ### Runtime
-1. **Per-mesh UV2 storage**: Need to extend mesh asset format to include UV2 coordinates.
-2. **Lightmap atlas persistence**: Need to serialize/deserialize lightmap texture and per-mesh scale/offset.
+None - persistence and binding fully implemented.
 
 ---
 
@@ -320,13 +409,14 @@ D3D11_INPUT_ELEMENT_DESC layout[] = {
 - [x] UV2 generation (xatlas integration)
 - [x] Atlas packing (row-based algorithm)
 - [x] Barycentric rasterization
-- [x] CPU path tracing baker (legacy)
-- [x] **GPU DXR baker (CLightmap2DGPUBaker)**
+- [x] GPU DXR baker (CLightmap2DGPUBaker)
 - [x] Finalize compute shader
+- [x] **Lightmap persistence (CLightmap2DManager)**
+- [x] **Runtime binding (SceneRenderer)**
+- [x] **Auto-load on mode switch**
+- [x] **Structured buffer for per-object scaleOffset**
 - [ ] GPU dilation pass
-- [ ] Editor UI integration
-- [ ] Lightmap serialization
-- [ ] Runtime UV2 vertex buffer
+- [ ] Hot-reload support
 
 ---
 
@@ -339,4 +429,4 @@ D3D11_INPUT_ELEMENT_DESC layout[] = {
 
 ---
 
-**Last Updated**: 2025-12-26
+**Last Updated**: 2025-12-27

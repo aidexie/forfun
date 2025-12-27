@@ -4,6 +4,8 @@
 #include "Engine/Rendering/ForwardRenderPipeline.h"
 #include "Engine/Rendering/VolumetricLightmap.h"
 #include "Engine/Rendering/Lightmap/LightmapBaker.h"
+#include "Engine/Rendering/Lightmap/Lightmap2DManager.h"
+#include "Engine/Components/MeshRenderer.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"  // FFPath namespace
 #include <windows.h>
@@ -89,6 +91,23 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         if (ImGui::Combo("Diffuse GI Mode", &currentMode, diffuseGIModes, IM_ARRAYSIZE(diffuseGIModes))) {
             settings.diffuseGIMode = static_cast<EDiffuseGIMode>(currentMode);
             CFFLog::Info("[LightSettings] Diffuse GI Mode: %s", diffuseGIModes[currentMode]);
+
+            // Auto-load lightmap when switching to Lightmap2D mode
+            if (settings.diffuseGIMode == EDiffuseGIMode::Lightmap2D) {
+                std::string scenePath = CScene::Instance().GetFilePath();
+                if (!scenePath.empty()) {
+                    size_t dotPos = scenePath.find_last_of('.');
+                    std::string lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
+
+                    if (!CLightmap2DManager::Instance().IsLoaded()) {
+                        if (CLightmap2DManager::Instance().LoadLightmap(lightmapPath)) {
+                            CFFLog::Info("[Lightmap2D] Auto-loaded lightmap: %s", lightmapPath.c_str());
+                        } else {
+                            CFFLog::Warning("[Lightmap2D] No lightmap found, mode will be disabled");
+                        }
+                    }
+                }
+            }
         }
         ImGui::PopItemWidth();
 
@@ -318,8 +337,41 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
                                 s_lightmap2DBaker.GetAtlasWidth(),
                                 s_lightmap2DBaker.GetAtlasHeight());
 
-                    // TODO: Create GPU texture and bind to shader
-                    // RHI::TexturePtr lightmapTex = s_lightmap2DBaker.CreateGPUTexture();
+                    // Assign lightmapInfosIndex to each MeshRenderer
+                    auto& infos = s_lightmap2DBaker.GetLightmapInfos();
+                    auto& world = CScene::Instance().GetWorld();
+
+                    for (size_t i = 0; i < infos.size(); i++) {
+                        auto* obj = world.Get(static_cast<int>(i));
+                        if (!obj) continue;
+
+                        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+                        if (meshRenderer) {
+                            meshRenderer->lightmapInfosIndex = static_cast<int>(i);
+                        }
+                    }
+
+                    // Save lightmap data to disk
+                    std::string scenePath = CScene::Instance().GetFilePath();
+                    if (!scenePath.empty()) {
+                        // Generate lightmap path: "scenes/MyScene.json" -> "scenes/MyScene.lightmap"
+                        size_t dotPos = scenePath.find_last_of('.');
+                        std::string lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
+
+                        if (CLightmap2DManager::Instance().SaveLightmap(
+                                lightmapPath,
+                                infos,
+                                s_lightmap2DBaker.GetLightmapTexture())) {
+                            CFFLog::Info("[Lightmap2D] Saved lightmap to: %s", lightmapPath.c_str());
+
+                            // Auto-load for immediate preview
+                            CLightmap2DManager::Instance().LoadLightmap(lightmapPath);
+                        } else {
+                            CFFLog::Error("[Lightmap2D] Failed to save lightmap");
+                        }
+                    } else {
+                        CFFLog::Warning("[Lightmap2D] Scene not saved, cannot save lightmap");
+                    }
                 } else {
                     CFFLog::Error("[Lightmap2D] Bake failed!");
                 }

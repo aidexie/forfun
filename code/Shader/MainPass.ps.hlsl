@@ -58,7 +58,8 @@ cbuffer CB_Object : register(b1) {
     int gAlphaMode;  // 0=Opaque, 1=Mask, 2=Blend
     float gAlphaCutoff;
     int gProbeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
-    float2 _padObj;
+    int gLightmapIndex;  // Per-object lightmap index (-1 = no lightmap)
+    float _padObj;
 }
 
 // ============================================
@@ -318,7 +319,7 @@ float4 main(PSIn i) : SV_Target {
     } else if (gDiffuseGIMode == DIFFUSE_GI_LIGHTMAP_2D) {
         // 2D Lightmap mode (UV2-based)
         if (IsLightmap2DEnabled()) {
-            float3 lmIrradiance = SampleLightmap2D(i.uv2, gSamp);
+            float3 lmIrradiance = SampleLightmap2D(i.uv2, gLightmapIndex, gSamp);
             diffuseIBL = lmIrradiance * albedo;
         }
     }

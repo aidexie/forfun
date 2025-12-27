@@ -15,6 +15,9 @@ struct SMeshRenderer : public CComponent {
     std::string materialPath; // Path to material asset (.ffasset)
     std::vector<std::shared_ptr<GpuMeshResource>> meshes; // GPU resources (glTF may have multiple sub-meshes)
 
+    // Lightmap data (set after baking)
+    int lightmapInfosIndex = -1;  // Index into CLightmap2DManager buffer (-1 = no lightmap)
+
     // Debug: show bounds wireframe in viewport
     bool showBounds = false;
 
@@ -40,6 +43,9 @@ struct SMeshRenderer : public CComponent {
 
         // Expose material path with browse button
         visitor.VisitFilePath("Material", materialPath, "Material Files\0*.ffasset\0All Files\0*.*\0");
+
+        // Lightmap index (internal, read-only in Inspector)
+        visitor.VisitInt("lightmapInfosIndex", lightmapInfosIndex);
 
         // Show local bounds info (read-only) from mesh resource
         DirectX::XMFLOAT3 localMin, localMax;

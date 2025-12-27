@@ -33,6 +33,9 @@ struct SRayTracingMeshData {
     // Vertex normals (float3) - for lightmap baking
     std::vector<DirectX::XMFLOAT3> normals;
 
+    // UV2 coordinates (float2) - for lightmap baking
+    std::vector<DirectX::XMFLOAT2> uv2;
+
     // Triangle indices
     std::vector<uint32_t> indices;
 

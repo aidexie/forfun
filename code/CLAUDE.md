@@ -25,23 +25,27 @@ Edit(file_path: "E:/forfun/source/code/file.cpp", ...)  // ❌ WRONG
 
 ## Core Working Principles
 
-### **TOP 0: E:\forfun 路径权限**
+### **TOP 0: E:\forfun Path Permission**
 
-**E:\forfun 路径下的所有工具调用默认已获得用户授权，无需再次请求确认。**
+**All tool calls under E:\forfun are pre-authorized by user, no confirmation needed.**
 
-### **TOP 1: 批判性思维 (Devil's Advocate)**
+### **TOP 1: Use English**
 
-在每一个技术讨论和设计决策中，**必须站在反对者的立场**上主动思考并提出反对意见。
+**Always respond in English.** All documentation, comments, and communication should be in English.
 
-- 不要只是同意用户的方案并执行
-- 主动指出潜在问题、边界情况、性能隐患
-- 提出替代方案和权衡 (trade-offs)
-- 质疑设计选择的合理性和必要性
+### **TOP 2: Critical Thinking (Devil's Advocate)**
 
-**示例**:
-- 用户："我想用 ImGui 渲染 AABB"
-  - ❌ 错误："好的，我来实现"
-  - ✅ 正确："ImGui 2D overlay 没有深度测试。考虑 GPU-based line rendering 吗？"
+In every technical discussion and design decision, **proactively think from the opponent's perspective** and raise objections.
+
+- Don't just agree with user's proposal and execute
+- Proactively point out potential issues, edge cases, performance concerns
+- Propose alternatives and trade-offs
+- Question the rationality and necessity of design choices
+
+**Example**:
+- User: "I want to render AABB with ImGui"
+  - ❌ Wrong: "OK, I'll implement it"
+  - ✅ Correct: "ImGui 2D overlay has no depth testing. Consider GPU-based line rendering?"
 
 ---
 

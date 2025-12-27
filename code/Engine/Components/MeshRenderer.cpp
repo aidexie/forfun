@@ -11,7 +11,7 @@ bool SMeshRenderer::EnsureUploaded() {
     if (path.empty()) return false;
 
     // Load or retrieve cached resources via MeshResourceManager
-    meshes = CMeshResourceManager::Instance().GetOrLoad(path,true);
+    meshes = CMeshResourceManager::Instance().GetOrLoad(path,true,true);
 
     if (meshes.empty()) {
         CFFLog::Error("ERROR: Failed to load mesh from: %s" , path);

@@ -5,6 +5,8 @@
 #include "Loader/ObjLoader.h"
 #include "Loader/GltfLoader.h"
 #include "../Engine/Rendering/RayTracing/SceneGeometryExport.h"
+#include "../Engine/Rendering/Lightmap/LightmapUV2.h"
+#include "FFLog.h"
 #include <algorithm>
 
 CMeshResourceManager& CMeshResourceManager::Instance() {
@@ -18,12 +20,14 @@ void CMeshResourceManager::CacheMeshForRayTracing(const SMeshCPU_PNT& cpu, const
     rtData.vertexCount = static_cast<uint32_t>(cpu.vertices.size());
     rtData.indexCount = static_cast<uint32_t>(cpu.indices.size());
 
-    // Extract positions and normals
+    // Extract positions, normals, and UV2
     rtData.positions.reserve(cpu.vertices.size());
     rtData.normals.reserve(cpu.vertices.size());
+    rtData.uv2.reserve(cpu.vertices.size());
     for (const auto& v : cpu.vertices) {
         rtData.positions.push_back(DirectX::XMFLOAT3(v.px, v.py, v.pz));
         rtData.normals.push_back(DirectX::XMFLOAT3(v.nx, v.ny, v.nz));
+        rtData.uv2.push_back(DirectX::XMFLOAT2(v.u2, v.v2));
     }
 
     // Copy indices
@@ -49,9 +53,84 @@ void CMeshResourceManager::CacheMeshForRayTracing(const SMeshCPU_PNT& cpu, const
     CRayTracingMeshCache::Instance().StoreMeshData(path, subMeshIndex, rtData);
 }
 
+// ============================================
+// ApplyUV2ToMesh - Generate UV2 using xatlas and rebuild mesh in-place
+// ============================================
+static void ApplyUV2ToMesh(SMeshCPU_PNT& cpu, int texelsPerUnit = 16) {
+    if (cpu.vertices.empty() || cpu.indices.empty()) {
+        return;
+    }
+
+    // Generate UV2 using xatlas
+    SUV2GenerationResult result = GenerateUV2ForMesh(cpu, texelsPerUnit);
+
+    if (!result.success) {
+        CFFLog::Warning("[MeshResourceManager] UV2 generation failed, mesh will have no lightmap UV");
+        return;
+    }
+
+    // Rebuild mesh with new vertex/index data from xatlas
+    // xatlas may split vertices at UV seams, so we need to rebuild entirely
+    std::vector<SVertexPNT> newVertices;
+    newVertices.reserve(result.positions.size());
+
+    for (size_t i = 0; i < result.positions.size(); i++) {
+        SVertexPNT v = {};
+
+        // Position
+        v.px = result.positions[i].x;
+        v.py = result.positions[i].y;
+        v.pz = result.positions[i].z;
+
+        // Normal
+        v.nx = result.normals[i].x;
+        v.ny = result.normals[i].y;
+        v.nz = result.normals[i].z;
+
+        // UV1 (original texture UV)
+        if (i < result.uv1.size()) {
+            v.u = result.uv1[i].x;
+            v.v = result.uv1[i].y;
+        }
+
+        // Tangent
+        if (i < result.tangents.size()) {
+            v.tx = result.tangents[i].x;
+            v.ty = result.tangents[i].y;
+            v.tz = result.tangents[i].z;
+            v.tw = result.tangents[i].w;
+        }
+
+        // Vertex color
+        if (i < result.colors.size()) {
+            v.r = result.colors[i].x;
+            v.g = result.colors[i].y;
+            v.b = result.colors[i].z;
+            v.a = result.colors[i].w;
+        } else {
+            v.r = v.g = v.b = v.a = 1.0f;
+        }
+
+        // UV2 (lightmap UV) - the key output!
+        v.u2 = result.uv2[i].x;
+        v.v2 = result.uv2[i].y;
+
+        newVertices.push_back(v);
+    }
+
+    // Replace mesh data
+    cpu.vertices = std::move(newVertices);
+    cpu.indices = result.indices;
+
+    CFFLog::Info("[MeshResourceManager] UV2 applied: %d vertices, %d indices",
+                 static_cast<int>(cpu.vertices.size()),
+                 static_cast<int>(cpu.indices.size()));
+}
+
 std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
     const std::string& path,
-    bool cacheForRayTracing
+    bool cacheForRayTracing,
+    bool generateLightmapUV2
 ) {
     if (path.empty()) {
         return {};
@@ -100,6 +179,11 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
         }
         RecenterAndScale(cpu, 2.0f);
 
+        // Generate UV2 if requested (must be before ray tracing cache)
+        if (generateLightmapUV2) {
+            ApplyUV2ToMesh(cpu);
+        }
+
         // Cache for ray tracing if requested
         if (cacheForRayTracing) {
             CacheMeshForRayTracing(cpu, path, 0);
@@ -119,6 +203,11 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
 
         uint32_t subMeshIndex = 0;
         for (auto& gltfMesh : meshes) {
+            // // Generate UV2 if requested (must be before ray tracing cache)
+            // if (generateLightmapUV2) {
+            //     ApplyUV2ToMesh(gltfMesh.mesh);
+            // }
+
             // Cache for ray tracing if requested
             if (cacheForRayTracing) {
                 CacheMeshForRayTracing(gltfMesh.mesh, path, subMeshIndex);
@@ -140,6 +229,11 @@ std::vector<std::shared_ptr<GpuMeshResource>> CMeshResourceManager::GetOrLoad(
 
         uint32_t subMeshIndex = 0;
         for (auto& gltfMesh : meshes) {
+            // // Generate UV2 if requested (must be before ray tracing cache)
+            // if (generateLightmapUV2) {
+            //     ApplyUV2ToMesh(gltfMesh.mesh);
+            // }
+
             // Cache for ray tracing if requested
             if (cacheForRayTracing) {
                 CacheMeshForRayTracing(gltfMesh.mesh, path, subMeshIndex);

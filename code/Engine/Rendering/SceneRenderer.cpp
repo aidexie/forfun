@@ -3,6 +3,7 @@
 #include "ShadowPass.h"
 #include "ShowFlags.h"
 #include "ReflectionProbeManager.h"
+#include "Lightmap/Lightmap2DManager.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
@@ -47,6 +48,7 @@ struct RenderItem {
     bool hasRealMetallicRoughnessTexture;
     bool hasRealEmissiveMap;
     int probeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
+    int lightmapIndex;  // Per-object lightmap index (-1 = no lightmap)
 };
 
 // 加载 Shader 源文件
@@ -90,7 +92,8 @@ struct alignas(16) CB_Object {
     int alphaMode;
     float alphaCutoff;
     int probeIndex;  // Per-object probe selection (0 = global, 1-7 = local)
-    XMFLOAT2 _padObj;
+    int lightmapIndex;  // Per-object lightmap index (-1 = no lightmap)
+    float _padObj;
 };
 
 // 更新帧常量 via RHI Map/Unmap
@@ -172,6 +175,7 @@ void updateObjectConstants(
     co.alphaMode = static_cast<int>(item.material->alphaMode);
     co.alphaCutoff = item.material->alphaCutoff;
     co.probeIndex = item.probeIndex;
+    co.lightmapIndex = item.lightmapIndex;
 
     // Use unified SetConstantBufferData API - works on both DX11 and DX12
     cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &co, sizeof(CB_Object));
@@ -245,6 +249,7 @@ void collectRenderItems(
             item.hasRealMetallicRoughnessTexture = hasRealMetallicRoughnessTexture;
             item.hasRealEmissiveMap = hasRealEmissiveMap;
             item.probeIndex = probeIndex;
+            item.lightmapIndex = meshRenderer->lightmapInfosIndex;
 
             if (item.material->alphaMode == EAlphaMode::Blend) {
                 transparentItems.push_back(item);
@@ -367,6 +372,24 @@ void CSceneRenderer::Render(
     // Bind Volumetric Lightmap (t20-t24, b6)
     auto& volumetricLightmap = scene.GetVolumetricLightmap();
     volumetricLightmap.Bind(cmdList);
+
+    // Bind 2D Lightmap (t16=atlas, t17=scaleOffsets, b7=CB_Lightmap2D)
+    auto& lightmap2D = CLightmap2DManager::Instance();
+    if (lightmap2D.IsLoaded()) {
+        cmdList->SetShaderResource(EShaderStage::Pixel, 16, lightmap2D.GetAtlasTexture());
+        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 17, lightmap2D.GetScaleOffsetBuffer());
+
+        // CB_Lightmap2D (b7): enabled flag + intensity
+        struct CB_Lightmap2D {
+            int enabled;
+            float intensity;
+            float pad[2];
+        };
+        CB_Lightmap2D cb{};
+        cb.enabled = 1;
+        cb.intensity = 1.0f;
+        cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D));
+    }
 
     // Bind sampler (s0)
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());

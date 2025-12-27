@@ -1,5 +1,4 @@
 #include "LightmapBaker.h"
-#include "LightmapUV2.h"
 #include "Lightmap2DGPUBaker.h"
 #include "Engine/Scene.h"
 #include "Engine/Components/Transform.h"
@@ -180,34 +179,26 @@ bool CLightmapBaker::Rasterize(CScene& scene)
         auto* transform = obj->GetComponent<STransform>();
         if (!meshRenderer || !transform) continue;
 
-        // Get mesh data from ray tracing cache
-        // Note: Mesh must be loaded with cacheForRayTracing=true
+        // Get mesh data from ray tracing cache (includes UV2)
+        // Note: Mesh must be loaded with cacheForRayTracing=true and generateLightmapUV2=true
         const SRayTracingMeshData* meshData = meshCache.GetMeshData(meshRenderer->path, 0);
         if (!meshData) {
             CFFLog::Warning("[LightmapBaker] Mesh data not cached: %s (skipping)", meshRenderer->path.c_str());
             continue;
         }
 
-        // Generate UV2 for this mesh using xatlas
-        SUV2GenerationResult uv2Result = GenerateUV2(
-            meshData->positions,
-            meshData->normals,
-            std::vector<XMFLOAT2>(meshData->positions.size(), XMFLOAT2{0, 0}),  // No UV1 needed
-            meshData->indices,
-            m_atlasBuilder.GetAtlas().GetAtlasResolution() / 4  // texelsPerUnit based on atlas
-        );
-
-        if (!uv2Result.success) {
-            CFFLog::Warning("[LightmapBaker] UV2 generation failed for mesh: %s", meshRenderer->path.c_str());
+        // Check if UV2 is available
+        if (meshData->uv2.empty()) {
+            CFFLog::Warning("[LightmapBaker] Mesh has no UV2: %s (skipping)", meshRenderer->path.c_str());
             continue;
         }
 
-        // Rasterize using generated UV2 data
+        // Rasterize using mesh's UV2 data
         m_rasterizer.RasterizeMesh(
-            uv2Result.positions,
-            uv2Result.normals,
-            uv2Result.uv2,
-            uv2Result.indices,
+            meshData->positions,
+            meshData->normals,
+            meshData->uv2,
+            meshData->indices,
             transform->WorldMatrix(),
             entry.atlasX, entry.atlasY,
             entry.width, entry.height
