@@ -93,6 +93,7 @@ public:
     const std::string& GetFilePath() const { return m_filePath; }
     void SetFilePath(const std::string& path) { m_filePath = path; }
     bool HasFilePath() const { return !m_filePath.empty(); }
+    const std::string& GetLightmapPath() const { return m_lightmapPath; }
 
     // Copy/Paste/Duplicate operations (for Hierarchy panel)
     void CopyGameObject(CGameObject* go);     // Copy to clipboard (JSON)
@@ -108,6 +109,7 @@ private:
     CWorld m_world;
     int m_selected = -1;
     std::string m_filePath;  // Current scene file path
+    std::string m_lightmapPath;  // Current scene file path
     CSkybox m_skybox;
     CReflectionProbeManager m_probeManager;
     CLightProbeManager m_lightProbeManager;

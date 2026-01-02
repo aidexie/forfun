@@ -1,7 +1,6 @@
 #include "Lightmap2DManager.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
-#include "Core/Exporter/KTXExporter.h"
 #include "Core/TextureManager.h"
 #include "RHI/RHIManager.h"
 #include "RHI/RHIDescriptors.h"
@@ -10,7 +9,7 @@
 #include <filesystem>
 
 // ============================================
-// File Format
+// File Format (must match LightmapBaker)
 // ============================================
 
 struct SLightmapDataHeader {
@@ -36,93 +35,6 @@ void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
 
     // Bind t17: ScaleOffset structured buffer
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
-
-    // Bind b7: CB_Lightmap2D (enabled flag + intensity)
-    struct CB_Lightmap2D {
-        int enabled;
-        float intensity;
-        float pad[2];
-    };
-    CB_Lightmap2D cb{};
-    cb.enabled = 1;
-    cb.intensity = 1.0f;
-    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D));
-}
-
-// ============================================
-// Save
-// ============================================
-
-bool CLightmap2DManager::SaveLightmap(
-    const std::string& lightmapPath,
-    const std::vector<SLightmapInfo>& infos,
-    RHI::ITexture* atlasTexture)
-{
-    if (infos.empty()) {
-        CFFLog::Error("[Lightmap2DManager] No lightmap infos to save");
-        return false;
-    }
-
-    if (!atlasTexture) {
-        CFFLog::Error("[Lightmap2DManager] No atlas texture to save");
-        return false;
-    }
-
-    // Create lightmap folder
-    std::string absLightmapPath = FFPath::GetAbsolutePath(lightmapPath);
-    std::filesystem::path folderPath(absLightmapPath);
-
-    if (!std::filesystem::exists(folderPath)) {
-        std::filesystem::create_directories(folderPath);
-    }
-
-    // Save data.bin
-    std::string dataPath = absLightmapPath + "/data.bin";
-    if (!SaveLightmapData(dataPath, infos)) {
-        return false;
-    }
-
-    // Save atlas.ktx2
-    std::string atlasPath = absLightmapPath + "/atlas.ktx2";
-    if (!SaveAtlasTexture(atlasPath, atlasTexture)) {
-        return false;
-    }
-
-    CFFLog::Info("[Lightmap2DManager] Saved lightmap to: %s", lightmapPath.c_str());
-    return true;
-}
-
-bool CLightmap2DManager::SaveLightmapData(const std::string& dataPath, const std::vector<SLightmapInfo>& infos) {
-    std::ofstream file(dataPath, std::ios::binary);
-    if (!file) {
-        CFFLog::Error("[Lightmap2DManager] Failed to create file: %s", dataPath.c_str());
-        return false;
-    }
-
-    // Write header
-    SLightmapDataHeader header;
-    header.infoCount = static_cast<uint32_t>(infos.size());
-    header.atlasWidth = 0;   // TODO: Get from texture
-    header.atlasHeight = 0;
-
-    file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-
-    // Write infos
-    file.write(reinterpret_cast<const char*>(infos.data()), infos.size() * sizeof(SLightmapInfo));
-
-    CFFLog::Info("[Lightmap2DManager] Saved %d lightmap infos to: %s",
-                 static_cast<int>(infos.size()), dataPath.c_str());
-    return true;
-}
-
-bool CLightmap2DManager::SaveAtlasTexture(const std::string& atlasPath, RHI::ITexture* texture) {
-    if (!CKTXExporter::Export2DTextureToKTX2(texture, atlasPath)) {
-        CFFLog::Error("[Lightmap2DManager] Failed to export atlas texture: %s", atlasPath.c_str());
-        return false;
-    }
-
-    CFFLog::Info("[Lightmap2DManager] Exported atlas texture: %s", atlasPath.c_str());
-    return true;
 }
 
 // ============================================
@@ -131,6 +43,9 @@ bool CLightmap2DManager::SaveAtlasTexture(const std::string& atlasPath, RHI::ITe
 
 bool CLightmap2DManager::LoadLightmap(const std::string& lightmapPath) {
     UnloadLightmap();
+
+    // Store path for hot-reload
+    m_loadedPath = lightmapPath;
 
     std::string absLightmapPath = FFPath::GetAbsolutePath(lightmapPath);
 
@@ -249,6 +164,25 @@ void CLightmap2DManager::UnloadLightmap() {
     m_atlasTexture.reset();
     m_scaleOffsetBuffer.reset();
     m_isLoaded = false;
+    // Note: m_loadedPath is preserved for hot-reload
+}
+
+// ============================================
+// Hot-Reload
+// ============================================
+
+bool CLightmap2DManager::ReloadLightmap() {
+    if (m_loadedPath.empty()) {
+        CFFLog::Warning("[Lightmap2DManager] No lightmap path to reload");
+        return false;
+    }
+
+    CFFLog::Info("[Lightmap2DManager] Reloading lightmap: %s", m_loadedPath.c_str());
+
+    // LoadLightmap will call UnloadLightmap internally,
+    // which defers GPU resource deletion via CDX12DeferredDeletionQueue
+    std::string pathCopy = m_loadedPath;  // Copy since UnloadLightmap doesn't clear it
+    return LoadLightmap(pathCopy);
 }
 
 // ============================================

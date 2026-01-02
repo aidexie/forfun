@@ -81,6 +81,20 @@ bool CScene::LoadFromFile(const std::string& scenePath) {
     // 6. Record file path
     m_filePath = scenePath;
 
+    // 7. Auto-load 2D lightmap if exists
+    size_t dotPos = scenePath.find_last_of('.');
+    if (dotPos != std::string::npos) {
+        m_lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
+        std::string absPath = FFPath::GetAbsolutePath(m_lightmapPath);
+        if (std::filesystem::exists(absPath)) {
+            if (m_lightmap2D.LoadLightmap(m_lightmapPath)) {
+                CFFLog::Info("Scene: Auto-loaded 2D lightmap from %s", m_lightmapPath.c_str());
+            }
+        }else{
+                CFFLog::Info("Scene: 2D lightmap %s was not exist", m_lightmapPath.c_str());
+        }
+    }
+
     CFFLog::Info("Scene: Loaded successfully!");
     return true;
 }

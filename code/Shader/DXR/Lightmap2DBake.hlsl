@@ -282,20 +282,13 @@ void RayGen() {
     // For Lambertian: PDF = cos(theta) / PI, so weight = 1
     float3 contribution = payload.radiance;
 
-    // Atomic add to accumulation buffer
-    // xyz = radiance, w = sample count
-    uint originalValue;
-    InterlockedAdd(asuint(g_Accumulation[atlasIdx].w), 1, originalValue);
-
-    // Note: For proper atomic float addition, we'd need a more complex approach
-    // Using simple store for now (may have race conditions with multiple samples)
+    // Simple accumulation (race condition possible with parallel samples)
     // TODO: Implement proper atomic float accumulation
     float4 current = g_Accumulation[atlasIdx];
-    float4 newValue = float4(
+    g_Accumulation[atlasIdx] = float4(
         current.xyz + contribution,
-        current.w  // Already incremented above
+        current.w + 1.0f
     );
-    g_Accumulation[atlasIdx] = newValue;
 }
 
 // ============================================

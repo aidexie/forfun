@@ -342,6 +342,19 @@ RHI::IBuffer* buffer = CScene::Instance().GetLightmap2D().GetScaleOffsetBuffer()
 scene.GetLightmap2D().Bind(cmdList);
 ```
 
+**Hot-Reload:**
+```cpp
+// Reload from last loaded path (e.g., after external re-bake)
+if (scene.GetLightmap2D().IsLoaded()) {
+    scene.GetLightmap2D().ReloadLightmap();
+}
+
+// Query loaded path
+const std::string& path = scene.GetLightmap2D().GetLoadedPath();
+```
+
+GPU resource cleanup is automatic via `CDX12DeferredDeletionQueue` - old textures/buffers are released after GPU finishes using them.
+
 The Bind() method encapsulates:
 ```cpp
 // t16: Atlas texture
@@ -366,7 +379,7 @@ cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D
 2. **Dilation not GPU-accelerated**: Currently placeholder, needs compute shader implementation.
 
 ### Runtime
-None - persistence and binding fully implemented.
+None - persistence, binding, and hot-reload fully implemented.
 
 ---
 
@@ -421,8 +434,8 @@ None - persistence and binding fully implemented.
 - [x] **Runtime binding (SceneRenderer)**
 - [x] **Auto-load on mode switch**
 - [x] **Structured buffer for per-object scaleOffset**
+- [x] **Hot-reload support (ReloadLightmap + UI button)**
 - [ ] GPU dilation pass
-- [ ] Hot-reload support
 
 ---
 

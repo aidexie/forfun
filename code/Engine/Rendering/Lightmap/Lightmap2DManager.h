@@ -14,25 +14,12 @@ namespace RHI {
 // ============================================
 // Manages runtime 2D lightmap data (atlas texture + per-object scaleOffset)
 // Owned by CScene
+// Note: Saving is handled by CLightmapBaker::SaveToFile()
 
 class CLightmap2DManager {
 public:
     CLightmap2DManager() = default;
     ~CLightmap2DManager() = default;
-
-    // ============================================
-    // Save (called after baking in Editor)
-    // ============================================
-
-    // Save lightmap data to disk
-    // lightmapPath: "scenes/MyScene.lightmap" (folder will be created)
-    // infos: per-object lightmap info (scaleOffset)
-    // atlasTexture: baked atlas texture (will be saved as atlas.ktx2)
-    bool SaveLightmap(
-        const std::string& lightmapPath,
-        const std::vector<SLightmapInfo>& infos,
-        RHI::ITexture* atlasTexture
-    );
 
     // ============================================
     // Load (called at runtime)
@@ -48,14 +35,23 @@ public:
     // Bind to command list (called in SceneRenderer)
     // ============================================
 
-    // Bind lightmap resources to shader (t16, t17, b7)
+    // Bind lightmap resources to shader (t16, t17)
     void Bind(RHI::ICommandList* cmdList);
+
+    // ============================================
+    // Hot-Reload
+    // ============================================
+
+    // Reload lightmap from last loaded path
+    // Returns false if no lightmap was previously loaded
+    bool ReloadLightmap();
 
     // ============================================
     // Query
     // ============================================
 
     bool IsLoaded() const { return m_isLoaded; }
+    const std::string& GetLoadedPath() const { return m_loadedPath; }
 
     RHI::ITexture* GetAtlasTexture() const { return m_atlasTexture.get(); }
     RHI::IBuffer* GetScaleOffsetBuffer() const { return m_scaleOffsetBuffer.get(); }
@@ -64,10 +60,6 @@ public:
     int GetLightmapInfoCount() const { return static_cast<int>(m_lightmapInfos.size()); }
 
 private:
-    // Save helpers
-    bool SaveLightmapData(const std::string& dataPath, const std::vector<SLightmapInfo>& infos);
-    bool SaveAtlasTexture(const std::string& atlasPath, RHI::ITexture* texture);
-
     // Load helpers
     bool LoadLightmapData(const std::string& dataPath);
     bool LoadAtlasTexture(const std::string& atlasPath);
@@ -75,6 +67,7 @@ private:
 
 private:
     bool m_isLoaded = false;
+    std::string m_loadedPath;  // Track loaded path for hot-reload
 
     // Runtime data
     std::vector<SLightmapInfo> m_lightmapInfos;

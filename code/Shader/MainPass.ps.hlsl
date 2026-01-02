@@ -318,10 +318,8 @@ float4 main(PSIn i) : SV_Target {
         diffuseIBL = irradiance * albedo;
     } else if (gDiffuseGIMode == DIFFUSE_GI_LIGHTMAP_2D) {
         // 2D Lightmap mode (UV2-based)
-        if (IsLightmap2DEnabled()) {
-            float3 lmIrradiance = SampleLightmap2D(i.uv2, gLightmapIndex, gSamp);
-            diffuseIBL = lmIrradiance * albedo;
-        }
+        float3 lmIrradiance = SampleLightmap2D(i.uv2, gLightmapIndex, gSamp);
+        diffuseIBL = lmIrradiance * albedo;
     }
 
     // else: DIFFUSE_GI_NONE - diffuseIBL stays at 0 (no diffuse GI)

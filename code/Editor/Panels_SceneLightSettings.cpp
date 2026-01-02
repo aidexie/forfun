@@ -5,9 +5,8 @@
 #include "Engine/Rendering/VolumetricLightmap.h"
 #include "Engine/Rendering/Lightmap/LightmapBaker.h"
 #include "Engine/Rendering/Lightmap/Lightmap2DManager.h"
-#include "Engine/Components/MeshRenderer.h"
 #include "Core/FFLog.h"
-#include "Core/PathManager.h"  // FFPath namespace
+#include "Core/PathManager.h"
 #include <windows.h>
 #include <commdlg.h>
 
@@ -91,23 +90,6 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         if (ImGui::Combo("Diffuse GI Mode", &currentMode, diffuseGIModes, IM_ARRAYSIZE(diffuseGIModes))) {
             settings.diffuseGIMode = static_cast<EDiffuseGIMode>(currentMode);
             CFFLog::Info("[LightSettings] Diffuse GI Mode: %s", diffuseGIModes[currentMode]);
-
-            // Auto-load lightmap when switching to Lightmap2D mode
-            if (settings.diffuseGIMode == EDiffuseGIMode::Lightmap2D) {
-                std::string scenePath = CScene::Instance().GetFilePath();
-                if (!scenePath.empty()) {
-                    size_t dotPos = scenePath.find_last_of('.');
-                    std::string lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
-
-                    if (!CScene::Instance().GetLightmap2D().IsLoaded()) {
-                        if (CScene::Instance().GetLightmap2D().LoadLightmap(lightmapPath)) {
-                            CFFLog::Info("[Lightmap2D] Auto-loaded lightmap: %s", lightmapPath.c_str());
-                        } else {
-                            CFFLog::Warning("[Lightmap2D] No lightmap found, mode will be disabled");
-                        }
-                    }
-                }
-            }
         }
         ImGui::PopItemWidth();
 
@@ -324,59 +306,40 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         } else {
             if (ImGui::Button("Bake 2D Lightmap", ImVec2(200, 30))) {
                 s_is2DLightmapBaking = true;
-                CFFLog::Info("[Lightmap2D] Starting 2D lightmap bake...");
-
-                // Set progress callback
-                s_lightmap2DBaker.SetProgressCallback([](float progress, const char* stage) {
-                    // Progress is logged by the baker itself
-                });
-
-                // Execute bake
-                if (s_lightmap2DBaker.Bake(CScene::Instance(), s_lightmap2DConfig)) {
+                
+                std::string lightmapPath = CScene::Instance().GetLightmapPath();
+                // Bake (includes assign indices + save to file)
+                if (s_lightmap2DBaker.Bake(CScene::Instance(), s_lightmap2DConfig, lightmapPath)) {
                     CFFLog::Info("[Lightmap2D] Bake complete! Atlas size: %dx%d",
                                 s_lightmap2DBaker.GetAtlasWidth(),
                                 s_lightmap2DBaker.GetAtlasHeight());
-
-                    // Assign lightmapInfosIndex to each MeshRenderer
-                    auto& infos = s_lightmap2DBaker.GetLightmapInfos();
-                    auto& world = CScene::Instance().GetWorld();
-
-                    for (size_t i = 0; i < infos.size(); i++) {
-                        auto* obj = world.Get(static_cast<int>(i));
-                        if (!obj) continue;
-
-                        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
-                        if (meshRenderer) {
-                            meshRenderer->lightmapInfosIndex = static_cast<int>(i);
-                        }
+                    CLightmap2DManager& lightmap2d = CScene::Instance().GetLightmap2D();
+                    if(lightmap2d.IsLoaded()){
+                        lightmap2d.ReloadLightmap();
+                    }else{
+                        lightmap2d.LoadLightmap(lightmapPath);
                     }
-
-                    // Save lightmap data to disk
-                    std::string scenePath = CScene::Instance().GetFilePath();
-                    if (!scenePath.empty()) {
-                        // Generate lightmap path: "scenes/MyScene.json" -> "scenes/MyScene.lightmap"
-                        size_t dotPos = scenePath.find_last_of('.');
-                        std::string lightmapPath = scenePath.substr(0, dotPos) + ".lightmap";
-
-                        if (CScene::Instance().GetLightmap2D().SaveLightmap(
-                                lightmapPath,
-                                infos,
-                                s_lightmap2DBaker.GetLightmapTexture())) {
-                            CFFLog::Info("[Lightmap2D] Saved lightmap to: %s", lightmapPath.c_str());
-
-                            // Auto-load for immediate preview
-                            CScene::Instance().GetLightmap2D().LoadLightmap(lightmapPath);
-                        } else {
-                            CFFLog::Error("[Lightmap2D] Failed to save lightmap");
-                        }
-                    } else {
-                        CFFLog::Warning("[Lightmap2D] Scene not saved, cannot save lightmap");
-                    }
-                } else {
+                }
+                else
+                {
                     CFFLog::Error("[Lightmap2D] Bake failed!");
                 }
 
                 s_is2DLightmapBaking = false;
+            }
+        }
+
+        // Reload button (only if lightmap is loaded)
+        auto& lightmap2D = CScene::Instance().GetLightmap2D();
+        if (lightmap2D.IsLoaded()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Reload##LM2D")) {
+                if (lightmap2D.ReloadLightmap()) {
+                    CFFLog::Info("[Lightmap2D] Reloaded successfully");
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Reload lightmap from disk:\n%s", lightmap2D.GetLoadedPath().c_str());
             }
         }
 
@@ -386,7 +349,13 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
             ImGui::SetTooltip(
                 "Bakes diffuse GI into a 2D texture atlas.\n"
                 "Requires UV2 coordinates on meshes.\n"
-                "Uses CPU path tracing for irradiance calculation.");
+                "Uses GPU DXR path tracing for irradiance calculation.");
+        }
+
+        // Show loaded status
+        if (lightmap2D.IsLoaded()) {
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "Loaded: %s", lightmap2D.GetLoadedPath().c_str());
+            ImGui::TextDisabled("Infos: %d entries", lightmap2D.GetLightmapInfoCount());
         }
 
         ImGui::Spacing();
