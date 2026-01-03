@@ -14,8 +14,7 @@ static bool s_showWindow = true;  // Default: hidden (user opens via menu)
 static bool s_isBaking = false;    // Volumetric Lightmap baking state
 static bool s_is2DLightmapBaking = false;  // 2D Lightmap baking state
 
-// 2D Lightmap baker and config
-static CLightmapBaker s_lightmap2DBaker;
+// 2D Lightmap config (baker is now owned by CScene to avoid static destruction order issues)
 static CLightmapBaker::Config s_lightmap2DConfig;
 
 // Bake configuration state (persisted across frames)
@@ -24,6 +23,9 @@ static SLightmapBakeConfig s_bakeConfig;
 // Deferred GPU bake request (executed at start of next frame)
 static bool s_pendingGPUBake = false;
 static CVolumetricLightmap::Config s_pendingBakeVLConfig;
+
+// Deferred 2D Lightmap bake request
+static bool s_pending2DLightmapBake = false;
 
 void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
     if (!s_showWindow) return;
@@ -215,34 +217,8 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
                 s_pendingBakeVLConfig.volumeMax = vlConfig.volumeMax;
                 s_pendingBakeVLConfig.minBrickWorldSize = vlConfig.minBrickWorldSize;
 
-                if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) {
-                    // GPU bake: Defer to start of next frame to avoid command list conflicts
-                    s_pendingGPUBake = true;
-                    CFFLog::Info("[VolumetricLightmap] GPU bake requested - will execute at start of next frame");
-                } else {
-                    // CPU bake: Execute immediately (no GPU state conflicts)
-                    s_isBaking = true;
-
-                    auto& vl = CScene::Instance().GetVolumetricLightmap();
-                    vl.Shutdown();
-                    if (vl.Initialize(s_pendingBakeVLConfig)) {
-                        vl.BuildOctree(CScene::Instance());
-                        CFFLog::Info("[VolumetricLightmap] Starting bake with CPU backend...");
-                        vl.BakeAllBricks(CScene::Instance(), s_bakeConfig);
-
-                        if (vl.CreateGPUResources()) {
-                            vl.SetEnabled(true);
-                            vlConfig.enabled = true;
-                            CFFLog::Info("[VolumetricLightmap] Bake complete and GPU resources created!");
-                        } else {
-                            CFFLog::Error("[VolumetricLightmap] Failed to create GPU resources!");
-                        }
-                    } else {
-                        CFFLog::Error("[VolumetricLightmap] Failed to initialize!");
-                    }
-
-                    s_isBaking = false;
-                }
+                s_pendingGPUBake = true;
+                CFFLog::Info("[VolumetricLightmap] bake requested - will execute at start of next frame");
             }
         }
 
@@ -299,33 +275,16 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         ImGui::Spacing();
 
         // Bake button
-        if (s_is2DLightmapBaking) {
+        if (s_is2DLightmapBaking || s_pending2DLightmapBake) {
             ImGui::BeginDisabled();
-            ImGui::Button("Baking 2D Lightmap...", ImVec2(200, 30));
+            const char* statusText = s_pending2DLightmapBake ? "Bake pending (next frame)..." : "Baking 2D Lightmap...";
+            ImGui::Button(statusText, ImVec2(200, 30));
             ImGui::EndDisabled();
         } else {
             if (ImGui::Button("Bake 2D Lightmap", ImVec2(200, 30))) {
-                s_is2DLightmapBaking = true;
-                
-                std::string lightmapPath = CScene::Instance().GetLightmapPath();
-                // Bake (includes assign indices + save to file)
-                if (s_lightmap2DBaker.Bake(CScene::Instance(), s_lightmap2DConfig, lightmapPath)) {
-                    CFFLog::Info("[Lightmap2D] Bake complete! Atlas size: %dx%d",
-                                s_lightmap2DBaker.GetAtlasWidth(),
-                                s_lightmap2DBaker.GetAtlasHeight());
-                    CLightmap2DManager& lightmap2d = CScene::Instance().GetLightmap2D();
-                    if(lightmap2d.IsLoaded()){
-                        lightmap2d.ReloadLightmap();
-                    }else{
-                        lightmap2d.LoadLightmap(lightmapPath);
-                    }
-                }
-                else
-                {
-                    CFFLog::Error("[Lightmap2D] Bake failed!");
-                }
-
-                s_is2DLightmapBaking = false;
+                // Defer bake to start of next frame to avoid command list conflicts
+                s_pending2DLightmapBake = true;
+                CFFLog::Info("[Lightmap2D] Bake requested - will execute at start of next frame");
             }
         }
 
@@ -437,5 +396,39 @@ bool Panels::ExecutePendingGPUBake() {
     }
 
     s_isBaking = false;
+    return true;
+}
+
+bool Panels::ExecutePending2DLightmapBake() {
+    if (!s_pending2DLightmapBake) {
+        return false;
+    }
+
+    CFFLog::Info("[Lightmap2D] Executing deferred 2D lightmap bake at frame start...");
+    s_pending2DLightmapBake = false;
+    s_is2DLightmapBaking = true;
+
+    CScene& scene = CScene::Instance();
+    std::string lightmapPath = scene.GetLightmapPath();
+    CLightmapBaker& baker = scene.GetLightmapBaker();
+
+    // Bake (includes assign indices + save to file)
+    if (baker.Bake(scene, s_lightmap2DConfig, lightmapPath)) {
+        CFFLog::Info("[Lightmap2D] Bake complete! Atlas size: %dx%d",
+                    baker.GetAtlasWidth(),
+                    baker.GetAtlasHeight());
+
+        // Load/reload lightmap for immediate preview
+        CLightmap2DManager& lightmap2d = scene.GetLightmap2D();
+        if (lightmap2d.IsLoaded()) {
+            lightmap2d.ReloadLightmap();
+        } else {
+            lightmap2d.LoadLightmap(lightmapPath);
+        }
+    } else {
+        CFFLog::Error("[Lightmap2D] Bake failed!");
+    }
+
+    s_is2DLightmapBaking = false;
     return true;
 }

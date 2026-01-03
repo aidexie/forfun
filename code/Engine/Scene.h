@@ -7,6 +7,7 @@
 #include "Rendering/LightProbeManager.h"
 #include "Rendering/VolumetricLightmap.h"
 #include "Rendering/Lightmap/Lightmap2DManager.h"
+#include "Rendering/Lightmap/LightmapBaker.h"
 #include "SceneLightSettings.h"
 #include "Camera.h"
 
@@ -79,6 +80,10 @@ public:
     CLightmap2DManager& GetLightmap2D() { return m_lightmap2D; }
     const CLightmap2DManager& GetLightmap2D() const { return m_lightmap2D; }
 
+    // 2D Lightmap Baker access
+    CLightmapBaker& GetLightmapBaker() { return m_lightmapBaker; }
+    const CLightmapBaker& GetLightmapBaker() const { return m_lightmapBaker; }
+
     // Light settings access
     CSceneLightSettings& GetLightSettings() { return m_lightSettings; }
     const CSceneLightSettings& GetLightSettings() const { return m_lightSettings; }
@@ -115,6 +120,7 @@ private:
     CLightProbeManager m_lightProbeManager;
     CVolumetricLightmap m_volumetricLightmap;
     CLightmap2DManager m_lightmap2D;
+    CLightmapBaker m_lightmapBaker;
     CSceneLightSettings m_lightSettings;
     bool m_initialized = false;
 
