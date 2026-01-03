@@ -375,10 +375,33 @@ cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D
 ## Known Issues
 
 ### Baking
-None - all features implemented.
+1. **Noise in baked lightmap**: Path tracing with 64 samples produces visible noise. Need denoising.
 
 ### Runtime
 None - persistence, binding, and hot-reload fully implemented.
+
+---
+
+## TODO
+
+### Short Term
+1. **Increase sample count / Add UI slider**
+   - Increase default `samplesPerTexel` from 64 to 256
+   - Add slider in Scene Light Settings panel for user control
+   - Simple fix, guaranteed convergence (4x samples = 2x less noise)
+
+### Medium Term
+2. **Bilateral blur denoiser (compute shader)**
+   - Add edge-preserving blur as post-process after baking
+   - Preserve sharp edges while smoothing noise
+   - No external dependencies, moderate quality improvement
+
+### Long Term
+3. **Intel OIDN Integration**
+   - Integrate Intel Open Image Denoise for production quality
+   - CPU-based, cross-platform, no GPU vendor lock-in
+   - Reference: [Intel OIDN](https://www.openimagedenoise.org/)
+   - Alternative: NVIDIA OptiX Denoiser (GPU, NVIDIA-only)
 
 ### Resolved
 - ~~**Atomic float accumulation**~~: Fixed using fixed-point integer accumulation with `InterlockedAdd`. Scale factor 65536 provides ~16-bit fractional precision.
