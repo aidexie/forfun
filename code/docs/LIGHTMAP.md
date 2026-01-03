@@ -375,13 +375,14 @@ cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D
 ## Known Issues
 
 ### Baking
-1. **Dilation not GPU-accelerated**: Currently placeholder, needs compute shader implementation.
+None - all features implemented.
 
 ### Runtime
 None - persistence, binding, and hot-reload fully implemented.
 
 ### Resolved
 - ~~**Atomic float accumulation**~~: Fixed using fixed-point integer accumulation with `InterlockedAdd`. Scale factor 65536 provides ~16-bit fractional precision.
+- ~~**Dilation not GPU-accelerated**~~: Implemented GPU compute shader dilation pass (`Lightmap2DDilate.cs.hlsl`). Uses ping-pong textures with configurable pass count.
 
 ---
 
@@ -437,7 +438,7 @@ None - persistence, binding, and hot-reload fully implemented.
 - [x] **Auto-load on mode switch**
 - [x] **Structured buffer for per-object scaleOffset**
 - [x] **Hot-reload support (ReloadLightmap + UI button)**
-- [ ] GPU dilation pass
+- [x] **GPU dilation pass (Lightmap2DDilate.cs.hlsl)**
 
 ---
 

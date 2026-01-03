@@ -279,6 +279,60 @@ bool CLightmap2DGPUBaker::CreateFinalizePipeline() {
     return true;
 }
 
+bool CLightmap2DGPUBaker::CreateDilatePipeline() {
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return false;
+
+    // Compile dilate compute shader
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/Lightmap2DDilate.cs.hlsl";
+    CFFLog::Info("[Lightmap2DGPUBaker] Compiling dilate shader: %s", shaderPath.c_str());
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    RHI::SCompiledShader compiled = RHI::CompileShaderFromFile(
+        shaderPath,
+        "CSMain",
+        "cs_5_0",
+        nullptr,
+        debugShaders
+    );
+
+    if (!compiled.success) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Dilate shader compilation failed: %s", compiled.errorMessage.c_str());
+        return false;
+    }
+
+    // Create shader
+    RHI::ShaderDesc shaderDesc;
+    shaderDesc.type = RHI::EShaderType::Compute;
+    shaderDesc.bytecode = compiled.bytecode.data();
+    shaderDesc.bytecodeSize = compiled.bytecode.size();
+
+    m_dilateShader.reset(ctx->CreateShader(shaderDesc));
+    if (!m_dilateShader) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Failed to create dilate shader");
+        return false;
+    }
+
+    // Create compute pipeline
+    RHI::ComputePipelineDesc pipelineDesc;
+    pipelineDesc.computeShader = m_dilateShader.get();
+    pipelineDesc.debugName = "Lightmap2DDilate";
+
+    m_dilatePipeline.reset(ctx->CreateComputePipelineState(pipelineDesc));
+    if (!m_dilatePipeline) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Failed to create dilate pipeline");
+        return false;
+    }
+
+    CFFLog::Info("[Lightmap2DGPUBaker] Dilate pipeline created successfully");
+    return true;
+}
+
 // ============================================
 // Per-Bake Setup
 // ============================================
@@ -308,6 +362,13 @@ bool CLightmap2DGPUBaker::PrepareBakeResources(const SRayTracingSceneData& scene
     if (!m_finalizePipeline) {
         if (!CreateFinalizePipeline()) {
             CFFLog::Error("[Lightmap2DGPUBaker] Failed to create finalize pipeline");
+            return false;
+        }
+    }
+
+    if (!m_dilatePipeline) {
+        if (!CreateDilatePipeline()) {
+            CFFLog::Error("[Lightmap2DGPUBaker] Failed to create dilate pipeline");
             return false;
         }
     }
@@ -675,9 +736,85 @@ void CLightmap2DGPUBaker::FinalizeAtlas() {
 }
 
 void CLightmap2DGPUBaker::DilateLightmap(int radius) {
-    // TODO: Implement GPU-based dilation pass
-    // For now, this is a placeholder
-    ReportProgress(0.98f, "Dilation");
+    if (radius <= 0) {
+        ReportProgress(0.98f, "Dilation skipped");
+        return;
+    }
+
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!ctx || !m_dilatePipeline || !m_outputTexture) {
+        ReportProgress(0.98f, "Dilation skipped (no resources)");
+        return;
+    }
+
+    auto* cmdList = ctx->GetCommandList();
+    if (!cmdList) return;
+
+    // Create temp texture for ping-pong if needed
+    if (!m_dilateTemp) {
+        RHI::TextureDesc texDesc;
+        texDesc.width = m_atlasWidth;
+        texDesc.height = m_atlasHeight;
+        texDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+        texDesc.usage = RHI::ETextureUsage::UnorderedAccess | RHI::ETextureUsage::ShaderResource;
+        texDesc.debugName = "Lightmap2D_DilateTemp";
+
+        m_dilateTemp.reset(ctx->CreateTexture(texDesc, nullptr));
+        if (!m_dilateTemp) {
+            CFFLog::Error("[Lightmap2DGPUBaker] Failed to create dilate temp texture");
+            return;
+        }
+    }
+
+    CFFLog::Info("[Lightmap2DGPUBaker] Running %d dilation passes", radius);
+
+    // Constant buffer for dilation params
+    struct CB_DilateParams {
+        uint32_t atlasWidth;
+        uint32_t atlasHeight;
+        uint32_t searchRadius;
+        uint32_t padding;
+    };
+
+    CB_DilateParams cbData;
+    cbData.atlasWidth = m_atlasWidth;
+    cbData.atlasHeight = m_atlasHeight;
+    cbData.searchRadius = 1;  // Search 1 pixel per pass
+    cbData.padding = 0;
+
+    uint32_t groupsX = (m_atlasWidth + 7) / 8;
+    uint32_t groupsY = (m_atlasHeight + 7) / 8;
+
+    // Ping-pong dilation passes
+    // Pass 0: output -> temp
+    // Pass 1: temp -> output
+    // ...
+    for (int pass = 0; pass < radius; pass++) {
+        bool evenPass = (pass % 2) == 0;
+        RHI::ITexture* inputTex = evenPass ? m_outputTexture.get() : m_dilateTemp.get();
+        RHI::ITexture* outputTex = evenPass ? m_dilateTemp.get() : m_outputTexture.get();
+
+        // Set pipeline
+        cmdList->SetPipelineState(m_dilatePipeline.get());
+
+        // Bind resources
+        cmdList->SetShaderResource(RHI::EShaderStage::Compute, 0, inputTex);
+        cmdList->SetUnorderedAccessTexture(0, outputTex);
+        cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &cbData, sizeof(cbData));
+
+        // Dispatch
+        cmdList->Dispatch(groupsX, groupsY, 1);
+
+        // Barrier between passes
+        cmdList->UAVBarrier(outputTex);
+    }
+
+    // If we ended on an odd pass, the result is in temp - copy back to output
+    if ((radius % 2) == 1) {
+        cmdList->CopyTexture(m_outputTexture.get(), m_dilateTemp.get());
+    }
+
+    ReportProgress(0.98f, "Dilation complete");
 }
 
 void CLightmap2DGPUBaker::ReleasePerBakeResources() {
@@ -689,6 +826,7 @@ void CLightmap2DGPUBaker::ReleasePerBakeResources() {
     m_texelBuffer.reset();
     m_accumulationBuffer.reset();
     m_outputTexture.reset();
+    m_dilateTemp.reset();
 
     m_linearizedTexels.clear();
     m_texelToAtlasX.clear();

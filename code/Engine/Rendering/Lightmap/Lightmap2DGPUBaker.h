@@ -174,6 +174,7 @@ private:
 
     bool CreatePipeline();
     bool CreateFinalizePipeline();
+    bool CreateDilatePipeline();
     bool CreateConstantBuffer();
 
     // ============================================
@@ -242,6 +243,13 @@ private:
     // Finalize compute pipeline
     std::unique_ptr<RHI::IPipelineState> m_finalizePipeline;
     std::unique_ptr<RHI::IShader> m_finalizeShader;
+
+    // Dilation compute pipeline
+    std::unique_ptr<RHI::IPipelineState> m_dilatePipeline;
+    std::unique_ptr<RHI::IShader> m_dilateShader;
+
+    // Ping-pong texture for dilation passes
+    RHI::TexturePtr m_dilateTemp;
 
     // Constant buffer
     std::unique_ptr<RHI::IBuffer> m_constantBuffer;
