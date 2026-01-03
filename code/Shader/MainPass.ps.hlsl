@@ -254,9 +254,18 @@ float4 main(PSIn i) : SV_Target {
 
     // Shadow factor
     float shadowFactor = CalcShadowFactor(i.posWS, i.posLS0, i.posLS1, i.posLS2);
-    
+
     // Direct lighting (affected by shadow)
-    float3 Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
+    // Note: For DIFFUSE_GI_LIGHTMAP_2D mode, diffuse is baked into lightmap,
+    // so we only calculate specular here. Diffuse term is added later from lightmap.
+    float3 Lo;
+    if (gDiffuseGIMode == DIFFUSE_GI_LIGHTMAP_2D) {
+        // Lightmap mode: only specular from directional light (diffuse is baked)
+        Lo = specular * gLightColor * NdotL * shadowFactor;
+    } else {
+        // Normal mode: both diffuse and specular
+        Lo = (diffuse + specular) * gLightColor * NdotL * shadowFactor;
+    }
     // return float4(F, 1.0); // TEMP: Return direct lighting only for testing
     // return float4(specular, 1.0); // TEMP: Return direct lighting only for testing
     // ============================================
@@ -297,32 +306,38 @@ float4 main(PSIn i) : SV_Target {
 
 
     // ============================================
-    // Diffuse IBL: Explicit Mode Selection
+    // Diffuse GI: Explicit Mode Selection
     // Mode 0: Volumetric Lightmap (Per-Pixel GI)
     // Mode 1: Global IBL (Skybox Irradiance)
     // Mode 2: None (Disabled, for baking)
-    // Mode 3: 2D Lightmap (UV2-based)
+    // Mode 3: 2D Lightmap (UV2-based, includes direct+indirect diffuse)
     // ============================================
-    float3 diffuseIBL = float3(0, 0, 0);
+    float3 diffuseGI = float3(0, 0, 0);
+    bool useLightmap2D = (gDiffuseGIMode == DIFFUSE_GI_LIGHTMAP_2D);
 
     if (gDiffuseGIMode == DIFFUSE_GI_VOLUMETRIC_LIGHTMAP) {
-        // Volumetric Lightmap mode
+        // Volumetric Lightmap mode (indirect only)
         if (IsVolumetricLightmapEnabled()) {
             float3 vlIrradiance = GetVolumetricLightmapDiffuse(i.posWS, N);
-
-            diffuseIBL = vlIrradiance * albedo;
+            diffuseGI = vlIrradiance * albedo;
         }
     } else if (gDiffuseGIMode == DIFFUSE_GI_GLOBAL_IBL) {
-        // Global IBL mode (Skybox Irradiance)
+        // Global IBL mode (Skybox Irradiance, indirect only)
         float3 irradiance = gIrradianceArray.Sample(gSamp, float4(N, probeIdxF)).rgb;
-        diffuseIBL = irradiance * albedo;
-    } else if (gDiffuseGIMode == DIFFUSE_GI_LIGHTMAP_2D) {
+        diffuseGI = irradiance * albedo;
+    } else if (useLightmap2D) {
         // 2D Lightmap mode (UV2-based)
+        // IMPORTANT: Lightmap contains BOTH direct + indirect diffuse irradiance
+        // Already includes: directional light diffuse, shadows, indirect GI, AO
+        // We only need to multiply by albedo (BRDF)
         float3 lmIrradiance = SampleLightmap2D(i.uv2, gLightmapIndex, gSamp);
-        diffuseIBL = lmIrradiance * albedo;
+        diffuseGI = lmIrradiance * albedo;
     }
+    // else: DIFFUSE_GI_NONE - diffuseGI stays at 0 (no diffuse GI)
 
-    // else: DIFFUSE_GI_NONE - diffuseIBL stays at 0 (no diffuse GI)
+    // ============================================
+    // Specular IBL
+    // ============================================
     // Sample BRDF LUT (X: NdotV, Y: roughness)
     float2 brdf = gBrdfLUT.Sample(gSamp, float2(NdotV, roughness)).rg;
 
@@ -337,14 +352,24 @@ float4 main(PSIn i) : SV_Target {
     float3 kD_IBL = float3(1.0, 1.0, 1.0) - kS_IBL;
     kD_IBL *= 1.0 - metallic;
 
-    // Combine diffuse and specular IBL
-    // CRITICAL: Divide diffuseIBL by PI for energy conservation with direct lighting
-    // Direct lighting uses (albedo/PI), so IBL diffuse should match
-    float3 ambient = (kD_IBL * diffuseIBL + specularIBL) * ao;
+    // ============================================
+    // Combine Ambient (Diffuse GI + Specular IBL)
+    // ============================================
+    float3 ambient;
+    if (useLightmap2D) {
+        // Lightmap mode:
+        // - diffuseGI already contains complete diffuse lighting (direct + indirect + shadow + AO)
+        // - Don't apply vertex AO (already baked into lightmap)
+        // - Don't apply kD_IBL energy conservation (lightmap is pre-computed irradiance)
+        // - Specular IBL still uses vertex AO (not baked)
+        ambient = diffuseGI + specularIBL * ao;
+    } else {
+        // Normal modes (VolumetricLightmap, GlobalIBL, None):
+        // - Apply energy conservation (kD_IBL) to diffuse
+        // - Apply vertex AO to both diffuse and specular
+        ambient = (kD_IBL * diffuseGI + specularIBL) * ao;
+    }
 
-    // Final color (linear space)
-    // Physically correct: only direct lighting (Lo) is affected by shadow
-    // IBL (ambient) represents omnidirectional environment light, not affected by directional shadow
     // ============================================
     // Emissive
     // ============================================
@@ -356,10 +381,21 @@ float4 main(PSIn i) : SV_Target {
         emissive = emissiveTex * gMatEmissiveStrength;
     }
 
-    // Final color: Emissive + Reflected Light
-    // CRITICAL: Emissive is added AFTER all lighting calculations
-    // It is NOT affected by shadows, IBL, or AO (self-emitted light)
-    float3 colorLin = emissive + (ambient * gIblIntensity) + Lo;
+    // ============================================
+    // Final Color Composition
+    // ============================================
+    // Lo = Direct lighting (specular only for lightmap mode, diffuse+specular otherwise)
+    // ambient = Diffuse GI + Specular IBL
+    // emissive = Self-emitted light
+    float3 colorLin;
+    if (useLightmap2D) {
+        // Lightmap mode: ambient already contains diffuse, Lo is specular only
+        // Don't multiply ambient by gIblIntensity (lightmap is absolute, not IBL-relative)
+        colorLin = emissive + ambient + Lo;
+    } else {
+        // Normal modes: ambient is IBL-based, scale by intensity
+        colorLin = emissive + (ambient * gIblIntensity) + Lo;
+    }
 
     // Alpha Output
     // Opaque (0): Always output alpha=1.0 (fully opaque)

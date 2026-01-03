@@ -71,7 +71,6 @@ void CLightmap2DManager::SetBakedData(
 // ============================================
 
 bool CLightmap2DManager::LoadLightmap(const std::string& lightmapPath) {
-    return false;
     UnloadLightmap();
 
     // Store path for hot-reload
