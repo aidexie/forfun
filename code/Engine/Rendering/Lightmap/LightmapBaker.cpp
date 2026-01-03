@@ -8,6 +8,7 @@
 #include "Core/Mesh.h"
 #include "Core/PathManager.h"
 #include "Core/Exporter/KTXExporter.h"
+#include "Core/RenderDocCapture.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -28,6 +29,12 @@ void CLightmapBaker::reportProgress(float progress, const char* stage)
 
 bool CLightmapBaker::Bake(CScene& scene, const Config& config, const std::string& lightmapPath)
 {
+    static bool s_captureFirstBake = true;
+    if (s_captureFirstBake)
+    {
+        CRenderDocCapture::BeginFrameCapture();
+        s_captureFirstBake = false;
+    }
     reportProgress(0.0f, "Starting lightmap bake");
 
     // Step 1: Pack atlas
@@ -55,14 +62,19 @@ bool CLightmapBaker::Bake(CScene& scene, const Config& config, const std::string
     reportProgress(0.96f, "Assigning lightmap indices");
     assignLightmapIndices(scene);
 
-    // Step 5: Save to file
-    reportProgress(0.98f, "Saving to file");
+    // Step 5: Save to file (for persistence on scene reload)
+    reportProgress(0.97f, "Saving to file");
     if (!saveToFile(lightmapPath)) {
-        CFFLog::Error("[LightmapBaker] Failed to save lightmap");
-        return false;
+       CFFLog::Error("[LightmapBaker] Failed to save lightmap");
+       // Continue anyway - we can still use the in-memory data
     }
 
+    // Step 6: Transfer baked data directly to manager (avoids reload from disk)
+    reportProgress(0.99f, "Transferring to runtime");
+    scene.GetLightmap2D().SetBakedData(std::move(m_gpuTexture), m_lightmapInfos);
+
     reportProgress(1.0f, "Bake complete");
+    CRenderDocCapture::EndFrameCapture();
     return true;
 }
 
@@ -282,7 +294,8 @@ struct SLightmapDataHeader {
 
 bool CLightmapBaker::saveToFile(const std::string& lightmapPath)
 {
-    if (m_lightmapInfos.empty()) {
+    if (m_lightmapInfos.empty())
+    {
         CFFLog::Error("[LightmapBaker] No lightmap infos to save");
         return false;
     }

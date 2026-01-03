@@ -38,10 +38,40 @@ void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
 }
 
 // ============================================
+// Direct Data Transfer
+// ============================================
+
+void CLightmap2DManager::SetBakedData(
+    RHI::TexturePtr atlasTexture,
+    const std::vector<SLightmapInfo>& infos
+) {
+    // Unload any existing data first
+    UnloadLightmap();
+
+    // Take ownership of the texture
+    m_atlasTexture = std::move(atlasTexture);
+
+    // Copy lightmap infos
+    m_lightmapInfos = infos;
+
+    // Create structured buffer for scaleOffsets
+    if (!CreateScaleOffsetBuffer()) {
+        CFFLog::Error("[Lightmap2DManager] SetBakedData: Failed to create scaleOffset buffer");
+        UnloadLightmap();
+        return;
+    }
+
+    m_isLoaded = true;
+    CFFLog::Info("[Lightmap2DManager] SetBakedData: Loaded %d lightmap infos directly from baker",
+                 static_cast<int>(infos.size()));
+}
+
+// ============================================
 // Load
 // ============================================
 
 bool CLightmap2DManager::LoadLightmap(const std::string& lightmapPath) {
+    return false;
     UnloadLightmap();
 
     // Store path for hot-reload

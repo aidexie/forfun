@@ -412,19 +412,12 @@ bool Panels::ExecutePending2DLightmapBake() {
     std::string lightmapPath = scene.GetLightmapPath();
     CLightmapBaker& baker = scene.GetLightmapBaker();
 
-    // Bake (includes assign indices + save to file)
+    // Bake (includes assign indices + save to file + transfer to manager)
+    // Note: Baker now calls SetBakedData() directly, no need to reload from disk
     if (baker.Bake(scene, s_lightmap2DConfig, lightmapPath)) {
         CFFLog::Info("[Lightmap2D] Bake complete! Atlas size: %dx%d",
                     baker.GetAtlasWidth(),
                     baker.GetAtlasHeight());
-
-        // Load/reload lightmap for immediate preview
-        CLightmap2DManager& lightmap2d = scene.GetLightmap2D();
-        if (lightmap2d.IsLoaded()) {
-            lightmap2d.ReloadLightmap();
-        } else {
-            lightmap2d.LoadLightmap(lightmapPath);
-        }
     } else {
         CFFLog::Error("[Lightmap2D] Bake failed!");
     }

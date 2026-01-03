@@ -32,6 +32,19 @@ public:
     void UnloadLightmap();
 
     // ============================================
+    // Direct Data Transfer (from baker, no file I/O)
+    // ============================================
+
+    // Set baked data directly from CLightmapBaker
+    // This avoids the round-trip to disk after baking
+    // atlasTexture: ownership transferred via std::move
+    // infos: copied
+    void SetBakedData(
+        RHI::TexturePtr atlasTexture,
+        const std::vector<SLightmapInfo>& infos
+    );
+
+    // ============================================
     // Bind to command list (called in SceneRenderer)
     // ============================================
 
