@@ -116,9 +116,16 @@ StructuredBuffer<SVertexPosition> g_Vertices : register(t5);
 StructuredBuffer<uint> g_Indices : register(t6);
 StructuredBuffer<STexelData> g_TexelData : register(t7);
 
-// Output: Accumulation buffer (float4 per atlas texel)
-// xyz = accumulated radiance, w = sample count
-RWStructuredBuffer<float4> g_Accumulation : register(u0);
+// Output: Accumulation buffer (uint4 per atlas texel) for atomic operations
+// xyz = accumulated radiance (fixed-point), w = sample count
+// Using fixed-point to enable InterlockedAdd on float values
+RWStructuredBuffer<uint4> g_Accumulation : register(u0);
+
+// Fixed-point scale factor for atomic accumulation
+// 65536 gives ~16-bit fractional precision, sufficient for HDR irradiance (0-100 range)
+// Max safe value before overflow: 2^32 / 65536 = 65536 (per channel per sample)
+static const float FIXED_POINT_SCALE = 65536.0f;
+static const float FIXED_POINT_INV_SCALE = 1.0f / 65536.0f;
 
 // ============================================
 // Geometric Normal Computation
@@ -336,13 +343,18 @@ void RayGen() {
     // For Lambertian: PDF = cos(theta) / PI, so weight = 1
     float3 contribution = payload.radiance;
 
-    // Simple accumulation (race condition possible with parallel samples)
-    // TODO: Implement proper atomic float accumulation
-    float4 current = g_Accumulation[atlasIdx];
-    g_Accumulation[atlasIdx] = float4(
-        current.xyz + contribution,
-        current.w + 1.0f
-    );
+    // Atomic accumulation using fixed-point integers
+    // Convert float to fixed-point, clamp to prevent overflow
+    // Max contribution per sample: ~65536 / FIXED_POINT_SCALE = 1.0 per channel is safe
+    // For HDR we allow higher values but clamp to prevent uint32 overflow
+    float3 clampedContrib = clamp(contribution, 0.0f, 500.0f);  // Reasonable HDR limit
+    uint3 fixedPoint = uint3(clampedContrib * FIXED_POINT_SCALE);
+
+    // Atomic add to accumulation buffer (no race conditions)
+    InterlockedAdd(g_Accumulation[atlasIdx].x, fixedPoint.x);
+    InterlockedAdd(g_Accumulation[atlasIdx].y, fixedPoint.y);
+    InterlockedAdd(g_Accumulation[atlasIdx].z, fixedPoint.z);
+    InterlockedAdd(g_Accumulation[atlasIdx].w, 1u);  // Sample count
 }
 
 // ============================================

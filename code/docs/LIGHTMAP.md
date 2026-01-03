@@ -375,11 +375,13 @@ cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D
 ## Known Issues
 
 ### Baking
-1. **Atomic float accumulation**: Current shader uses simple store, may have race conditions with multiple samples. Consider using `InterlockedCompareExchange` for proper atomic float add.
-2. **Dilation not GPU-accelerated**: Currently placeholder, needs compute shader implementation.
+1. **Dilation not GPU-accelerated**: Currently placeholder, needs compute shader implementation.
 
 ### Runtime
 None - persistence, binding, and hot-reload fully implemented.
+
+### Resolved
+- ~~**Atomic float accumulation**~~: Fixed using fixed-point integer accumulation with `InterlockedAdd`. Scale factor 65536 provides ~16-bit fractional precision.
 
 ---
 

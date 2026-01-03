@@ -514,18 +514,21 @@ bool CLightmap2DGPUBaker::CreateAccumulationBuffer(uint32_t atlasWidth, uint32_t
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!ctx) return false;
 
-    // Accumulation buffer: float4 per texel (xyz = radiance, w = sample count)
-    uint32_t bufferSize = atlasWidth * atlasHeight * sizeof(XMFLOAT4);
+    // Accumulation buffer: uint4 per texel (xyz = fixed-point radiance, w = sample count)
+    // Using uint4 to enable atomic InterlockedAdd operations
+    // Fixed-point scale: 65536 (defined in shader)
+    struct UInt4 { uint32_t x, y, z, w; };
+    uint32_t bufferSize = atlasWidth * atlasHeight * sizeof(UInt4);
 
     RHI::BufferDesc bufDesc;
     bufDesc.size = bufferSize;
     bufDesc.usage = RHI::EBufferUsage::UnorderedAccess | RHI::EBufferUsage::Structured;
     bufDesc.cpuAccess = RHI::ECPUAccess::None;
-    bufDesc.structureByteStride = sizeof(XMFLOAT4);
+    bufDesc.structureByteStride = sizeof(UInt4);
     bufDesc.debugName = "Lightmap2D_Accumulation";
 
     // Initialize to zero
-    std::vector<XMFLOAT4> zeroData(atlasWidth * atlasHeight, XMFLOAT4{0, 0, 0, 0});
+    std::vector<UInt4> zeroData(atlasWidth * atlasHeight, UInt4{0, 0, 0, 0});
 
     m_accumulationBuffer.reset(ctx->CreateBuffer(bufDesc, zeroData.data()));
     return m_accumulationBuffer != nullptr;

@@ -263,8 +263,8 @@ private:
     std::vector<uint32_t> m_texelToAtlasX;
     std::vector<uint32_t> m_texelToAtlasY;
 
-    // Accumulation buffer (float4 per atlas texel)
-    // xyz = accumulated radiance, w = sample count
+    // Accumulation buffer (uint4 per atlas texel) for atomic operations
+    // xyz = fixed-point accumulated radiance (scale 65536), w = sample count
     std::unique_ptr<RHI::IBuffer> m_accumulationBuffer;
 
     // Output texture (R16G16B16A16_FLOAT)
