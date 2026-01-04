@@ -36,34 +36,35 @@
 - **Volumetric Lightmap**: 自适应八叉树，GPU DXR 烘焙，Per-Pixel GI
   - 详细文档: `docs/VOLUMETRIC_LIGHTMAP.md`
 
+### Phase 3.1: 2D Lightmap ✅
+- **UV2 Generation**: xatlas 自动 UV 展开
+- **Atlas Packing**: 多 Mesh 打包到单张贴图
+- **GPU DXR Baking**: Path Tracing，多 Bounce GI
+- **GPU Dilation**: 防止 UV 边缘黑边
+- **Intel OIDN Denoising**: AI 降噪，98% 噪点消除
+- **Runtime Sampling**: 着色器集成，Per-Object Scale/Offset
+- 详细文档: `docs/LIGHTMAP.md`
+
 ---
 
-## Phase 3: 渲染进阶 (预计 8-10周)
+## 🚧 Phase 3: 渲染进阶 (进行中)
 
 **目标**: 高级渲染特性、后处理和架构升级
 
 **实现顺序**:
 ```
-3.1 Lightmap ──────────────────────────────────────┐
-                                                    │
-3.2 Deferred (G-Buffer) ──► 3.3 后处理 (SSAO/SSR) │
-                            │                       │
-                            └──► 3.4 RTGI ─────────┤
-                                                    │
-3.5 Instancing ────────────────────────────────────┤
-                                                    │
-3.6 RDG ──► 3.7 Descriptor Set ──► 3.8 Vulkan ────┘
+3.1 Lightmap ✅ ─────────────────────────────────────┐
+                                                     │
+3.2 Deferred (G-Buffer) ──► 3.3 后处理 (SSAO/SSR)  │
+                            │                        │
+                            └──► 3.4 RTGI ──────────┤
+                                                     │
+3.5 Instancing ─────────────────────────────────────┤
+                                                     │
+3.6 RDG ──► 3.7 Descriptor Set ──► 3.8 Vulkan ─────┘
 ```
 
-### 3.1 Lightmap 支持 - 3-4天
-
-复用 DXR 烘焙基础设施，烘焙静态光照到 UV2 纹理空间。
-
-**核心**: UV2 生成 (xatlas) + DXR Baking + Shader 采样
-
-**验收标准**: TestLightmap 通过
-
-### 3.2 Deferred 渲染 (Hybrid) - 1周
+### 3.2 Deferred 渲染 (Hybrid) - 1周 ⬅️ NEXT
 
 Hybrid Deferred: Forward+ 主渲染 + G-Buffer Pre-pass
 
@@ -71,6 +72,11 @@ Hybrid Deferred: Forward+ 主渲染 + G-Buffer Pre-pass
 - RT0: Albedo.rgb + Metallic.a (R8G8B8A8_UNORM)
 - RT1: Normal.xyz + Roughness.a (R16G16B16A16_FLOAT)
 - RT2: Emissive.rgb + AO.a (R8G8B8A8_UNORM)
+
+**任务分解**:
+1. 创建 G-Buffer RTs 和 DSV
+2. G-Buffer Pre-pass 着色器
+3. 屏幕空间 Pass 框架（为 SSAO/SSR 准备）
 
 **验收标准**: TestDeferredGBuffer 通过
 
@@ -169,7 +175,8 @@ GPU 粒子 + Compute Shader
 - [Forward+: Bringing Deferred Lighting to the Next Level](https://takahiroharada.files.wordpress.com/2015/04/forward_plus.pdf)
 - [Stupid Spherical Harmonics Tricks](https://www.ppsloan.org/publications/StupidSH36.pdf)
 - [GTAO](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_COLOR.pdf)
+- [Intel Open Image Denoise](https://www.openimagedenoise.org/)
 
 ---
 
-**Last Updated**: 2025-12-25
+**Last Updated**: 2026-01-04
