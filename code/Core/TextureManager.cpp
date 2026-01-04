@@ -20,7 +20,7 @@ CTextureManager::CTextureManager() {
     CFFLog::Info("TextureManager initialized");
 }
 
-RHI::ITexture* CTextureManager::Load(const std::string& path, bool srgb) {
+RHI::TextureSharedPtr CTextureManager::Load(const std::string& path, bool srgb) {
     if (path.empty()) {
         return srgb ? GetDefaultWhite() : GetDefaultBlack();
     }
@@ -31,7 +31,7 @@ RHI::ITexture* CTextureManager::Load(const std::string& path, bool srgb) {
     // Check cache
     auto it = m_textures.find(cacheKey);
     if (it != m_textures.end()) {
-        return it->second.texture.get();
+        return it->second.texture;
     }
 
     // Load from file
@@ -45,25 +45,25 @@ RHI::ITexture* CTextureManager::Load(const std::string& path, bool srgb) {
 
     CFFLog::Info(("Loaded texture: " + path + (srgb ? " (sRGB)" : " (Linear)")).c_str());
 
-    // Cache it
+    // Cache it with shared_ptr
     CachedTexture cached;
-    cached.texture.reset(texture);
+    cached.texture = RHI::TextureSharedPtr(texture);
     cached.isSRGB = srgb;
     m_textures[cacheKey] = std::move(cached);
 
-    return m_textures[cacheKey].texture.get();
+    return m_textures[cacheKey].texture;
 }
 
-RHI::ITexture* CTextureManager::GetDefaultWhite() {
-    return m_defaultWhite.get();
+RHI::TextureSharedPtr CTextureManager::GetDefaultWhite() {
+    return m_defaultWhite;
 }
 
-RHI::ITexture* CTextureManager::GetDefaultNormal() {
-    return m_defaultNormal.get();
+RHI::TextureSharedPtr CTextureManager::GetDefaultNormal() {
+    return m_defaultNormal;
 }
 
-RHI::ITexture* CTextureManager::GetDefaultBlack() {
-    return m_defaultBlack.get();
+RHI::TextureSharedPtr CTextureManager::GetDefaultBlack() {
+    return m_defaultBlack;
 }
 
 bool CTextureManager::IsLoaded(const std::string& path) const {
@@ -110,9 +110,9 @@ void CTextureManager::CreateDefaultTextures() {
         return rhiCtx->CreateTexture(desc, &pixel);
     };
 
-    m_defaultWhite.reset(MakeSolidTexture(255, 255, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM_SRGB));
-    m_defaultNormal.reset(MakeSolidTexture(128, 128, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
-    m_defaultBlack.reset(MakeSolidTexture(0, 0, 0, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
+    m_defaultWhite = RHI::TextureSharedPtr(MakeSolidTexture(255, 255, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM_SRGB));
+    m_defaultNormal = RHI::TextureSharedPtr(MakeSolidTexture(128, 128, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
+    m_defaultBlack = RHI::TextureSharedPtr(MakeSolidTexture(0, 0, 0, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
 
     CFFLog::Info("Created default textures (white, normal, black)");
 }

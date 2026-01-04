@@ -22,6 +22,18 @@ struct SLightmapDataHeader {
 };
 
 // ============================================
+// Query
+// ============================================
+
+RHI::ITexture* CLightmap2DManager::GetAtlasTexture() const {
+    // Return whichever texture is valid (owned takes priority)
+    if (m_atlasTextureOwned) {
+        return m_atlasTextureOwned.get();
+    }
+    return m_atlasTextureShared.get();
+}
+
+// ============================================
 // Bind
 // ============================================
 
@@ -31,7 +43,7 @@ void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
     }
 
     // Bind t16: Atlas texture
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 16, m_atlasTexture.get());
+    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 16, GetAtlasTexture());
 
     // Bind t17: ScaleOffset structured buffer
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
@@ -48,8 +60,9 @@ void CLightmap2DManager::SetBakedData(
     // Unload any existing data first
     UnloadLightmap();
 
-    // Take ownership of the texture
-    m_atlasTexture = std::move(atlasTexture);
+    // Take unique ownership of the texture (from baker)
+    m_atlasTextureOwned = std::move(atlasTexture);
+    m_atlasTextureShared.reset();  // Clear shared ptr
 
     // Copy lightmap infos
     m_lightmapInfos = infos;
@@ -140,9 +153,11 @@ bool CLightmap2DManager::LoadAtlasTexture(const std::string& atlasPath) {
         return false;
     }
 
-    m_atlasTexture.reset(CTextureManager::Instance().Load(atlasPath, false));
+    // Use shared_ptr from TextureManager (proper shared ownership)
+    m_atlasTextureShared = CTextureManager::Instance().Load(atlasPath, false);
+    m_atlasTextureOwned.reset();  // Clear owned ptr
 
-    if (!m_atlasTexture) {
+    if (!m_atlasTextureShared) {
         CFFLog::Error("[Lightmap2DManager] Failed to load atlas texture: %s", atlasPath.c_str());
         return false;
     }
@@ -190,7 +205,8 @@ bool CLightmap2DManager::CreateScaleOffsetBuffer() {
 
 void CLightmap2DManager::UnloadLightmap() {
     m_lightmapInfos.clear();
-    m_atlasTexture.reset();
+    m_atlasTextureOwned.reset();
+    m_atlasTextureShared.reset();
     m_scaleOffsetBuffer.reset();
     m_isLoaded = false;
     // Note: m_loadedPath is preserved for hot-reload

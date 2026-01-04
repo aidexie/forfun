@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RHI/RHIResources.h"
+#include "RHI/RHIPointers.h"
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -13,6 +14,11 @@
  * - Cache textures to avoid duplicate loading
  * - Manage color space (sRGB vs Linear)
  * - Provide default textures (white, normal, black)
+ *
+ * Ownership Model:
+ * - Uses shared_ptr for texture ownership (UE4/UE5 style)
+ * - Multiple systems can safely hold references to the same texture
+ * - Textures are automatically released when all references are dropped
  */
 class CTextureManager {
 public:
@@ -26,24 +32,24 @@ public:
      * Load a texture from file (with caching)
      * @param path Relative path from assets directory (e.g., "textures/wood_albedo.png")
      * @param srgb True for sRGB color space (albedo, emissive), false for linear (normal, metallic, roughness, AO)
-     * @return RHI Texture, or default texture if load fails
+     * @return Shared pointer to RHI Texture, or default texture if load fails
      */
-    RHI::ITexture* Load(const std::string& path, bool srgb);
+    RHI::TextureSharedPtr Load(const std::string& path, bool srgb);
 
     /**
      * Get default white texture (1x1 white pixel, sRGB)
      */
-    RHI::ITexture* GetDefaultWhite();
+    RHI::TextureSharedPtr GetDefaultWhite();
 
     /**
      * Get default normal map (1x1 pixel: RGB=(128,128,255) -> normal=(0,0,1))
      */
-    RHI::ITexture* GetDefaultNormal();
+    RHI::TextureSharedPtr GetDefaultNormal();
 
     /**
      * Get default black texture (1x1 black pixel, linear)
      */
-    RHI::ITexture* GetDefaultBlack();
+    RHI::TextureSharedPtr GetDefaultBlack();
 
     /**
      * Check if a texture is already loaded
@@ -65,15 +71,15 @@ private:
     ~CTextureManager() = default;
 
     struct CachedTexture {
-        std::unique_ptr<RHI::ITexture> texture;
+        RHI::TextureSharedPtr texture;
         bool isSRGB;
     };
 
     std::unordered_map<std::string, CachedTexture> m_textures;
 
-    std::unique_ptr<RHI::ITexture> m_defaultWhite;
-    std::unique_ptr<RHI::ITexture> m_defaultNormal;
-    std::unique_ptr<RHI::ITexture> m_defaultBlack;
+    RHI::TextureSharedPtr m_defaultWhite;
+    RHI::TextureSharedPtr m_defaultNormal;
+    RHI::TextureSharedPtr m_defaultBlack;
 
     void CreateDefaultTextures();
     std::string ResolveFullPath(const std::string& relativePath) const;

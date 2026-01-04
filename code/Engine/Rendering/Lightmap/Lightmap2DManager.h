@@ -66,7 +66,7 @@ public:
     bool IsLoaded() const { return m_isLoaded; }
     const std::string& GetLoadedPath() const { return m_loadedPath; }
 
-    RHI::ITexture* GetAtlasTexture() const { return m_atlasTexture.get(); }
+    RHI::ITexture* GetAtlasTexture() const;
     RHI::IBuffer* GetScaleOffsetBuffer() const { return m_scaleOffsetBuffer.get(); }
 
     const SLightmapInfo* GetLightmapInfo(int index) const;
@@ -84,6 +84,10 @@ private:
 
     // Runtime data
     std::vector<SLightmapInfo> m_lightmapInfos;
-    RHI::TexturePtr m_atlasTexture;
+
+    // Atlas texture - can be owned (from baker) or shared (from TextureManager)
+    RHI::TexturePtr m_atlasTextureOwned;           // Unique ownership (from baker)
+    RHI::TextureSharedPtr m_atlasTextureShared;    // Shared ownership (from TextureManager)
+
     RHI::BufferPtr m_scaleOffsetBuffer;  // StructuredBuffer<float4>
 };

@@ -108,9 +108,9 @@ public:
 
             // Verify TextureManager default textures exist
             CTextureManager& texMgr = CTextureManager::Instance();
-            ASSERT_NOT_NULL(ctx, texMgr.GetDefaultWhite(), "Default white texture");
-            ASSERT_NOT_NULL(ctx, texMgr.GetDefaultNormal(), "Default normal texture");
-            ASSERT_NOT_NULL(ctx, texMgr.GetDefaultBlack(), "Default black texture");
+            ASSERT_NOT_NULL(ctx, texMgr.GetDefaultWhite().get(), "Default white texture");
+            ASSERT_NOT_NULL(ctx, texMgr.GetDefaultNormal().get(), "Default normal texture");
+            ASSERT_NOT_NULL(ctx, texMgr.GetDefaultBlack().get(), "Default black texture");
 
             CFFLog::Info("✓ Frame 10: All material system assertions passed");
         });
