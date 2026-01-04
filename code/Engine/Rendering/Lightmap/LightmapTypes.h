@@ -62,4 +62,5 @@ struct SLightmap2DBakeConfig {
     int maxBounces = 3;           // Max ray bounces for GI
     float skyIntensity = 1.0f;    // Sky light intensity multiplier
     bool useGPU = true;           // Use DXR GPU baking if available
+    bool enableDenoiser = true;   // Enable Intel OIDN denoising
 };

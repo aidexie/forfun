@@ -376,9 +376,10 @@ cmdList->SetConstantBufferData(EShaderStage::Pixel, 7, &cb, sizeof(CB_Lightmap2D
 
 ### Baking
 1. **Noise in baked lightmap**: Path tracing with 64 samples produces visible noise. Need denoising.
+2. **Export2DTextureToKTX2_RHI fails on DX12**: KTX2 texture export fails when using DX12 backend, preventing lightmap save.
 
 ### Runtime
-None - persistence, binding, and hot-reload fully implemented.
+1. **Load texture from KTX2 fails**: KTX2 texture loading fails, preventing lightmap reload from disk.
 
 ---
 
@@ -403,9 +404,248 @@ None - persistence, binding, and hot-reload fully implemented.
    - Reference: [Intel OIDN](https://www.openimagedenoise.org/)
    - Alternative: NVIDIA OptiX Denoiser (GPU, NVIDIA-only)
 
-### Resolved
-- ~~**Atomic float accumulation**~~: Fixed using fixed-point integer accumulation with `InterlockedAdd`. Scale factor 65536 provides ~16-bit fractional precision.
-- ~~**Dilation not GPU-accelerated**~~: Implemented GPU compute shader dilation pass (`Lightmap2DDilate.cs.hlsl`). Uses ping-pong textures with configurable pass count.
+---
+
+## Intel OIDN Integration Roadmap
+
+### Overview
+
+Intel Open Image Denoise (OIDN) is a high-performance, AI-based denoising library optimized for ray-traced images. It will be integrated as **Step 5.5** in the lightmap pipeline:
+
+```
+Step 5:   GPU Dilation → fills gaps
+Step 5.5: OIDN Denoise → removes Monte Carlo noise (NEW)
+Step 6:   Runtime Sampling
+```
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Dependency | Required | Simplify code, no `#ifdef` branching |
+| Library Location | `E:/forfun/thirdparty/oidn/` | Consistent with other dependencies |
+| Denoise Timing | Configurable in `SLightmap2DGPUBakeConfig` | User controls performance/quality tradeoff |
+| Filter Type | `RTLightmap` (default) | OIDN's recommended filter for lightmaps |
+| Auxiliary Buffers | Color-only initially, normal optional later | Incremental approach |
+
+### Implementation Phases
+
+#### Phase 1: Library Integration (CMake)
+**Goal**: Add OIDN to build system
+
+**Tasks**:
+- Download OIDN binary release to `E:/forfun/thirdparty/oidn/`
+- Add `find_package(OpenImageDenoise)` or manual library linking in CMakeLists.txt
+- Verify library links correctly (stub call)
+
+**Files Modified**:
+- `CMakeLists.txt`
+
+**Estimated Complexity**: Low
+
+---
+
+#### Phase 2: Denoiser Wrapper Class
+**Goal**: Create `CLightmapDenoiser` encapsulating OIDN API
+
+**Tasks**:
+- Create `Engine/Rendering/Lightmap/LightmapDenoiser.h/cpp`
+- Initialize OIDN device (CPU)
+- Create `RTLightmap` filter
+- Implement `Denoise(float* colorBuffer, int width, int height)` API
+
+**Interface Design**:
+```cpp
+class CLightmapDenoiser {
+public:
+    bool Initialize();
+    void Shutdown();
+
+    // Denoise in-place (RGB float buffer)
+    bool Denoise(
+        float* colorBuffer,     // width * height * 3 floats (RGB)
+        int width,
+        int height,
+        float* normalBuffer = nullptr,  // Optional: width * height * 3 floats
+        float* albedoBuffer = nullptr   // Optional: width * height * 3 floats
+    );
+
+private:
+    oidn::DeviceRef m_device;
+    oidn::FilterRef m_filter;
+};
+```
+
+**Files Created**:
+- `Engine/Rendering/Lightmap/LightmapDenoiser.h`
+- `Engine/Rendering/Lightmap/LightmapDenoiser.cpp`
+
+**Estimated Complexity**: Low
+
+---
+
+#### Phase 3: GPU Readback
+**Goal**: Copy lightmap texture from GPU to CPU buffer
+
+**Tasks**:
+- After dilation pass, create CPU-readable staging texture
+- Copy `m_outputTexture` (R16G16B16A16_FLOAT) to staging
+- Map staging texture and convert to `float3` buffer for OIDN
+
+**Data Flow**:
+```
+GPU R16G16B16A16_FLOAT → Staging (CPU-readable) → Map → float3[] buffer
+```
+
+**Format Conversion**:
+```cpp
+// R16G16B16A16_FLOAT to float3
+for (int i = 0; i < width * height; ++i) {
+    colorBuffer[i * 3 + 0] = halfToFloat(srcPixel[i].r);
+    colorBuffer[i * 3 + 1] = halfToFloat(srcPixel[i].g);
+    colorBuffer[i * 3 + 2] = halfToFloat(srcPixel[i].b);
+}
+```
+
+**Files Modified**:
+- `Engine/Rendering/Lightmap/Lightmap2DGPUBaker.cpp`
+
+**Estimated Complexity**: Medium
+
+---
+
+#### Phase 4: OIDN Denoise Call
+**Goal**: Execute OIDN denoising on CPU buffer
+
+**Tasks**:
+- Call `CLightmapDenoiser::Denoise()` with color buffer
+- Handle errors from OIDN (check `device.getError()`)
+- Add progress callback for denoise step
+
+**Files Modified**:
+- `Engine/Rendering/Lightmap/Lightmap2DGPUBaker.cpp`
+
+**Estimated Complexity**: Low
+
+---
+
+#### Phase 5: CPU to GPU Upload
+**Goal**: Upload denoised buffer back to GPU texture
+
+**Tasks**:
+- Convert `float3[]` back to R16G16B16A16_FLOAT format
+- Create upload buffer with denoised data
+- Copy to `m_outputTexture`
+
+**Data Flow**:
+```
+float3[] buffer → R16G16B16A16_FLOAT → Upload Buffer → GPU Texture
+```
+
+**Files Modified**:
+- `Engine/Rendering/Lightmap/Lightmap2DGPUBaker.cpp`
+
+**Estimated Complexity**: Medium
+
+---
+
+#### Phase 6: Configuration Integration
+**Goal**: Add denoise toggle to bake config and UI
+
+**Tasks**:
+- Add `bool enableDenoiser = true;` to `SLightmap2DGPUBakeConfig`
+- Add checkbox in Scene Light Settings panel
+- Skip denoise pass when disabled
+
+**Files Modified**:
+- `Engine/Rendering/Lightmap/Lightmap2DGPUBaker.h` (config struct)
+- `Editor/Panels_SceneLightSettings.cpp` (UI)
+
+**Estimated Complexity**: Low
+
+---
+
+#### Phase 7: Auxiliary Buffers (Optional Quality Enhancement)
+**Goal**: Provide normal/albedo buffers to OIDN for better edge preservation
+
+**Tasks**:
+- Export normal buffer from `CLightmapRasterizer` (already available)
+- Optionally export albedo buffer from material data
+- Pass auxiliary buffers to `CLightmapDenoiser::Denoise()`
+
+**Note**: This phase is optional and can be deferred. Color-only denoising provides significant improvement.
+
+**Files Modified**:
+- `Engine/Rendering/Lightmap/LightmapDenoiser.cpp`
+- `Engine/Rendering/Lightmap/Lightmap2DGPUBaker.cpp`
+
+**Estimated Complexity**: Medium
+
+---
+
+### File Structure After Integration
+
+```
+Engine/Rendering/Lightmap/
+├── LightmapTypes.h
+├── LightmapUV2.h/cpp
+├── LightmapAtlas.h/cpp
+├── LightmapRasterizer.h/cpp
+├── LightmapBaker.h/cpp
+├── Lightmap2DGPUBaker.h/cpp    # Modified: add denoise step
+├── Lightmap2DManager.h/cpp
+└── LightmapDenoiser.h/cpp      # NEW: OIDN wrapper
+
+thirdparty/
+└── oidn/                        # NEW: Intel OIDN library
+    ├── include/
+    │   └── OpenImageDenoise/
+    │       └── oidn.hpp
+    └── lib/
+        ├── OpenImageDenoise.lib
+        └── OpenImageDenoise.dll
+```
+
+### Updated Pipeline Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Lightmap Pipeline                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Step 1: UV2 Generation (xatlas)                                │
+│  Step 2: Atlas Packing                                          │
+│  Step 3: Rasterization                                          │
+│  Step 4: Baking (DXR GPU Path Tracing)                          │
+│  Step 5: Dilation (GPU compute shader)                          │
+│  Step 5.5: OIDN Denoise (CPU, configurable)     ← NEW           │
+│  Step 6: Runtime Sampling                                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Configuration Reference Update
+
+**SLightmap2DGPUBakeConfig** (after OIDN integration):
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| samplesPerTexel | uint32_t | 64 | Monte Carlo samples per texel |
+| maxBounces | uint32_t | 3 | Maximum GI ray bounces |
+| skyIntensity | float | 1.0 | Sky light intensity multiplier |
+| **enableDenoiser** | **bool** | **true** | **Enable Intel OIDN denoising** |
+| progressCallback | function | nullptr | Progress reporting callback |
+
+### Dependencies
+
+| Library | Version | Source |
+|---------|---------|--------|
+| Intel OIDN | 2.x | [GitHub Releases](https://github.com/OpenImageDenoise/oidn/releases) |
+
+**System Requirements**:
+- CPU: SSE4.1 support (any modern x64 CPU)
+- Memory: ~100MB additional for OIDN runtime
+- No GPU required (CPU-based denoising)
 
 ---
 
@@ -471,7 +711,8 @@ None - persistence, binding, and hot-reload fully implemented.
 - [GPU Gems 2: High-Quality Global Illumination](https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows)
 - [UE4 Lightmass Documentation](https://docs.unrealengine.com/4.27/en-US/RenderingAndGraphics/Lightmass/)
 - [Bakery GPU Lightmapper](https://geom.io/bakery/wiki/)
+- [Intel Open Image Denoise](https://www.openimagedenoise.org/)
 
 ---
 
-**Last Updated**: 2025-12-27
+**Last Updated**: 2026-01-04

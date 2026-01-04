@@ -1,5 +1,6 @@
 #include "Lightmap2DGPUBaker.h"
 #include "LightmapRasterizer.h"
+#include "LightmapDenoiser.h"
 #include "../RayTracing/DXRAccelerationStructureManager.h"
 #include "../RayTracing/SceneGeometryExport.h"
 #include "../../Scene.h"
@@ -9,7 +10,9 @@
 #include "../../../RHI/ShaderCompiler.h"
 #include "../../../Core/FFLog.h"
 #include "../../../Core/PathManager.h"
+#include "../../../Core/Exporter/KTXExporter.h"
 #include <chrono>
+#include <cmath>
 
 using namespace DirectX;
 
@@ -817,6 +820,257 @@ void CLightmap2DGPUBaker::DilateLightmap(int radius) {
     ReportProgress(0.98f, "Dilation complete");
 }
 
+void CLightmap2DGPUBaker::DenoiseLightmap() {
+    if (!m_enableDenoiser) {
+        ReportProgress(0.99f, "Denoising skipped (disabled)");
+        return;
+    }
+
+    if (!m_outputTexture || m_atlasWidth == 0 || m_atlasHeight == 0) {
+        ReportProgress(0.99f, "Denoising skipped (no texture)");
+        return;
+    }
+
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!ctx) {
+        CFFLog::Error("[Lightmap2DGPUBaker] No render context for denoising");
+        return;
+    }
+
+    ReportProgress(0.90f, "Initializing denoiser");
+
+    // Initialize denoiser if needed
+    if (!m_denoiser) {
+        m_denoiser = std::make_unique<CLightmapDenoiser>();
+        if (!m_denoiser->Initialize()) {
+            CFFLog::Error("[Lightmap2DGPUBaker] Failed to initialize OIDN denoiser");
+            m_denoiser.reset();
+            return;
+        }
+    }
+
+    ReportProgress(0.91f, "Reading lightmap from GPU");
+
+    // ============================================
+    // Phase 1: GPU Readback
+    // ============================================
+
+    // Create staging texture for CPU read
+    RHI::TextureDesc stagingDesc;
+    stagingDesc.width = m_atlasWidth;
+    stagingDesc.height = m_atlasHeight;
+    stagingDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    stagingDesc.usage = RHI::ETextureUsage::Staging;
+    stagingDesc.cpuAccess = RHI::ECPUAccess::Read;
+    stagingDesc.debugName = "Lightmap2D_StagingRead";
+
+    std::unique_ptr<RHI::ITexture> stagingTexture(ctx->CreateTexture(stagingDesc, nullptr));
+    if (!stagingTexture) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Failed to create staging texture for readback");
+        return;
+    }
+
+    // Copy output texture to staging
+    auto* cmdList = ctx->GetCommandList();
+    if (cmdList) {
+        cmdList->CopyTexture(stagingTexture.get(), m_outputTexture.get());
+    }
+
+    // Execute and wait for GPU
+    ctx->ExecuteAndWait();
+
+    // Map staging texture
+    RHI::MappedTexture mapped = stagingTexture->Map(0, 0);
+    if (!mapped.pData) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Failed to map staging texture");
+        return;
+    }
+
+    // Convert R16G16B16A16_FLOAT to float3 buffer for OIDN
+    // R16G16B16A16_FLOAT = 8 bytes per pixel (4 x 16-bit float)
+    uint32_t pixelCount = m_atlasWidth * m_atlasHeight;
+    std::vector<float> colorBuffer(pixelCount * 3);  // RGB float
+
+    const uint16_t* srcData = static_cast<const uint16_t*>(mapped.pData);
+    uint32_t srcRowPitch = mapped.rowPitch / sizeof(uint16_t);  // Elements per row
+
+    // Helper: Convert half-precision float to single-precision
+    auto halfToFloat = [](uint16_t h) -> float {
+        uint32_t sign = (h >> 15) & 0x1;
+        uint32_t exp = (h >> 10) & 0x1F;
+        uint32_t mant = h & 0x3FF;
+
+        if (exp == 0) {
+            if (mant == 0) {
+                // Zero
+                return sign ? -0.0f : 0.0f;
+            } else {
+                // Denormalized
+                float m = mant / 1024.0f;
+                return (sign ? -1.0f : 1.0f) * std::ldexp(m, -14);
+            }
+        } else if (exp == 31) {
+            // Inf or NaN
+            if (mant == 0) {
+                return sign ? -INFINITY : INFINITY;
+            } else {
+                return NAN;
+            }
+        } else {
+            // Normalized
+            float m = 1.0f + mant / 1024.0f;
+            return (sign ? -1.0f : 1.0f) * std::ldexp(m, (int)exp - 15);
+        }
+    };
+
+    for (uint32_t y = 0; y < m_atlasHeight; y++) {
+        for (uint32_t x = 0; x < m_atlasWidth; x++) {
+            uint32_t srcIdx = y * srcRowPitch + x * 4;  // 4 components (RGBA)
+            uint32_t dstIdx = (y * m_atlasWidth + x) * 3;  // 3 components (RGB)
+
+            colorBuffer[dstIdx + 0] = halfToFloat(srcData[srcIdx + 0]);  // R
+            colorBuffer[dstIdx + 1] = halfToFloat(srcData[srcIdx + 1]);  // G
+            colorBuffer[dstIdx + 2] = halfToFloat(srcData[srcIdx + 2]);  // B
+        }
+    }
+
+    stagingTexture->Unmap(0, 0);
+
+    CFFLog::Info("[Lightmap2DGPUBaker] Read %ux%u lightmap from GPU", m_atlasWidth, m_atlasHeight);
+
+    // Debug: Log sample pixel values before denoising
+    if (pixelCount > 0) {
+        int sampleIdx = (m_atlasHeight / 2 * m_atlasWidth + m_atlasWidth / 2) * 3;
+        CFFLog::Info("[Lightmap2DGPUBaker] Sample pixel before denoise: R=%.4f G=%.4f B=%.4f",
+                     colorBuffer[sampleIdx], colorBuffer[sampleIdx + 1], colorBuffer[sampleIdx + 2]);
+    }
+
+    // Debug: Export before-denoise image to KTX2
+    {
+        std::string debugPath = FFPath::GetDebugDir() + "/lightmap_before_denoise.ktx2";
+        if (CKTXExporter::Export2DFromFloat3Buffer(colorBuffer.data(), m_atlasWidth, m_atlasHeight, debugPath)) {
+            CFFLog::Info("[Lightmap2DGPUBaker] Debug: Saved before-denoise image to %s", debugPath.c_str());
+        } else {
+            CFFLog::Warning("[Lightmap2DGPUBaker] Debug: Failed to save before-denoise image");
+        }
+    }
+
+    // ============================================
+    // Phase 2: OIDN Denoise
+    // ============================================
+
+    ReportProgress(0.93f, "Denoising with OIDN");
+
+    if (!m_denoiser->Denoise(colorBuffer.data(), m_atlasWidth, m_atlasHeight)) {
+        CFFLog::Error("[Lightmap2DGPUBaker] OIDN denoising failed: %s", m_denoiser->GetLastError());
+        return;
+    }
+
+    // Debug: Log sample pixel values after denoising
+    if (pixelCount > 0) {
+        int sampleIdx = (m_atlasHeight / 2 * m_atlasWidth + m_atlasWidth / 2) * 3;
+        CFFLog::Info("[Lightmap2DGPUBaker] Sample pixel after denoise: R=%.4f G=%.4f B=%.4f",
+                     colorBuffer[sampleIdx], colorBuffer[sampleIdx + 1], colorBuffer[sampleIdx + 2]);
+    }
+
+    // Debug: Export after-denoise image to KTX2
+    {
+        std::string debugPath = FFPath::GetDebugDir() + "/lightmap_after_denoise.ktx2";
+        if (CKTXExporter::Export2DFromFloat3Buffer(colorBuffer.data(), m_atlasWidth, m_atlasHeight, debugPath)) {
+            CFFLog::Info("[Lightmap2DGPUBaker] Debug: Saved after-denoise image to %s", debugPath.c_str());
+        } else {
+            CFFLog::Warning("[Lightmap2DGPUBaker] Debug: Failed to save after-denoise image");
+        }
+    }
+
+    // ============================================
+    // Phase 3: CPU to GPU Upload
+    // ============================================
+
+    ReportProgress(0.97f, "Uploading denoised lightmap to GPU");
+
+    // Helper: Convert single-precision float to half-precision
+    auto floatToHalf = [](float f) -> uint16_t {
+        uint32_t fltInt = *reinterpret_cast<uint32_t*>(&f);
+        uint32_t sign = (fltInt >> 31) & 0x1;
+        int32_t exp = ((fltInt >> 23) & 0xFF) - 127;
+        uint32_t mant = fltInt & 0x7FFFFF;
+
+        if (exp > 15) {
+            // Overflow to infinity
+            return (sign << 15) | (31 << 10);
+        } else if (exp < -14) {
+            // Underflow to zero or denormal
+            if (exp < -24) {
+                return sign << 15;  // Zero
+            }
+            // Denormalized
+            mant |= 0x800000;  // Add implicit bit
+            int shift = -14 - exp;
+            mant >>= shift;
+            return (sign << 15) | ((mant >> 13) & 0x3FF);
+        } else {
+            // Normalized
+            return (sign << 15) | ((exp + 15) << 10) | ((mant >> 13) & 0x3FF);
+        }
+    };
+
+    // Convert float3 back to R16G16B16A16_FLOAT
+    std::vector<uint16_t> uploadData(pixelCount * 4);  // RGBA half
+
+    for (uint32_t i = 0; i < pixelCount; i++) {
+        uploadData[i * 4 + 0] = floatToHalf(colorBuffer[i * 3 + 0]);  // R
+        uploadData[i * 4 + 1] = floatToHalf(colorBuffer[i * 3 + 1]);  // G
+        uploadData[i * 4 + 2] = floatToHalf(colorBuffer[i * 3 + 2]);  // B
+        uploadData[i * 4 + 3] = floatToHalf(1.0f);  // A = 1.0
+    }
+
+    // Create staging texture for upload
+    RHI::TextureDesc uploadStagingDesc;
+    uploadStagingDesc.width = m_atlasWidth;
+    uploadStagingDesc.height = m_atlasHeight;
+    uploadStagingDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
+    uploadStagingDesc.usage = RHI::ETextureUsage::Staging;
+    uploadStagingDesc.cpuAccess = RHI::ECPUAccess::Write;
+    uploadStagingDesc.debugName = "Lightmap2D_StagingWrite";
+
+    std::unique_ptr<RHI::ITexture> uploadStaging(ctx->CreateTexture(uploadStagingDesc, nullptr));
+    if (!uploadStaging) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Failed to create upload staging texture");
+        return;
+    }
+
+    // Map and write data
+    RHI::MappedTexture uploadMapped = uploadStaging->Map(0, 0);
+    if (!uploadMapped.pData) {
+        CFFLog::Error("[Lightmap2DGPUBaker] Failed to map upload staging texture");
+        return;
+    }
+
+    // Copy row by row (handle pitch)
+    uint8_t* dstPtr = static_cast<uint8_t*>(uploadMapped.pData);
+    const uint8_t* srcPtr = reinterpret_cast<const uint8_t*>(uploadData.data());
+    uint32_t srcRowSize = m_atlasWidth * 4 * sizeof(uint16_t);  // 8 bytes per pixel
+
+    for (uint32_t y = 0; y < m_atlasHeight; y++) {
+        memcpy(dstPtr + y * uploadMapped.rowPitch, srcPtr + y * srcRowSize, srcRowSize);
+    }
+
+    uploadStaging->Unmap(0, 0);
+
+    // Copy staging to output texture
+    cmdList = ctx->GetCommandList();
+    if (cmdList) {
+        cmdList->CopyTexture(m_outputTexture.get(), uploadStaging.get());
+    }
+
+    // Execute and wait
+    ctx->ExecuteAndWait();
+
+    CFFLog::Info("[Lightmap2DGPUBaker] Uploaded denoised lightmap to GPU");
+    ReportProgress(0.99f, "Denoising complete");
+}
+
 void CLightmap2DGPUBaker::ReleasePerBakeResources() {
     m_materialBuffer.reset();
     m_lightBuffer.reset();
@@ -887,6 +1141,7 @@ RHI::TexturePtr CLightmap2DGPUBaker::BakeLightmap(
     const SLightmap2DGPUBakeConfig& config)
 {
     m_progressCallback = config.progressCallback;
+    m_enableDenoiser = config.enableDenoiser;
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -946,6 +1201,9 @@ RHI::TexturePtr CLightmap2DGPUBaker::BakeLightmap(
 
     // Phase 8: Dilation (optional)
     DilateLightmap(4);
+
+    // Phase 9: OIDN Denoising (optional)
+    DenoiseLightmap();
 
     ReportProgress(1.0f, "Bake complete");
 

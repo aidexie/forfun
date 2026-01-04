@@ -270,7 +270,12 @@ void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
         ImGui::SliderInt("Samples/Texel##LM2D", &s_lightmap2DConfig.bakeConfig.samplesPerTexel, 16, 512);
         ImGui::SliderInt("Max Bounces##LM2D", &s_lightmap2DConfig.bakeConfig.maxBounces, 1, 8);
         ImGui::SliderFloat("Sky Intensity##LM2D", &s_lightmap2DConfig.bakeConfig.skyIntensity, 0.0f, 5.0f, "%.2f");
+        ImGui::Checkbox("Enable OIDN Denoiser##LM2D", &s_lightmap2DConfig.bakeConfig.enableDenoiser);
         ImGui::PopItemWidth();
+
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Intel Open Image Denoise - AI-based denoising\nfor cleaner lightmaps with fewer samples.");
+        }
 
         ImGui::Spacing();
 

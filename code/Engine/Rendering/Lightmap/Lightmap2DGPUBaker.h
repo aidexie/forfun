@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LightmapTypes.h"
+#include "LightmapDenoiser.h"
 #include "../RayTracing/DXRAccelerationStructureManager.h"
 #include "../RayTracing/SceneGeometryExport.h"
 #include "RHI/RHIDescriptors.h"
@@ -26,6 +27,7 @@
 // 3. GPU accumulation buffer
 // 4. GPU finalize pass (compute shader)
 // 5. Optional dilation pass
+// 6. Optional OIDN denoising (CPU)
 
 namespace RHI {
     class IRenderContext;
@@ -62,6 +64,7 @@ struct SLightmap2DGPUBakeConfig {
     uint32_t samplesPerTexel = 64;      // Monte Carlo samples per texel
     uint32_t maxBounces = 3;            // Max ray bounces for GI
     float skyIntensity = 1.0f;          // Sky light intensity multiplier
+    bool enableDenoiser = true;         // Enable Intel OIDN denoising
 
     // Progress callback (0.0 to 1.0)
     std::function<void(float, const char*)> progressCallback = nullptr;
@@ -220,6 +223,9 @@ private:
     // Optional: Dilation pass
     void DilateLightmap(int radius);
 
+    // Optional: OIDN denoising (requires GPU readback and upload)
+    void DenoiseLightmap();
+
     // ============================================
     // Cleanup
     // ============================================
@@ -290,4 +296,8 @@ private:
     // Skybox texture (borrowed from scene)
     RHI::ITexture* m_skyboxTexture = nullptr;
     RHI::ISampler* m_skyboxSampler = nullptr;
+
+    // OIDN denoiser
+    std::unique_ptr<CLightmapDenoiser> m_denoiser;
+    bool m_enableDenoiser = true;
 };

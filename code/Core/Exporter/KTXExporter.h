@@ -43,4 +43,13 @@ public:
         const std::string& filepath,
         bool hdr = true
     );
+
+    // Export CPU 2D float3 buffer to KTX2 file (for debugging)
+    // data: RGB float buffer (width * height * 3 floats)
+    static bool Export2DFromFloat3Buffer(
+        const float* data,
+        int width,
+        int height,
+        const std::string& filepath
+    );
 };

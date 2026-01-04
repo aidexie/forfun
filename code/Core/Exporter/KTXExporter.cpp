@@ -442,3 +442,76 @@ bool CKTXExporter::Export2DTextureToKTX2Native(void* nativeTexture, const std::s
     CFFLog::Warning("KTXExporter: Export2DTextureToKTX2Native is deprecated, use RHI texture instead");
     return false;
 }
+
+bool CKTXExporter::Export2DFromFloat3Buffer(
+    const float* data,
+    int width,
+    int height,
+    const std::string& filepath)
+{
+    using namespace DirectX::PackedVector;
+
+    if (!data || width <= 0 || height <= 0) {
+        CFFLog::Error("[KTXExporter] Invalid input for Export2DFromFloat3Buffer");
+        return false;
+    }
+
+    // Ensure output directory exists
+    std::filesystem::path path(filepath);
+    std::filesystem::create_directories(path.parent_path());
+
+    // Create KTX texture (R16G16B16A16_FLOAT format)
+    ktxTextureCreateInfo createInfo = {};
+    createInfo.glInternalformat = 0;
+    createInfo.vkFormat = 97;  // VK_FORMAT_R16G16B16A16_SFLOAT
+    createInfo.baseWidth = width;
+    createInfo.baseHeight = height;
+    createInfo.baseDepth = 1;
+    createInfo.numDimensions = 2;
+    createInfo.numLevels = 1;
+    createInfo.numLayers = 1;
+    createInfo.numFaces = 1;
+    createInfo.isArray = KTX_FALSE;
+    createInfo.generateMipmaps = KTX_FALSE;
+
+    ktxTexture2* ktxTex = nullptr;
+    KTX_error_code result = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &ktxTex);
+    if (result != KTX_SUCCESS) {
+        CFFLog::Error("[KTXExporter] Failed to create KTX texture: %d", result);
+        return false;
+    }
+
+    // Convert float3 (RGB) to R16G16B16A16_FLOAT (RGBA half)
+    std::vector<XMHALF4> halfData(width * height);
+    for (int i = 0; i < width * height; ++i) {
+        halfData[i].x = XMConvertFloatToHalf(data[i * 3 + 0]);  // R
+        halfData[i].y = XMConvertFloatToHalf(data[i * 3 + 1]);  // G
+        halfData[i].z = XMConvertFloatToHalf(data[i * 3 + 2]);  // B
+        halfData[i].w = XMConvertFloatToHalf(1.0f);             // A = 1.0
+    }
+
+    result = ktxTexture_SetImageFromMemory(
+        ktxTexture(ktxTex),
+        0, 0, 0,
+        (const ktx_uint8_t*)halfData.data(),
+        halfData.size() * sizeof(XMHALF4)
+    );
+
+    if (result != KTX_SUCCESS) {
+        CFFLog::Error("[KTXExporter] Failed to set image data: %d", result);
+        ktxTexture2_Destroy(ktxTex);
+        return false;
+    }
+
+    // Write to file
+    result = ktxTexture_WriteToNamedFile(ktxTexture(ktxTex), filepath.c_str());
+    if (result != KTX_SUCCESS) {
+        CFFLog::Error("[KTXExporter] Failed to write KTX file: %d", result);
+        ktxTexture2_Destroy(ktxTex);
+        return false;
+    }
+
+    ktxTexture2_Destroy(ktxTex);
+    CFFLog::Info("[KTXExporter] Exported float3 buffer to %s (%dx%d)", filepath.c_str(), width, height);
+    return true;
+}

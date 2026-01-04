@@ -16,6 +16,7 @@ set(IMGUI_BACK ${IMGUI_DIR}/backends)
 set(IMGUIZMO_DIR ${THIRD_PARTY_PATH}/ImGuizmo)
 set(KTX_DIR ${THIRD_PARTY_PATH}/KTX-Software)
 set(XATLAS_DIR ${THIRD_PARTY_PATH}/xatlas/source/xatlas)
+set(OIDN_DIR ${THIRD_PARTY_PATH}/oidn)
 
 add_library(imgui_docking STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -230,6 +231,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestDXRCubemapBaker.cpp
     ${CODE_PATH}/Tests/TestLightmapUV2.cpp
     ${CODE_PATH}/Tests/TestLightmap2D.cpp
+    ${CODE_PATH}/Tests/TestOIDNDenoiser.cpp
 )
 
 add_executable(forfun WIN32
@@ -247,6 +249,7 @@ target_include_directories(forfun PRIVATE
     ${THIRD_PARTY_PATH}/nlohmann
     ${THIRD_PARTY_PATH}/stb
     ${KTX_DIR}/include
+    ${OIDN_DIR}/include
 )
 target_compile_definitions(forfun PRIVATE UNICODE _UNICODE NOMINMAX)
 target_link_libraries(forfun
@@ -256,12 +259,29 @@ target_link_libraries(forfun
         xatlas
         d3d11 d3d12 dxgi d3dcompiler dxguid
         ${KTX_DIR}/lib/ktx.lib
+        ${OIDN_DIR}/lib/OpenImageDenoise.lib
 )
 
 # Copy KTX DLL to output directory
 add_custom_command(TARGET forfun POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${KTX_DIR}/bin/ktx.dll"
+        $<TARGET_FILE_DIR:forfun>
+)
+
+# Copy OIDN DLLs to output directory
+add_custom_command(TARGET forfun POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${OIDN_DIR}/bin/OpenImageDenoise.dll"
+        $<TARGET_FILE_DIR:forfun>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${OIDN_DIR}/bin/OpenImageDenoise_core.dll"
+        $<TARGET_FILE_DIR:forfun>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${OIDN_DIR}/bin/OpenImageDenoise_device_cpu.dll"
+        $<TARGET_FILE_DIR:forfun>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${OIDN_DIR}/bin/tbb12.dll"
         $<TARGET_FILE_DIR:forfun>
 )
 
@@ -335,6 +355,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/Lightmap/Lightmap2DGPUBaker.cpp
     ${CODE_PATH}/Engine/Rendering/Lightmap/Lightmap2DManager.h
     ${CODE_PATH}/Engine/Rendering/Lightmap/Lightmap2DManager.cpp
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapDenoiser.h
+    ${CODE_PATH}/Engine/Rendering/Lightmap/LightmapDenoiser.cpp
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.h
     ${CODE_PATH}/Engine/Rendering/DebugLinePass.cpp
     ${CODE_PATH}/Engine/Rendering/DebugRenderSystem.h
