@@ -341,7 +341,7 @@ void RayGen() {
 
     // Cosine-weighted sampling already accounts for PDF
     // For Lambertian: PDF = cos(theta) / PI, so weight = 1
-    float3 contribution = payload.radiance;
+    float3 contribution = payload.radiance * INV_PI;
 
     // Atomic accumulation using fixed-point integers
     // Convert float to fixed-point, clamp to prevent overflow

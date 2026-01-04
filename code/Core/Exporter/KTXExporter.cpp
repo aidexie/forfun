@@ -242,8 +242,8 @@ static bool Export2DTextureToKTX2_RHI(ITexture* texture, const std::string& file
     }
 
     // Copy source to staging
-    cmdList->CopyTexture(stagingTexture.get(), texture);
-
+    cmdList->CopyTextureToSlice(stagingTexture.get(), 0, 0, texture);
+    ctx->ExecuteAndWait();
     // Read each mip level
     for (uint32_t mip = 0; mip < mipLevels; ++mip) {
         MappedTexture mapped = stagingTexture->Map(0, mip);

@@ -36,4 +36,5 @@ namespace Panels {
     // Deferred GPU Bake (call at start of frame, before scene rendering)
     // Returns true if a bake was executed this frame
     bool ExecutePendingGPUBake();
+    bool ExecutePending2DLightmapBake();
 }
