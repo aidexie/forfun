@@ -63,4 +63,5 @@ struct SLightmap2DBakeConfig {
     float skyIntensity = 1.0f;    // Sky light intensity multiplier
     bool useGPU = true;           // Use DXR GPU baking if available
     bool enableDenoiser = true;   // Enable Intel OIDN denoising
+    bool debugExportImages = false; // Export debug KTX2 images (before/after denoise)
 };

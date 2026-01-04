@@ -870,13 +870,13 @@ void CLightmap2DGPUBaker::DenoiseLightmap() {
         return;
     }
 
-    // Copy output texture to staging
+    // Copy output texture to staging (use CopyTextureToSlice for proper 2D texture copy)
     auto* cmdList = ctx->GetCommandList();
     if (cmdList) {
-        cmdList->CopyTexture(stagingTexture.get(), m_outputTexture.get());
+        cmdList->CopyTextureToSlice(stagingTexture.get(), 0, 0, m_outputTexture.get());
     }
 
-    // Execute and wait for GPU
+    // Execute and wait for GPU to complete the copy
     ctx->ExecuteAndWait();
 
     // Map staging texture
@@ -938,15 +938,8 @@ void CLightmap2DGPUBaker::DenoiseLightmap() {
 
     CFFLog::Info("[Lightmap2DGPUBaker] Read %ux%u lightmap from GPU", m_atlasWidth, m_atlasHeight);
 
-    // Debug: Log sample pixel values before denoising
-    if (pixelCount > 0) {
-        int sampleIdx = (m_atlasHeight / 2 * m_atlasWidth + m_atlasWidth / 2) * 3;
-        CFFLog::Info("[Lightmap2DGPUBaker] Sample pixel before denoise: R=%.4f G=%.4f B=%.4f",
-                     colorBuffer[sampleIdx], colorBuffer[sampleIdx + 1], colorBuffer[sampleIdx + 2]);
-    }
-
-    // Debug: Export before-denoise image to KTX2
-    {
+    // Debug: Export before-denoise image to KTX2 (if enabled)
+    if (m_debugExportImages) {
         std::string debugPath = FFPath::GetDebugDir() + "/lightmap_before_denoise.ktx2";
         if (CKTXExporter::Export2DFromFloat3Buffer(colorBuffer.data(), m_atlasWidth, m_atlasHeight, debugPath)) {
             CFFLog::Info("[Lightmap2DGPUBaker] Debug: Saved before-denoise image to %s", debugPath.c_str());
@@ -966,15 +959,8 @@ void CLightmap2DGPUBaker::DenoiseLightmap() {
         return;
     }
 
-    // Debug: Log sample pixel values after denoising
-    if (pixelCount > 0) {
-        int sampleIdx = (m_atlasHeight / 2 * m_atlasWidth + m_atlasWidth / 2) * 3;
-        CFFLog::Info("[Lightmap2DGPUBaker] Sample pixel after denoise: R=%.4f G=%.4f B=%.4f",
-                     colorBuffer[sampleIdx], colorBuffer[sampleIdx + 1], colorBuffer[sampleIdx + 2]);
-    }
-
-    // Debug: Export after-denoise image to KTX2
-    {
+    // Debug: Export after-denoise image to KTX2 (if enabled)
+    if (m_debugExportImages) {
         std::string debugPath = FFPath::GetDebugDir() + "/lightmap_after_denoise.ktx2";
         if (CKTXExporter::Export2DFromFloat3Buffer(colorBuffer.data(), m_atlasWidth, m_atlasHeight, debugPath)) {
             CFFLog::Info("[Lightmap2DGPUBaker] Debug: Saved after-denoise image to %s", debugPath.c_str());
@@ -1061,7 +1047,7 @@ void CLightmap2DGPUBaker::DenoiseLightmap() {
     // Copy staging to output texture
     cmdList = ctx->GetCommandList();
     if (cmdList) {
-        cmdList->CopyTexture(m_outputTexture.get(), uploadStaging.get());
+        cmdList->CopyTextureToSlice(m_outputTexture.get(), 0, 0, uploadStaging.get());
     }
 
     // Execute and wait
@@ -1142,6 +1128,7 @@ RHI::TexturePtr CLightmap2DGPUBaker::BakeLightmap(
 {
     m_progressCallback = config.progressCallback;
     m_enableDenoiser = config.enableDenoiser;
+    m_debugExportImages = config.debugExportImages;
 
     auto startTime = std::chrono::high_resolution_clock::now();
 

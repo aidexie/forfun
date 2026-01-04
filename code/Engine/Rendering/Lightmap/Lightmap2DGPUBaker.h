@@ -65,6 +65,7 @@ struct SLightmap2DGPUBakeConfig {
     uint32_t maxBounces = 3;            // Max ray bounces for GI
     float skyIntensity = 1.0f;          // Sky light intensity multiplier
     bool enableDenoiser = true;         // Enable Intel OIDN denoising
+    bool debugExportImages = false;     // Export debug KTX2 images (before/after denoise)
 
     // Progress callback (0.0 to 1.0)
     std::function<void(float, const char*)> progressCallback = nullptr;
@@ -300,4 +301,5 @@ private:
     // OIDN denoiser
     std::unique_ptr<CLightmapDenoiser> m_denoiser;
     bool m_enableDenoiser = true;
+    bool m_debugExportImages = false;
 };

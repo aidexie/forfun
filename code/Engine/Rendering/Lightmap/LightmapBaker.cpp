@@ -244,6 +244,7 @@ bool CLightmapBaker::bakeIrradiance(CScene& scene, const SLightmap2DBakeConfig& 
     gpuConfig.maxBounces = config.maxBounces;
     gpuConfig.skyIntensity = config.skyIntensity;
     gpuConfig.enableDenoiser = config.enableDenoiser;
+    gpuConfig.debugExportImages = config.debugExportImages;
     gpuConfig.progressCallback = [this](float progress, const char* stage) {
         // Map GPU baker progress (0-1) to our progress range (0.30 - 0.95)
         float mappedProgress = 0.30f + progress * 0.65f;
