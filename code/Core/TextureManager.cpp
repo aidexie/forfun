@@ -5,8 +5,10 @@
 #include "DebugPaths.h"
 #include "PathManager.h"
 #include "Loader/TextureLoader.h"
+#include "Loader/KTXLoader.h"
 #include <codecvt>
 #include <locale>
+#include <algorithm>
 
 CTextureManager& CTextureManager::Instance() {
     static CTextureManager instance;
@@ -120,10 +122,22 @@ std::string CTextureManager::ResolveFullPath(const std::string& relativePath) co
 }
 
 RHI::ITexture* CTextureManager::LoadTextureFromFile(const std::string& fullPath, bool srgb) {
-    // Convert to wide string for WIC loader
+    // Get file extension (case-insensitive)
+    std::string ext;
+    size_t dotPos = fullPath.rfind('.');
+    if (dotPos != std::string::npos) {
+        ext = fullPath.substr(dotPos);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    }
+
+    // Route to appropriate loader based on extension
+    if (ext == ".ktx2" || ext == ".ktx") {
+        // KTX2 loader (ignores srgb flag - format is embedded in file)
+        return CKTXLoader::Load2DTextureFromKTX2(fullPath);
+    }
+
+    // Default: WIC loader for PNG/JPG/BMP/TGA/etc.
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
     std::wstring wpath = converter.from_bytes(fullPath);
-
-    // Use RHI-based WIC loader - returns RHI::ITexture* directly
     return LoadTextureWIC(wpath, srgb);
 }
