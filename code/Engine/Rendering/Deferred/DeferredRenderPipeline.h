@@ -3,7 +3,9 @@
 #include "GBuffer.h"
 #include "DepthPrePass.h"
 #include "GBufferPass.h"
+#include "DeferredLightingPass.h"
 #include "Engine/Rendering/ShadowPass.h"
+#include "Engine/Rendering/ClusteredLightingPass.h"
 #include "Engine/Rendering/PostProcessPass.h"
 #include "Engine/Rendering/DebugLinePass.h"
 #include "Engine/Rendering/GridPass.h"
@@ -94,6 +96,8 @@ private:
     CDepthPrePass m_depthPrePass;
     CGBufferPass m_gbufferPass;
     CShadowPass m_shadowPass;
+    CDeferredLightingPass m_lightingPass;
+    CClusteredLightingPass m_clusteredLighting;
     CPostProcessPass m_postProcess;
     CDebugLinePass m_debugLinePass;
 

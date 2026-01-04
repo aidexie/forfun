@@ -127,6 +127,13 @@ bool CDeferredRenderPipeline::Initialize()
         return false;
     }
 
+    if (!m_lightingPass.Initialize()) {
+        CFFLog::Error("Failed to initialize DeferredLightingPass");
+        return false;
+    }
+
+    m_clusteredLighting.Initialize();
+
     m_postProcess.Initialize();
     m_debugLinePass.Initialize();
     CGridPass::Instance().Initialize();
@@ -143,6 +150,8 @@ void CDeferredRenderPipeline::Shutdown()
     m_depthPrePass.Shutdown();
     m_gbufferPass.Shutdown();
     m_shadowPass.Shutdown();
+    m_lightingPass.Shutdown();
+    m_clusteredLighting.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
     CGridPass::Instance().Shutdown();
@@ -278,35 +287,43 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 5. Deferred Lighting Pass (TODO - Phase 3.2.2)
-    // For now, just copy G-Buffer albedo to HDR RT
+    // 5. Clustered Lighting Compute (build light grid)
     // ============================================
     {
-        CScopedDebugEvent evt(cmdList, L"Deferred Lighting");
+        CScopedDebugEvent evt(cmdList, L"Clustered Lighting Compute");
+        m_clusteredLighting.Resize(ctx.width, ctx.height);
+        m_clusteredLighting.BuildClusterGrid(cmdList,
+                                             ctx.camera.GetProjectionMatrix(),
+                                             ctx.camera.nearZ, ctx.camera.farZ);
+        m_clusteredLighting.CullLights(cmdList, &ctx.scene, ctx.camera.GetViewMatrix());
+    }
 
-        // Set HDR render target
-        ITexture* hdrRT = m_offHDR.get();
-        cmdList->SetRenderTargets(1, &hdrRT, nullptr);
-        cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
-        cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
-
-        const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
-
-        // Debug visualization or placeholder lighting
+    // ============================================
+    // 6. Deferred Lighting Pass
+    // ============================================
+    {
+        // Debug visualization mode or full lighting
         if (m_debugMode != EGBufferDebugMode::None) {
+            // Set HDR render target for debug vis
+            ITexture* hdrRT = m_offHDR.get();
+            cmdList->SetRenderTargets(1, &hdrRT, nullptr);
+            cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
+            cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
+
+            const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
+
             renderDebugVisualization(ctx.width, ctx.height);
         } else {
-            // TODO: Implement proper deferred lighting
-            // For now, just visualize albedo as placeholder
-            m_debugMode = EGBufferDebugMode::Albedo;
-            renderDebugVisualization(ctx.width, ctx.height);
-            m_debugMode = EGBufferDebugMode::None;
+            // Full deferred lighting
+            m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
+                                  m_offHDR.get(), ctx.width, ctx.height,
+                                  &m_shadowPass, &m_clusteredLighting);
         }
     }
 
     // ============================================
-    // 6. Post-Processing (HDR -> LDR)
+    // 7. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
@@ -319,7 +336,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 7. Debug Lines (if enabled)
+    // 8. Debug Lines (if enabled)
     // ============================================
     if (ctx.showFlags.DebugLines) {
         CScopedDebugEvent evt(cmdList, L"Debug Lines");
@@ -331,7 +348,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 8. Grid (if enabled)
+    // 9. Grid (if enabled)
     // ============================================
     if (ctx.showFlags.Grid) {
         CScopedDebugEvent evt(cmdList, L"Grid");
@@ -343,7 +360,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 9. Copy to final output (if provided)
+    // 10. Copy to final output (if provided)
     // ============================================
     if (ctx.finalOutputTexture) {
         cmdList->UnbindRenderTargets();
@@ -354,7 +371,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 10. Transition LDR to SRV state
+    // 11. Transition LDR to SRV state
     // ============================================
     cmdList->UnbindRenderTargets();
     cmdList->Barrier(m_offLDR.get(), EResourceState::RenderTarget, EResourceState::ShaderResource);

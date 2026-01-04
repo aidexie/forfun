@@ -373,6 +373,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/Deferred/DepthPrePass.cpp
     ${CODE_PATH}/Engine/Rendering/Deferred/GBufferPass.h
     ${CODE_PATH}/Engine/Rendering/Deferred/GBufferPass.cpp
+    ${CODE_PATH}/Engine/Rendering/Deferred/DeferredLightingPass.h
+    ${CODE_PATH}/Engine/Rendering/Deferred/DeferredLightingPass.cpp
     ${CODE_PATH}/Engine/Rendering/Deferred/DeferredRenderPipeline.h
     ${CODE_PATH}/Engine/Rendering/Deferred/DeferredRenderPipeline.cpp
 )
@@ -383,6 +385,7 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/MainPass.ps.hlsl
     ${CODE_PATH}/Shader/GBuffer.vs.hlsl
     ${CODE_PATH}/Shader/GBuffer.ps.hlsl
+    ${CODE_PATH}/Shader/DeferredLighting.ps.hlsl
     ${CODE_PATH}/Shader/IrradianceConvolution.vs.hlsl
     ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
     ${CODE_PATH}/Shader/PreFilterEnvironmentMap.vs.hlsl
@@ -434,6 +437,7 @@ if (MSVC)
     set_source_files_properties(
         ${CODE_PATH}/Shader/MainPass.ps.hlsl
         ${CODE_PATH}/Shader/GBuffer.ps.hlsl
+        ${CODE_PATH}/Shader/DeferredLighting.ps.hlsl
         ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
         ${CODE_PATH}/Shader/PreFilterEnvironmentMap.ps.hlsl
         ${CODE_PATH}/Shader/BrdfLut.ps.hlsl
