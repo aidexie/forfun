@@ -232,6 +232,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestLightmapUV2.cpp
     ${CODE_PATH}/Tests/TestLightmap2D.cpp
     ${CODE_PATH}/Tests/TestOIDNDenoiser.cpp
+    ${CODE_PATH}/Tests/TestGBuffer.cpp
 )
 
 add_executable(forfun WIN32
@@ -365,12 +366,23 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.h
     ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.cpp
     ${CODE_PATH}/Engine/Rendering/GridPass.cpp
+    # Deferred Rendering Pipeline (Phase 3.2)
+    ${CODE_PATH}/Engine/Rendering/Deferred/GBuffer.h
+    ${CODE_PATH}/Engine/Rendering/Deferred/GBuffer.cpp
+    ${CODE_PATH}/Engine/Rendering/Deferred/DepthPrePass.h
+    ${CODE_PATH}/Engine/Rendering/Deferred/DepthPrePass.cpp
+    ${CODE_PATH}/Engine/Rendering/Deferred/GBufferPass.h
+    ${CODE_PATH}/Engine/Rendering/Deferred/GBufferPass.cpp
+    ${CODE_PATH}/Engine/Rendering/Deferred/DeferredRenderPipeline.h
+    ${CODE_PATH}/Engine/Rendering/Deferred/DeferredRenderPipeline.cpp
 )
 
 # Shader files (for IDE visibility)
 set(SHADER_SOURCES
     ${CODE_PATH}/Shader/MainPass.vs.hlsl
     ${CODE_PATH}/Shader/MainPass.ps.hlsl
+    ${CODE_PATH}/Shader/GBuffer.vs.hlsl
+    ${CODE_PATH}/Shader/GBuffer.ps.hlsl
     ${CODE_PATH}/Shader/IrradianceConvolution.vs.hlsl
     ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
     ${CODE_PATH}/Shader/PreFilterEnvironmentMap.vs.hlsl
@@ -395,6 +407,7 @@ if (MSVC)
     # Vertex Shaders
     set_source_files_properties(
         ${CODE_PATH}/Shader/MainPass.vs.hlsl
+        ${CODE_PATH}/Shader/GBuffer.vs.hlsl
         ${CODE_PATH}/Shader/IrradianceConvolution.vs.hlsl
         ${CODE_PATH}/Shader/PreFilterEnvironmentMap.vs.hlsl
         ${CODE_PATH}/Shader/BrdfLut.vs.hlsl
@@ -420,6 +433,7 @@ if (MSVC)
     # Pixel Shaders
     set_source_files_properties(
         ${CODE_PATH}/Shader/MainPass.ps.hlsl
+        ${CODE_PATH}/Shader/GBuffer.ps.hlsl
         ${CODE_PATH}/Shader/IrradianceConvolution.ps.hlsl
         ${CODE_PATH}/Shader/PreFilterEnvironmentMap.ps.hlsl
         ${CODE_PATH}/Shader/BrdfLut.ps.hlsl
