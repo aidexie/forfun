@@ -2,7 +2,7 @@
 #include "RHI/RHIResources.h"
 #include <string>
 
-class CForwardRenderPipeline;
+class CRenderPipeline;
 
 // Screenshot utilities for automated testing
 // Captures rendered frames to PNG files for AI visual verification
@@ -14,11 +14,11 @@ public:
     // Returns true on success
     static bool Capture(RHI::ITexture* texture, const std::string& path);
 
-    // Capture from ForwardRenderPipeline offscreen target
-    static bool CaptureFromPipeline(CForwardRenderPipeline* pipeline, const std::string& path);
+    // Capture from render pipeline offscreen target
+    static bool CaptureFromPipeline(CRenderPipeline* pipeline, const std::string& path);
 
     // Capture for test cases with automatic naming
-    static bool CaptureTest(CForwardRenderPipeline* pipeline, const std::string& testName, int frame);
+    static bool CaptureTest(CRenderPipeline* pipeline, const std::string& testName, int frame);
 
 private:
     static bool EnsureDirectoryExists(const std::string& path);

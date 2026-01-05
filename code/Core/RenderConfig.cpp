@@ -26,6 +26,25 @@ static RHI::EBackend StringToBackend(const std::string& str) {
 }
 
 // ============================================
+// Helper: Pipeline enum to/from string
+// ============================================
+
+static std::string PipelineToString(ERenderPipeline pipeline) {
+    switch (pipeline) {
+        case ERenderPipeline::Forward: return "Forward";
+        case ERenderPipeline::Deferred: return "Deferred";
+        default: return "Forward";
+    }
+}
+
+static ERenderPipeline StringToPipeline(const std::string& str) {
+    if (str == "Forward") return ERenderPipeline::Forward;
+    if (str == "Deferred") return ERenderPipeline::Deferred;
+    CFFLog::Warning("[RenderConfig] Unknown pipeline '%s', defaulting to Forward", str.c_str());
+    return ERenderPipeline::Forward;
+}
+
+// ============================================
 // Load / Save
 // ============================================
 
@@ -43,6 +62,11 @@ bool SRenderConfig::Load(const std::string& path, SRenderConfig& outConfig) {
         // Backend
         if (j.contains("backend")) {
             outConfig.backend = StringToBackend(j["backend"].get<std::string>());
+        }
+
+        // Pipeline
+        if (j.contains("pipeline")) {
+            outConfig.pipeline = StringToPipeline(j["pipeline"].get<std::string>());
         }
 
         // Window settings
@@ -63,6 +87,7 @@ bool SRenderConfig::Load(const std::string& path, SRenderConfig& outConfig) {
 
         CFFLog::Info("[RenderConfig] Loaded config from %s", path.c_str());
         CFFLog::Info("[RenderConfig]   Backend: %s", BackendToString(outConfig.backend).c_str());
+        CFFLog::Info("[RenderConfig]   Pipeline: %s", PipelineToString(outConfig.pipeline).c_str());
         CFFLog::Info("[RenderConfig]   Resolution: %dx%d", outConfig.windowWidth, outConfig.windowHeight);
         CFFLog::Info("[RenderConfig]   VSync: %s", outConfig.vsync ? "On" : "Off");
 
@@ -80,6 +105,9 @@ bool SRenderConfig::Save(const std::string& path, const SRenderConfig& config) {
 
         // Backend
         j["backend"] = BackendToString(config.backend);
+
+        // Pipeline
+        j["pipeline"] = PipelineToString(config.pipeline);
 
         // Window settings
         j["window"]["width"] = config.windowWidth;

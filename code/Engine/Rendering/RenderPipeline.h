@@ -5,6 +5,8 @@
 // Forward declarations
 class CCamera;
 class CScene;
+class CDebugLinePass;
+class CClusteredLightingPass;
 
 // ============================================
 // CRenderPipeline - 渲染流程基类
@@ -17,9 +19,8 @@ class CScene;
 // - 通过 ShowFlags 控制渲染哪些内容
 //
 // 子类实现：
-// - CForwardRenderPipeline: Forward 渲染流程（编辑器 + 游戏视图）
-// - CReflectionProbePipeline: Reflection Probe 烘焙流程（未来）
-// - CDeferredRenderPipeline: Deferred 渲染流程（未来）
+// - CForwardRenderPipeline: Forward+ 渲染流程（clustered lighting）
+// - CDeferredRenderPipeline: True Deferred 渲染流程
 // ============================================
 class CRenderPipeline
 {
@@ -69,14 +70,6 @@ public:
     // ============================================
     // 核心渲染接口（纯虚函数）
     // ============================================
-    // 子类必须实现此方法，定义具体的渲染流程
-    //
-    // 典型的渲染流程：
-    // 1. Shadow Pass (if showFlags.Shadows)
-    // 2. Scene Rendering (Opaque + Transparent + Skybox)
-    // 3. Post-Processing (if showFlags.PostProcessing)
-    // 4. Debug Rendering (if showFlags.DebugLines)
-    // 5. Editor Tools (Grid, Gizmos, etc.)
     virtual void Render(const RenderContext& ctx) = 0;
 
     // ============================================
@@ -84,4 +77,23 @@ public:
     // ============================================
     virtual bool Initialize() { return true; }
     virtual void Shutdown() {}
+
+    // ============================================
+    // 离屏纹理访问接口（用于 ImGui 显示和测试）
+    // ============================================
+    virtual void* GetOffscreenSRV() const = 0;
+    virtual void* GetOffscreenTexture() const = 0;
+    virtual RHI::ITexture* GetOffscreenTextureRHI() const = 0;
+    virtual unsigned int GetOffscreenWidth() const = 0;
+    virtual unsigned int GetOffscreenHeight() const = 0;
+
+    // ============================================
+    // Debug Line Pass 访问（用于调试渲染）
+    // ============================================
+    virtual CDebugLinePass& GetDebugLinePass() = 0;
+
+    // ============================================
+    // Clustered Lighting Pass 访问（用于 debug UI）
+    // ============================================
+    virtual CClusteredLightingPass& GetClusteredLightingPass() = 0;
 };

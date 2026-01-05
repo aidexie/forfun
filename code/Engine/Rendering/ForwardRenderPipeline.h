@@ -40,22 +40,22 @@ public:
     void Render(const RenderContext& ctx) override;
 
     // 访问离屏纹理（用于 ImGui 显示）
-    void* GetOffscreenSRV() const {
+    void* GetOffscreenSRV() const override {
         return m_offLDR ? RHI::GetNativeSRV(m_offLDR.get()) : nullptr;
     }
-    void* GetOffscreenTexture() const {
+    void* GetOffscreenTexture() const override {
         return m_offLDR ? m_offLDR->GetNativeHandle() : nullptr;
     }
-    RHI::ITexture* GetOffscreenTextureRHI() const {
+    RHI::ITexture* GetOffscreenTextureRHI() const override {
         return m_offLDR.get();
     }
-    unsigned int GetOffscreenWidth() const { return m_offscreenWidth; }
-    unsigned int GetOffscreenHeight() const { return m_offscreenHeight; }
+    unsigned int GetOffscreenWidth() const override { return m_offscreenWidth; }
+    unsigned int GetOffscreenHeight() const override { return m_offscreenHeight; }
 
     // 访问内部 Pass（用于特殊需求）
-    CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
+    CDebugLinePass& GetDebugLinePass() override { return m_debugLinePass; }
+    CClusteredLightingPass& GetClusteredLightingPass() override { return m_clusteredLighting; }
     CSceneRenderer& GetSceneRenderer() { return m_sceneRenderer; }
-    CClusteredLightingPass& GetClusteredLightingPass() { return m_clusteredLighting; }
 
 private:
     // 确保离屏目标尺寸正确

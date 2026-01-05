@@ -1,7 +1,7 @@
 #include "Panels.h"
 #include "imgui.h"
 #include "Scene.h"
-#include "Engine/Rendering/ForwardRenderPipeline.h"
+#include "Engine/Rendering/RenderPipeline.h"
 #include "Engine/Rendering/IBLGenerator.h"
 #include "Core/FFLog.h"
 #include <windows.h> // For file dialogs
@@ -44,7 +44,7 @@ static std::string SaveFileDialog(const char* filter) {
     return "";
 }
 
-void Panels::DrawDockspace(bool* pOpen, CScene& scene, CForwardRenderPipeline* pipeline) {
+void Panels::DrawDockspace(bool* pOpen, CScene& scene, CRenderPipeline* pipeline) {
     ImGuiWindowFlags winFlags = ImGuiWindowFlags_NoDocking
         | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
         | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove

@@ -4,18 +4,18 @@
 class CScene;
 class CCamera;  // ✅ 改用 CCamera
 struct ImVec2;
-class CForwardRenderPipeline;
+class CRenderPipeline;
 
 namespace Panels {
     ImVec2 GetViewportLastSize();
 
-    void DrawDockspace(bool* pOpen, CScene& scene, CForwardRenderPipeline* pipeline);
+    void DrawDockspace(bool* pOpen, CScene& scene, CRenderPipeline* pipeline);
     void DrawHierarchy(CScene& scene);
     void DrawInspector(CScene& scene);
     void DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
         void* srv,  // ID3D11ShaderResourceView* or equivalent (passed to ImGui)
         size_t srcWidth, size_t srcHeight,
-        CForwardRenderPipeline* pipeline = nullptr);
+        CRenderPipeline* pipeline = nullptr);
     void DrawIrradianceDebug();  // Uses CScene::Instance() internally
     void ShowIrradianceDebug(bool show);
     bool IsIrradianceDebugVisible();
@@ -26,7 +26,7 @@ namespace Panels {
 
     // Scene Light Settings Window
     void ShowSceneLightSettings(bool show);
-    void DrawSceneLightSettings(CForwardRenderPipeline* pipeline = nullptr);
+    void DrawSceneLightSettings(CRenderPipeline* pipeline = nullptr);
     bool IsSceneLightSettingsVisible();
 
     // Material Editor Window

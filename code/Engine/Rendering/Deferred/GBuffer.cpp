@@ -116,7 +116,7 @@ void CGBuffer::createRenderTargets(uint32_t width, uint32_t height)
         desc.dimension = ETextureDimension::Tex2D;
         desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
         desc.dsvFormat = ETextureFormat::D32_FLOAT;
-        desc.srvFormat = ETextureFormat::R32_TYPELESS;  // Read as R32_FLOAT in shader
+        desc.srvFormat = ETextureFormat::R32_FLOAT;  // DX12 requires typed format for SRV
         desc.debugName = "GBuffer_Depth";
         m_depth.reset(ctx->CreateTexture(desc, nullptr));
     }

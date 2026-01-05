@@ -15,6 +15,7 @@
 #include "RHI/DX12/DX12Context.h"  // DX12 Context for ImGui
 #include "RHI/DX12/DX12Common.h"   // NUM_FRAMES_IN_FLIGHT
 #include "Engine/Rendering/ForwardRenderPipeline.h"  // ✅ Forward 渲染流程
+#include "Engine/Rendering/Deferred/DeferredRenderPipeline.h"  // ✅ Deferred 渲染流程
 #include "Engine/Rendering/ShowFlags.h"  // ✅ 渲染标志
 #include "Engine/Rendering/IBLGenerator.h"  // IBL生成器
 #include "Engine/Rendering/DebugRenderSystem.h"  // Debug 几何渲染
@@ -61,7 +62,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // -----------------------------------------------------------------------------
 static const wchar_t* kWndClass = L"ForFunEditorWindowClass";
 static const wchar_t* kWndTitle = L"ForFunEditor";
-static CForwardRenderPipeline g_pipeline;  // ✅ Forward 渲染 Pipeline
+static CRenderPipeline* g_pipeline = nullptr;  // ✅ 渲染 Pipeline (Forward or Deferred)
 static bool g_minimized = false;
 static POINT g_last_mouse = { 0, 0 };
 static SRenderConfig g_renderConfig;  // ✅ Global render configuration
@@ -315,7 +316,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     CTestContext testContext;
     // Setup test if in test mode
     if (activeTest) {
-        testContext.pipeline = &g_pipeline;  // Give test access to ForwardRenderPipeline for screenshots
+        // Note: testContext.pipeline will be set after pipeline initialization
         testContext.testName = activeTest->GetName();  // Set test name for detailed logging
 
         // Set test-specific runtime log path
@@ -470,18 +471,35 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
 
         if (!pipelineInitialized) {
-            if (!g_pipeline.Initialize()) {
-                CFFLog::Error("Failed to initialize ForwardRenderPipeline!");
+            // Create appropriate pipeline based on config
+            if (g_renderConfig.pipeline == ERenderPipeline::Deferred) {
+                g_pipeline = new CDeferredRenderPipeline();
+                CFFLog::Info("Creating Deferred render pipeline");
+            } else {
+                g_pipeline = new CForwardRenderPipeline();
+                CFFLog::Info("Creating Forward render pipeline");
+            }
+
+            if (!g_pipeline->Initialize()) {
+                CFFLog::Error("Failed to initialize render pipeline!");
                 PostQuitMessage(-5);
                 break;
             }
             pipelineInitialized = true;
-            CFFLog::Info("ForwardRenderPipeline initialized");
+
+            // Give test access to pipeline (must be after initialization)
+            if (activeTest) {
+                testContext.pipeline = g_pipeline;
+            }
+
+            CFFLog::Info("Render pipeline initialized");
         }
 
         // Load default scene (deferred for both backends)
         if (!defaultSceneLoaded && !activeTest) {
-            std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
+            // std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
+            std::string scenePath = FFPath::GetAbsolutePath("scenes/2d_lightmap_test.scene");
+            //std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;
         }
@@ -489,7 +507,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // Execute any pending GPU bake (deferred from previous frame's UI)
         // Must be done BEFORE scene rendering to avoid command list state conflicts
         if (Panels::ExecutePendingGPUBake()) {
-            CFFLog::Info("[Main] GPU bake executed at frame start");
+            CFFLog::Info("[Main] Volumetric lightmap GPU bake executed at frame start");
+        }
+        if (Panels::ExecutePending2DLightmapBake()) {
+            CFFLog::Info("[Main] 2D lightmap bake executed at frame start");
         }
 
         // Execute test frame if in test mode
@@ -533,16 +554,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             CEditorContext::Instance().Update(dt, editorCamera);
 
             // Collect debug lines
-            g_pipeline.GetDebugLinePass().BeginFrame();
-            CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline.GetDebugLinePass());
+            g_pipeline->GetDebugLinePass().BeginFrame();
+            CDebugRenderSystem::Instance().CollectAndRender(CScene::Instance(), g_pipeline->GetDebugLinePass());
 
             // Render through pipeline
             {
-                RHI::CScopedDebugEvent evtScene(cmdList, L"Forward Pipeline");
+                RHI::CScopedDebugEvent evtScene(cmdList, L"Render Pipeline");
                 CRenderPipeline::RenderContext renderCtx{
                     editorCamera, CScene::Instance(), vpW, vpH, dt, FShowFlags::Editor()
                 };
-                g_pipeline.Render(renderCtx);
+                g_pipeline->Render(renderCtx);
             }
         }
 
@@ -574,20 +595,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         // 7. ImGui Panels
         {
             bool dockOpen = true;
-            Panels::DrawDockspace(&dockOpen, CScene::Instance(), &g_pipeline);
+            Panels::DrawDockspace(&dockOpen, CScene::Instance(), g_pipeline);
             Panels::DrawHierarchy(CScene::Instance());
             Panels::DrawInspector(CScene::Instance());
 
             // Viewport SRV handling (backend-specific)
             void* viewportSrv = nullptr;
-            unsigned int vpW = g_pipeline.GetOffscreenWidth();
-            unsigned int vpH = g_pipeline.GetOffscreenHeight();
+            unsigned int vpW = g_pipeline->GetOffscreenWidth();
+            unsigned int vpH = g_pipeline->GetOffscreenHeight();
 
             if (g_renderConfig.backend == RHI::EBackend::DX12) {
                 // DX12: Need to allocate ImGui descriptor for offscreen texture
                 if (vpW > 0 && vpH > 0) {
                     auto& dx12Ctx = RHI::DX12::CDX12Context::Instance();
-                    RHI::ITexture* ldrTexture = g_pipeline.GetOffscreenTextureRHI();
+                    RHI::ITexture* ldrTexture = g_pipeline->GetOffscreenTextureRHI();
                     if (ldrTexture) {
                         ID3D12Resource* d3dResource = static_cast<ID3D12Resource*>(ldrTexture->GetNativeHandle());
 
@@ -614,14 +635,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 }
             } else {
                 // DX11: Direct SRV pointer
-                viewportSrv = g_pipeline.GetOffscreenSRV();
+                viewportSrv = g_pipeline->GetOffscreenSRV();
             }
 
             Panels::DrawViewport(CScene::Instance(), CScene::Instance().GetEditorCamera(),
-               viewportSrv, vpW, vpH, &g_pipeline);
+               viewportSrv, vpW, vpH, g_pipeline);
             Panels::DrawIrradianceDebug();
             Panels::DrawHDRExportWindow();
-            Panels::DrawSceneLightSettings(&g_pipeline);
+            Panels::DrawSceneLightSettings(g_pipeline);
             Panels::DrawMaterialEditor();
         }
 
@@ -664,8 +685,10 @@ cleanup:
         dx12Ctx.WaitForGPU();
     }
     if (pipelineInitialized) {
-        CFFLog::Info("Shutting down ForwardRenderPipeline...");
-        g_pipeline.Shutdown();
+        CFFLog::Info("Shutting down render pipeline...");
+        g_pipeline->Shutdown();
+        delete g_pipeline;
+        g_pipeline = nullptr;
     }
 
     if (sceneInitialized) {

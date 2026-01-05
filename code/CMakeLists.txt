@@ -375,6 +375,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/Deferred/GBufferPass.cpp
     ${CODE_PATH}/Engine/Rendering/Deferred/DeferredLightingPass.h
     ${CODE_PATH}/Engine/Rendering/Deferred/DeferredLightingPass.cpp
+    ${CODE_PATH}/Engine/Rendering/Deferred/TransparentForwardPass.h
+    ${CODE_PATH}/Engine/Rendering/Deferred/TransparentForwardPass.cpp
     ${CODE_PATH}/Engine/Rendering/Deferred/DeferredRenderPipeline.h
     ${CODE_PATH}/Engine/Rendering/Deferred/DeferredRenderPipeline.cpp
 )

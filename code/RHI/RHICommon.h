@@ -129,6 +129,7 @@ enum class ETextureFormat {
     D32_FLOAT,
     R24G8_TYPELESS,         // For depth with SRV access
     R32_TYPELESS,           // For depth with SRV access
+    R32_FLOAT,              // For reading depth as float in shader
     R24_UNORM_X8_TYPELESS,  // For reading depth from R24G8
     // Compressed formats
     BC1_UNORM,

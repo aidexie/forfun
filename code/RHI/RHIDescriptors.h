@@ -56,6 +56,10 @@ struct TextureDesc {
     ETextureFormat srvFormat = ETextureFormat::Unknown;  // ShaderResourceView format
     ETextureFormat uavFormat = ETextureFormat::Unknown;  // UnorderedAccessView format
 
+    // Optimized clear value (DX12 performance optimization)
+    // Render targets cleared with this value will be faster
+    float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // Default: black with alpha 0
+
     // Legacy compatibility (mapped to dimension)
     bool isCubemap = false;     // DEPRECATED: use dimension = TexCube
     bool isCubemapArray = false; // DEPRECATED: use dimension = TexCubeArray

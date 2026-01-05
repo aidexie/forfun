@@ -6,9 +6,18 @@
 // Render Configuration
 // ============================================
 
+// Render pipeline selection
+enum class ERenderPipeline {
+    Forward,   // Forward+ rendering (clustered lighting)
+    Deferred   // True deferred rendering
+};
+
 struct SRenderConfig {
     // Rendering backend selection
     RHI::EBackend backend = RHI::EBackend::DX11;
+
+    // Render pipeline selection
+    ERenderPipeline pipeline = ERenderPipeline::Forward;
 
     // Window settings
     uint32_t windowWidth = 1280;

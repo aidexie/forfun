@@ -176,9 +176,8 @@ std::unique_ptr<SRayTracingSceneData> CSceneGeometryExporter::ExportScene(CScene
                 rtMat.metallic = materialAsset->metallic;
                 rtMat.roughness = materialAsset->roughness;
 
-                 instance.materialIndex = 0;
+                instance.materialIndex = static_cast<uint32_t>(result->materials.size());
                 result->materials.push_back(rtMat);
-
                 result->instances.push_back(instance);
 
                 // Update scene bounds (transform mesh bounds to world space)

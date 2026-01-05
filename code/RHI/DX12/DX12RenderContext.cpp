@@ -584,10 +584,11 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
         } else {
             clearValue.Format = (desc.rtvFormat != ETextureFormat::Unknown) ? ToDXGIFormat(desc.rtvFormat) : resourceDesc.Format;
         }
-        clearValue.Color[0] = 0.0f;
-        clearValue.Color[1] = 0.0f;
-        clearValue.Color[2] = 0.0f;
-        clearValue.Color[3] = 1.0f;
+        // Use clear color from TextureDesc for optimal performance
+        clearValue.Color[0] = desc.clearColor[0];
+        clearValue.Color[1] = desc.clearColor[1];
+        clearValue.Color[2] = desc.clearColor[2];
+        clearValue.Color[3] = desc.clearColor[3];
         pClearValue = &clearValue;
     } else if (desc.usage & ETextureUsage::DepthStencil) {
         clearValue.Format = (desc.dsvFormat != ETextureFormat::Unknown) ? ToDXGIFormat(desc.dsvFormat) : resourceDesc.Format;
@@ -915,8 +916,12 @@ IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc&
     // Set depth stencil format
     if (desc.depthStencilFormat != ETextureFormat::Unknown) {
         builder.SetDepthStencilFormat(ToDXGIFormat(desc.depthStencilFormat));
+    } else if (desc.depthStencil.depthEnable) {
+        // Default to D32_FLOAT when depth is enabled but format not specified
+        builder.SetDepthStencilFormat(DXGI_FORMAT_D32_FLOAT);
     } else {
-        builder.SetDepthStencilFormat(DXGI_FORMAT_D24_UNORM_S8_UINT);
+        // No depth testing - use UNKNOWN format
+        builder.SetDepthStencilFormat(DXGI_FORMAT_UNKNOWN);
     }
 
     // Set topology type

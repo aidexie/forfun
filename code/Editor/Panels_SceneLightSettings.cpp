@@ -1,7 +1,8 @@
 #include "Panels.h"
 #include "imgui.h"
 #include "Engine/Scene.h"
-#include "Engine/Rendering/ForwardRenderPipeline.h"
+#include "Engine/Rendering/RenderPipeline.h"
+#include "Engine/Rendering/ClusteredLightingPass.h"
 #include "Engine/Rendering/VolumetricLightmap.h"
 #include "Engine/Rendering/Lightmap/LightmapBaker.h"
 #include "Engine/Rendering/Lightmap/Lightmap2DManager.h"
@@ -27,7 +28,7 @@ static CVolumetricLightmap::Config s_pendingBakeVLConfig;
 // Deferred 2D Lightmap bake request
 static bool s_pending2DLightmapBake = false;
 
-void Panels::DrawSceneLightSettings(CForwardRenderPipeline* pipeline) {
+void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
     if (!s_showWindow) return;
 
     if (ImGui::Begin("Scene Light Settings", &s_showWindow)) {
@@ -412,7 +413,7 @@ bool Panels::ExecutePending2DLightmapBake() {
     CFFLog::Info("[Lightmap2D] Executing deferred 2D lightmap bake at frame start...");
     s_pending2DLightmapBake = false;
     s_is2DLightmapBaking = true;
-
+    // s_lightmap2DConfig.bakeConfig.debugExportImages = true;
     CScene& scene = CScene::Instance();
     std::string lightmapPath = scene.GetLightmapPath();
     CLightmapBaker& baker = scene.GetLightmapBaker();

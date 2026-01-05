@@ -3,7 +3,7 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ICommandList.h"
 #include "Core/FFLog.h"
-#include "Engine/Rendering/ForwardRenderPipeline.h"
+#include "Engine/Rendering/RenderPipeline.h"
 #include "TestCase.h"
 #include <vector>
 #include <filesystem>
@@ -97,24 +97,24 @@ bool CScreenshot::Capture(ITexture* texture, const std::string& path) {
     return true;
 }
 
-bool CScreenshot::CaptureFromPipeline(CForwardRenderPipeline* pipeline, const std::string& path) {
+bool CScreenshot::CaptureFromPipeline(CRenderPipeline* pipeline, const std::string& path) {
     if (!pipeline) {
-        CFFLog::Error("Screenshot: Null ForwardRenderPipeline");
+        CFFLog::Error("Screenshot: Null render pipeline");
         return false;
     }
 
     ITexture* texture = pipeline->GetOffscreenTextureRHI();
     if (!texture) {
-        CFFLog::Error("Screenshot: ForwardRenderPipeline offscreen texture is null");
+        CFFLog::Error("Screenshot: Render pipeline offscreen texture is null");
         return false;
     }
 
     return Capture(texture, path);
 }
 
-bool CScreenshot::CaptureTest(CForwardRenderPipeline* pipeline, const std::string& testName, int frame) {
+bool CScreenshot::CaptureTest(CRenderPipeline* pipeline, const std::string& testName, int frame) {
     if (!pipeline) {
-        CFFLog::Error("Screenshot: Null ForwardRenderPipeline");
+        CFFLog::Error("Screenshot: Null render pipeline");
         return false;
     }
 

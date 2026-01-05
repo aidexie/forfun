@@ -4,6 +4,7 @@
 #include "DepthPrePass.h"
 #include "GBufferPass.h"
 #include "DeferredLightingPass.h"
+#include "TransparentForwardPass.h"
 #include "Engine/Rendering/ShadowPass.h"
 #include "Engine/Rendering/ClusteredLightingPass.h"
 #include "Engine/Rendering/PostProcessPass.h"
@@ -22,8 +23,8 @@
 // 1. Depth Pre-Pass (LESS test, write ON) - Populate depth buffer
 // 2. G-Buffer Pass (EQUAL test, write OFF) - Fill G-Buffer with geometry data
 // 3. Shadow Pass - CSM for directional light
-// 4. Deferred Lighting Pass (TODO) - Screen-space lighting evaluation
-// 5. Transparent Forward Pass (TODO) - Forward render transparent objects
+// 4. Deferred Lighting Pass - Screen-space lighting evaluation
+// 5. Transparent Forward Pass - Forward render transparent objects
 // 6. Post-Processing - Tone mapping, gamma correction
 // 7. Debug/Editor overlays - Grid, debug lines
 //
@@ -67,20 +68,21 @@ public:
     // ============================================
     // Accessors
     // ============================================
-    void* GetOffscreenSRV() const {
+    void* GetOffscreenSRV() const override {
         return m_offLDR ? RHI::GetNativeSRV(m_offLDR.get()) : nullptr;
     }
-    void* GetOffscreenTexture() const {
+    void* GetOffscreenTexture() const override {
         return m_offLDR ? m_offLDR->GetNativeHandle() : nullptr;
     }
-    RHI::ITexture* GetOffscreenTextureRHI() const {
+    RHI::ITexture* GetOffscreenTextureRHI() const override {
         return m_offLDR.get();
     }
-    unsigned int GetOffscreenWidth() const { return m_offscreenWidth; }
-    unsigned int GetOffscreenHeight() const { return m_offscreenHeight; }
+    unsigned int GetOffscreenWidth() const override { return m_offscreenWidth; }
+    unsigned int GetOffscreenHeight() const override { return m_offscreenHeight; }
 
     // Access internal passes
-    CDebugLinePass& GetDebugLinePass() { return m_debugLinePass; }
+    CDebugLinePass& GetDebugLinePass() override { return m_debugLinePass; }
+    CClusteredLightingPass& GetClusteredLightingPass() override { return m_clusteredLighting; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
 
     // Debug visualization
@@ -97,6 +99,7 @@ private:
     CGBufferPass m_gbufferPass;
     CShadowPass m_shadowPass;
     CDeferredLightingPass m_lightingPass;
+    CTransparentForwardPass m_transparentPass;
     CClusteredLightingPass m_clusteredLighting;
     CPostProcessPass m_postProcess;
     CDebugLinePass m_debugLinePass;

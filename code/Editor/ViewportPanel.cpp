@@ -6,7 +6,7 @@
 #include "GameObject.h"
 #include "Components/Transform.h"
 #include "Components/MeshRenderer.h"
-#include "Engine/Rendering/ForwardRenderPipeline.h"
+#include "Engine/Rendering/RenderPipeline.h"
 #include "Rendering/GridPass.h"
 #include "PickingUtils.h"
 #include "Core/FFLog.h"
@@ -31,7 +31,7 @@ ImVec2 Panels::GetViewportLastSize() {
 void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCamera
     void* srv,
     size_t srcWidth, size_t srcHeight,
-    CForwardRenderPipeline* pipeline)
+    CRenderPipeline* pipeline)
 {
     ImGui::Begin("Viewport");
 

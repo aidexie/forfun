@@ -64,21 +64,36 @@
 3.6 RDG ──► 3.7 Descriptor Set ──► 3.8 Vulkan ─────┘
 ```
 
-### 3.2 Deferred 渲染 (Hybrid) - 1周 ⬅️ NEXT
+### 3.2 True Deferred Rendering ⬅️ NEXT
 
-Hybrid Deferred: Forward+ 主渲染 + G-Buffer Pre-pass
+**详细设计文档**: `docs/DEFERRED_ROADMAP.md`
 
-**G-Buffer 布局**:
-- RT0: Albedo.rgb + Metallic.a (R8G8B8A8_UNORM)
+True Deferred Pipeline: 全屏幕空间光照，最佳渲染质量
+
+**G-Buffer 布局 (5 RTs + Depth)**:
+- RT0: WorldPosition.xyz + Metallic.a (R16G16B16A16_FLOAT)
 - RT1: Normal.xyz + Roughness.a (R16G16B16A16_FLOAT)
-- RT2: Emissive.rgb + AO.a (R8G8B8A8_UNORM)
+- RT2: Albedo.rgb + AO.a (R8G8B8A8_UNORM_SRGB)
+- RT3: Emissive.rgb + MaterialID.a (R16G16B16A16_FLOAT)
+- RT4: Velocity.xy (R16G16_FLOAT)
+- Depth: D32_FLOAT
 
-**任务分解**:
-1. 创建 G-Buffer RTs 和 DSV
-2. G-Buffer Pre-pass 着色器
-3. 屏幕空间 Pass 框架（为 SSAO/SSR 准备）
+**设计决策**:
+- Lighting Pass: 全屏 Quad（后期迁移到 Clustered Compute）
+- World Position: 存储在 G-Buffer（避免重建误差）
+- Normal: 最高精度 R16G16B16A16_FLOAT
+- 2D Lightmap: 预烘焙到 Emissive 通道
+- Material ID: 支持多材质类型（Standard, Subsurface, Cloth, Hair）
+- 目标: 100+ 灯光 @ 1080p @ 60 FPS
 
-**验收标准**: TestDeferredGBuffer 通过
+**实现阶段**:
+- 3.2.1 Depth Pre-Pass + G-Buffer 基础设施
+- 3.2.2 Deferred Lighting (Standard PBR)
+- 3.2.3 完整集成 (Lightmap, IBL, Probes)
+- 3.2.4 Material ID 系统
+- 3.2.5 性能优化 (Clustered Compute)
+
+**验收标准**: TestDepthPrePass, TestGBuffer, TestDeferredLighting, TestDeferredFull 通过
 
 ### 3.3 后处理栈 - 1-2周
 

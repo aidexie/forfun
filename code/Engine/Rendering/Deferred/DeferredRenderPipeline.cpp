@@ -132,6 +132,11 @@ bool CDeferredRenderPipeline::Initialize()
         return false;
     }
 
+    if (!m_transparentPass.Initialize()) {
+        CFFLog::Error("Failed to initialize TransparentForwardPass");
+        return false;
+    }
+
     m_clusteredLighting.Initialize();
 
     m_postProcess.Initialize();
@@ -151,6 +156,7 @@ void CDeferredRenderPipeline::Shutdown()
     m_gbufferPass.Shutdown();
     m_shadowPass.Shutdown();
     m_lightingPass.Shutdown();
+    m_transparentPass.Shutdown();
     m_clusteredLighting.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
@@ -323,6 +329,18 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
+    // 6.5. Transparent Forward Pass
+    // ============================================
+    // Render transparent objects using forward shading
+    // (cannot be deferred due to blending requirements)
+    {
+        m_transparentPass.Render(ctx.camera, ctx.scene,
+                                 m_offHDR.get(), m_gbuffer.GetDepthBuffer(),
+                                 ctx.width, ctx.height,
+                                 shadowData, &m_clusteredLighting);
+    }
+
+    // ============================================
     // 7. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
@@ -422,6 +440,11 @@ void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
     {
         TextureDesc desc = TextureDesc::RenderTarget(w, h, ETextureFormat::R16G16B16A16_FLOAT);
         desc.debugName = "Deferred_HDR_RT";
+        // Set optimized clear color (matches ClearRenderTarget calls)
+        desc.clearColor[0] = 0.0f;
+        desc.clearColor[1] = 0.0f;
+        desc.clearColor[2] = 0.0f;
+        desc.clearColor[3] = 1.0f;
         m_offHDR.reset(rhiCtx->CreateTexture(desc, nullptr));
     }
 
@@ -429,6 +452,11 @@ void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
     {
         TextureDesc desc = TextureDesc::LDRRenderTarget(w, h);
         desc.debugName = "Deferred_LDR_RT";
+        // Set optimized clear color (matches ClearRenderTarget calls)
+        desc.clearColor[0] = 0.0f;
+        desc.clearColor[1] = 0.0f;
+        desc.clearColor[2] = 0.0f;
+        desc.clearColor[3] = 1.0f;
         m_offLDR.reset(rhiCtx->CreateTexture(desc, nullptr));
     }
 }

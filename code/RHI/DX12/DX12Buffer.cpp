@@ -207,6 +207,7 @@ DXGI_FORMAT ToDXGIFormat(ETextureFormat format) {
         case ETextureFormat::D32_FLOAT:             return DXGI_FORMAT_D32_FLOAT;
         case ETextureFormat::R24G8_TYPELESS:        return DXGI_FORMAT_R24G8_TYPELESS;
         case ETextureFormat::R32_TYPELESS:          return DXGI_FORMAT_R32_TYPELESS;
+        case ETextureFormat::R32_FLOAT:             return DXGI_FORMAT_R32_FLOAT;
         case ETextureFormat::R24_UNORM_X8_TYPELESS: return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
         case ETextureFormat::BC1_UNORM:             return DXGI_FORMAT_BC1_UNORM;
         case ETextureFormat::BC1_UNORM_SRGB:        return DXGI_FORMAT_BC1_UNORM_SRGB;

@@ -214,6 +214,11 @@ void CForwardRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
     {
         RHI::TextureDesc desc = RHI::TextureDesc::RenderTarget(w, h, RHI::ETextureFormat::R16G16B16A16_FLOAT);
         desc.debugName = "HDR_RenderTarget";
+        // Set optimized clear color (matches ClearRenderTarget calls)
+        desc.clearColor[0] = 0.0f;
+        desc.clearColor[1] = 0.0f;
+        desc.clearColor[2] = 0.0f;
+        desc.clearColor[3] = 1.0f;
         m_offHDR.reset(rhiCtx->CreateTexture(desc, nullptr));
     }
 
@@ -232,6 +237,11 @@ void CForwardRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
     {
         RHI::TextureDesc desc = RHI::TextureDesc::LDRRenderTarget(w, h);
         desc.debugName = "LDR_RenderTarget";
+        // Set optimized clear color (matches ClearRenderTarget calls)
+        desc.clearColor[0] = 0.0f;
+        desc.clearColor[1] = 0.0f;
+        desc.clearColor[2] = 0.0f;
+        desc.clearColor[3] = 1.0f;
         m_offLDR.reset(rhiCtx->CreateTexture(desc, nullptr));
     }
 }
