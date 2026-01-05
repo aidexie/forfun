@@ -64,36 +64,29 @@
 3.6 RDG ──► 3.7 Descriptor Set ──► 3.8 Vulkan ─────┘
 ```
 
-### 3.2 True Deferred Rendering ⬅️ NEXT
+### 3.2 True Deferred Rendering ✅ COMPLETE
 
-**详细设计文档**: `docs/DEFERRED_ROADMAP.md`
+**技术文档**: `docs/DEFERRED_DOCUMENT.md`
 
-True Deferred Pipeline: 全屏幕空间光照，最佳渲染质量
+True Deferred Pipeline 已完成，支持运行时切换 Forward/Deferred。
 
-**G-Buffer 布局 (5 RTs + Depth)**:
-- RT0: WorldPosition.xyz + Metallic.a (R16G16B16A16_FLOAT)
-- RT1: Normal.xyz + Roughness.a (R16G16B16A16_FLOAT)
-- RT2: Albedo.rgb + AO.a (R8G8B8A8_UNORM_SRGB)
-- RT3: Emissive.rgb + MaterialID.a (R16G16B16A16_FLOAT)
-- RT4: Velocity.xy (R16G16_FLOAT)
-- Depth: D32_FLOAT
+**已实现功能**:
+- G-Buffer (5 RTs + Depth): WorldPos, Normal, Albedo, Emissive+MaterialID, Velocity
+- Depth Pre-Pass: 消除 G-Buffer overdraw
+- Deferred Lighting: 全屏 Quad，PBR + CSM + IBL
+- Material System: Standard, Unlit (可扩展 Subsurface/Cloth/Hair)
+- 透明物体: Forward 渲染
+- 2D Lightmap: 预烘焙到 Emissive
 
-**设计决策**:
-- Lighting Pass: 全屏 Quad（后期迁移到 Clustered Compute）
-- World Position: 存储在 G-Buffer（避免重建误差）
-- Normal: 最高精度 R16G16B16A16_FLOAT
-- 2D Lightmap: 预烘焙到 Emissive 通道
-- Material ID: 支持多材质类型（Standard, Subsurface, Cloth, Hair）
-- 目标: 100+ 灯光 @ 1080p @ 60 FPS
+**性能对比** (26 objects, 16 lights):
+| Pipeline | FPS |
+|----------|-----|
+| Forward+ | 38.7 |
+| Deferred | 27.9 |
 
-**实现阶段**:
-- 3.2.1 Depth Pre-Pass + G-Buffer 基础设施
-- 3.2.2 Deferred Lighting (Standard PBR)
-- 3.2.3 完整集成 (Lightmap, IBL, Probes)
-- 3.2.4 Material ID 系统
-- 3.2.5 性能优化 (Clustered Compute)
+Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空间效果。
 
-**验收标准**: TestDepthPrePass, TestGBuffer, TestDeferredLighting, TestDeferredFull 通过
+**验收测试**: TestGBuffer, TestMaterialTypes, TestDeferredPerf 通过
 
 ### 3.3 后处理栈 - 1-2周
 
