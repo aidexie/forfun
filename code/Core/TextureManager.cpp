@@ -17,7 +17,12 @@ CTextureManager& CTextureManager::Instance() {
 
 CTextureManager::CTextureManager() {
     CreateDefaultTextures();
+    CreatePlaceholderTexture();
     CFFLog::Info("TextureManager initialized");
+}
+
+std::string CTextureManager::MakeCacheKey(const std::string& path, bool srgb) const {
+    return path + (srgb ? "|srgb" : "|linear");
 }
 
 RHI::TextureSharedPtr CTextureManager::Load(const std::string& path, bool srgb) {
@@ -25,8 +30,7 @@ RHI::TextureSharedPtr CTextureManager::Load(const std::string& path, bool srgb) 
         return srgb ? GetDefaultWhite() : GetDefaultBlack();
     }
 
-    // Create cache key with sRGB flag
-    std::string cacheKey = path + (srgb ? "|srgb" : "|linear");
+    std::string cacheKey = MakeCacheKey(path, srgb);
 
     // Check cache
     auto it = m_textures.find(cacheKey);
@@ -34,7 +38,7 @@ RHI::TextureSharedPtr CTextureManager::Load(const std::string& path, bool srgb) 
         return it->second.texture;
     }
 
-    // Load from file
+    // Load from file (BLOCKING)
     std::string fullPath = ResolveFullPath(path);
     RHI::ITexture* texture = LoadTextureFromFile(fullPath, srgb);
 
@@ -43,7 +47,7 @@ RHI::TextureSharedPtr CTextureManager::Load(const std::string& path, bool srgb) 
         return srgb ? GetDefaultWhite() : GetDefaultBlack();
     }
 
-    CFFLog::Info(("Loaded texture: " + path + (srgb ? " (sRGB)" : " (Linear)")).c_str());
+    CFFLog::Info(("Loaded texture (sync): " + path + (srgb ? " (sRGB)" : " (Linear)")).c_str());
 
     // Cache it with shared_ptr
     CachedTexture cached;
@@ -52,6 +56,116 @@ RHI::TextureSharedPtr CTextureManager::Load(const std::string& path, bool srgb) 
     m_textures[cacheKey] = std::move(cached);
 
     return m_textures[cacheKey].texture;
+}
+
+TextureHandlePtr CTextureManager::LoadAsync(const std::string& path, bool srgb) {
+    if (path.empty()) {
+        // Return a handle that's immediately ready with default texture
+        auto handle = std::make_shared<CTextureHandle>(
+            srgb ? GetDefaultWhite() : GetDefaultBlack(), path, srgb);
+        handle->SetReady(srgb ? GetDefaultWhite() : GetDefaultBlack());
+        return handle;
+    }
+
+    std::string cacheKey = MakeCacheKey(path, srgb);
+
+    // Check handle cache first (already loaded or pending)
+    auto handleIt = m_handles.find(cacheKey);
+    if (handleIt != m_handles.end()) {
+        return handleIt->second;
+    }
+
+    // Check sync cache (loaded via Load())
+    auto syncIt = m_textures.find(cacheKey);
+    if (syncIt != m_textures.end()) {
+        // Create handle that's immediately ready
+        auto handle = std::make_shared<CTextureHandle>(m_placeholder, path, srgb);
+        handle->SetReady(syncIt->second.texture);
+        m_handles[cacheKey] = handle;
+        return handle;
+    }
+
+    // Create new handle with placeholder
+    auto handle = std::make_shared<CTextureHandle>(m_placeholder, path, srgb);
+    m_handles[cacheKey] = handle;
+
+    // Queue load request
+    LoadRequest request;
+    request.path = path;
+    request.fullPath = ResolveFullPath(path);
+    request.cacheKey = cacheKey;
+    request.srgb = srgb;
+    request.handle = handle;
+    m_pendingLoads.push(std::move(request));
+
+    CFFLog::Info(("Queued async load: " + path + " (pending: " +
+                  std::to_string(m_pendingLoads.size()) + ")").c_str());
+
+    return handle;
+}
+
+uint32_t CTextureManager::Tick(uint32_t maxLoadsPerFrame) {
+    if (m_pendingLoads.empty()) {
+        return 0;
+    }
+
+    uint32_t loadCount = 0;
+    uint32_t limit = (maxLoadsPerFrame == 0) ? UINT32_MAX : maxLoadsPerFrame;
+
+    while (!m_pendingLoads.empty() && loadCount < limit) {
+        LoadRequest request = std::move(m_pendingLoads.front());
+        m_pendingLoads.pop();
+
+        ProcessLoadRequest(request);
+        loadCount++;
+    }
+
+    if (loadCount > 0) {
+        CFFLog::Info(("TextureManager::Tick processed " + std::to_string(loadCount) +
+                      " loads, " + std::to_string(m_pendingLoads.size()) + " remaining").c_str());
+    }
+
+    return loadCount;
+}
+
+void CTextureManager::FlushPendingLoads() {
+    uint32_t count = Tick(0);  // 0 = unlimited
+    if (count > 0) {
+        CFFLog::Info(("TextureManager::FlushPendingLoads: loaded " +
+                      std::to_string(count) + " textures").c_str());
+    }
+}
+
+void CTextureManager::ProcessLoadRequest(LoadRequest& request) {
+    request.handle->SetState(CTextureHandle::EState::Loading);
+
+    // Load from disk + GPU upload + mip generation
+    RHI::ITexture* texture = LoadTextureFromFile(request.fullPath, request.srgb);
+
+    if (!texture) {
+        CFFLog::Warning(("Failed to load texture (async): " + request.path).c_str());
+        request.handle->SetFailed();
+
+        // Use default texture as fallback
+        RHI::TextureSharedPtr fallback = request.srgb ? GetDefaultWhite() : GetDefaultBlack();
+        request.handle->SetReady(fallback);
+        return;
+    }
+
+    // Wrap in shared_ptr
+    RHI::TextureSharedPtr texturePtr(texture);
+
+    // Also add to sync cache for compatibility
+    CachedTexture cached;
+    cached.texture = texturePtr;
+    cached.isSRGB = request.srgb;
+    m_textures[request.cacheKey] = std::move(cached);
+
+    // Mark handle as ready
+    request.handle->SetReady(texturePtr);
+
+    CFFLog::Info(("Loaded texture (async): " + request.path +
+                  (request.srgb ? " (sRGB)" : " (Linear)")).c_str());
 }
 
 RHI::TextureSharedPtr CTextureManager::GetDefaultWhite() {
@@ -66,6 +180,10 @@ RHI::TextureSharedPtr CTextureManager::GetDefaultBlack() {
     return m_defaultBlack;
 }
 
+RHI::TextureSharedPtr CTextureManager::GetPlaceholder() {
+    return m_placeholder;
+}
+
 bool CTextureManager::IsLoaded(const std::string& path) const {
     std::string keySRGB = path + "|srgb";
     std::string keyLinear = path + "|linear";
@@ -74,15 +192,28 @@ bool CTextureManager::IsLoaded(const std::string& path) const {
 }
 
 void CTextureManager::Clear() {
+    // Clear pending loads queue
+    while (!m_pendingLoads.empty()) {
+        m_pendingLoads.pop();
+    }
+
     m_textures.clear();
+    m_handles.clear();
     CFFLog::Info("TextureManager cache cleared");
 }
 
 void CTextureManager::Shutdown() {
+    // Clear pending loads queue
+    while (!m_pendingLoads.empty()) {
+        m_pendingLoads.pop();
+    }
+
     m_textures.clear();
+    m_handles.clear();
     m_defaultWhite.reset();
     m_defaultNormal.reset();
     m_defaultBlack.reset();
+    m_placeholder.reset();
     CFFLog::Info("TextureManager shutdown complete");
 }
 
@@ -115,6 +246,47 @@ void CTextureManager::CreateDefaultTextures() {
     m_defaultBlack = RHI::TextureSharedPtr(MakeSolidTexture(0, 0, 0, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
 
     CFFLog::Info("Created default textures (white, normal, black)");
+}
+
+void CTextureManager::CreatePlaceholderTexture() {
+    RHI::IRenderContext* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!rhiCtx) {
+        CFFLog::Error("Failed to create placeholder texture: RHI context not available");
+        return;
+    }
+
+    // Create 8x8 checkerboard pattern (magenta/black - visually obvious)
+    constexpr uint32_t SIZE = 8;
+    constexpr uint32_t MAGENTA = 0xFFFF00FF;  // ABGR: magenta
+    constexpr uint32_t BLACK   = 0xFF000000;  // ABGR: black
+
+    uint32_t pixels[SIZE * SIZE];
+    for (uint32_t y = 0; y < SIZE; ++y) {
+        for (uint32_t x = 0; x < SIZE; ++x) {
+            // 2x2 checkerboard pattern
+            bool isEven = ((x / 2) + (y / 2)) % 2 == 0;
+            pixels[y * SIZE + x] = isEven ? MAGENTA : BLACK;
+        }
+    }
+
+    RHI::TextureDesc desc;
+    desc.width = SIZE;
+    desc.height = SIZE;
+    desc.mipLevels = 1;
+    desc.arraySize = 1;
+    desc.format = RHI::ETextureFormat::R8G8B8A8_UNORM_SRGB;
+    desc.usage = RHI::ETextureUsage::ShaderResource;
+    desc.debugName = "PlaceholderTexture";
+
+    RHI::ITexture* texture = rhiCtx->CreateTexture(desc, pixels);
+    if (texture) {
+        m_placeholder = RHI::TextureSharedPtr(texture);
+        CFFLog::Info("Created placeholder texture (8x8 checkerboard)");
+    } else {
+        // Fallback to default white if placeholder creation fails
+        m_placeholder = m_defaultWhite;
+        CFFLog::Warning("Failed to create placeholder texture, using default white");
+    }
 }
 
 std::string CTextureManager::ResolveFullPath(const std::string& relativePath) const {

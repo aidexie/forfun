@@ -84,6 +84,10 @@ cmake --build build --target forfun
 ./build/Debug/forfun.exe --test TestRayCast
 ```
 
+**Log Output**:
+- Editor mode: `debug/logs/runtime.log`
+- Test mode: `debug/logs/{TestCaseName}/runtime.log`
+
 ### Backend Selection
 
 **配置文件**: `render.json` (项目根目录)
@@ -304,6 +308,7 @@ enum class EDiffuseGIMode : int {
 - `docs/RENDERING.md` - 渲染系统完整文档
 - `docs/EDITOR.md` - 编辑器系统完整文档
 - `docs/TESTING.md` - 自动化测试完整文档
+- `docs/TEXTURE_MANAGER.md` - 纹理管理器文档（同步/异步加载）
 
 ---
 

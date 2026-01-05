@@ -206,13 +206,13 @@ void collectRenderItems(
 
         CTextureManager& texMgr = CTextureManager::Instance();
         RHI::ITexture* albedoTex = material->albedoTexture.empty() ?
-            texMgr.GetDefaultWhite().get() : texMgr.Load(material->albedoTexture, true).get();
+            texMgr.GetDefaultWhite().get() : texMgr.LoadAsync(material->albedoTexture, true)->GetTexture();
         RHI::ITexture* normalTex = material->normalMap.empty() ?
-            texMgr.GetDefaultNormal().get() : texMgr.Load(material->normalMap, false).get();
+            texMgr.GetDefaultNormal().get() : texMgr.LoadAsync(material->normalMap, false)->GetTexture();
         RHI::ITexture* metallicRoughnessTex = material->metallicRoughnessMap.empty() ?
-            texMgr.GetDefaultWhite().get() : texMgr.Load(material->metallicRoughnessMap, false).get();
+            texMgr.GetDefaultWhite().get() : texMgr.LoadAsync(material->metallicRoughnessMap, false)->GetTexture();
         RHI::ITexture* emissiveTex = material->emissiveMap.empty() ?
-            texMgr.GetDefaultBlack().get() : texMgr.Load(material->emissiveMap, true).get();
+            texMgr.GetDefaultBlack().get() : texMgr.LoadAsync(material->emissiveMap, true)->GetTexture();
 
         bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
         bool hasRealEmissiveMap = !material->emissiveMap.empty();

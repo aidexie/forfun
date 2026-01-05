@@ -30,7 +30,7 @@ RHI::ITexture* CLightmap2DManager::GetAtlasTexture() const {
     if (m_atlasTextureOwned) {
         return m_atlasTextureOwned.get();
     }
-    return m_atlasTextureShared.get();
+    return m_atlasHandle ? m_atlasHandle->GetTexture() : nullptr;
 }
 
 // ============================================
@@ -62,7 +62,7 @@ void CLightmap2DManager::SetBakedData(
 
     // Take unique ownership of the texture (from baker)
     m_atlasTextureOwned = std::move(atlasTexture);
-    m_atlasTextureShared.reset();  // Clear shared ptr
+    m_atlasHandle.reset();  // Clear async-loaded handle
 
     // Copy lightmap infos
     m_lightmapInfos = infos;
@@ -153,16 +153,16 @@ bool CLightmap2DManager::LoadAtlasTexture(const std::string& atlasPath) {
         return false;
     }
 
-    // Use shared_ptr from TextureManager (proper shared ownership)
-    m_atlasTextureShared = CTextureManager::Instance().Load(atlasPath, false);
+    // Use async loading from TextureManager (returns placeholder until ready)
+    m_atlasHandle = CTextureManager::Instance().LoadAsync(atlasPath, false);
     m_atlasTextureOwned.reset();  // Clear owned ptr
 
-    if (!m_atlasTextureShared) {
-        CFFLog::Error("[Lightmap2DManager] Failed to load atlas texture: %s", atlasPath.c_str());
+    if (!m_atlasHandle) {
+        CFFLog::Error("[Lightmap2DManager] Failed to create texture handle: %s", atlasPath.c_str());
         return false;
     }
 
-    CFFLog::Info("[Lightmap2DManager] Loaded atlas texture: %s", atlasPath.c_str());
+    CFFLog::Info("[Lightmap2DManager] Queued atlas texture for async load: %s", atlasPath.c_str());
     return true;
 }
 
@@ -206,7 +206,7 @@ bool CLightmap2DManager::CreateScaleOffsetBuffer() {
 void CLightmap2DManager::UnloadLightmap() {
     m_lightmapInfos.clear();
     m_atlasTextureOwned.reset();
-    m_atlasTextureShared.reset();
+    m_atlasHandle.reset();
     m_scaleOffsetBuffer.reset();
     m_isLoaded = false;
     // Note: m_loadedPath is preserved for hot-reload

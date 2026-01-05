@@ -91,6 +91,7 @@ set(CORE_SRC
     ${CODE_PATH}/Core/SphericalHarmonics.h
     ${CODE_PATH}/Core/TextureManager.cpp
     ${CODE_PATH}/Core/TextureManager.h
+    ${CODE_PATH}/Core/TextureHandle.h
     # Exporter
     ${CODE_PATH}/Core/Exporter/KTXExporter.cpp
     ${CODE_PATH}/Core/Exporter/KTXExporter.h
@@ -216,6 +217,7 @@ set(EDITOR_SRC
 set(TEST_SRC
     ${CODE_PATH}/Tests/TestRayCast.cpp
     ${CODE_PATH}/Tests/TestMaterialAsset.cpp
+    ${CODE_PATH}/Tests/TestAsyncTextureLoad.cpp
     ${CODE_PATH}/Tests/TestAlphaTest.cpp
     ${CODE_PATH}/Tests/TestAlphaBlend.cpp
     ${CODE_PATH}/Tests/TestClusteredLighting.cpp

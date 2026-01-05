@@ -458,7 +458,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // 1. RHI BeginFrame
         rhiCtx->BeginFrame();
-        CTextureManager::Instance();
+
+        // 1.5. Process async texture loads (frame-budget: 2 textures per frame)
+        CTextureManager::Instance().Tick(2);
 
         // 2. Deferred initialization (must be after command list is open for DX12)
         if (!sceneInitialized) {

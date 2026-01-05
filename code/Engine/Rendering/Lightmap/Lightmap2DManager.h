@@ -1,6 +1,7 @@
 #pragma once
 #include "LightmapTypes.h"
 #include "RHI/RHIPointers.h"
+#include "Core/TextureHandle.h"
 #include <vector>
 #include <string>
 
@@ -85,9 +86,9 @@ private:
     // Runtime data
     std::vector<SLightmapInfo> m_lightmapInfos;
 
-    // Atlas texture - can be owned (from baker) or shared (from TextureManager)
-    RHI::TexturePtr m_atlasTextureOwned;           // Unique ownership (from baker)
-    RHI::TextureSharedPtr m_atlasTextureShared;    // Shared ownership (from TextureManager)
+    // Atlas texture - can be owned (from baker) or async-loaded (from TextureManager)
+    RHI::TexturePtr m_atlasTextureOwned;    // Unique ownership (from baker)
+    TextureHandlePtr m_atlasHandle;          // Async-loaded (from TextureManager)
 
     RHI::BufferPtr m_scaleOffsetBuffer;  // StructuredBuffer<float4>
 };

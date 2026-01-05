@@ -290,15 +290,15 @@ void CTransparentForwardPass::Render(
         XMVECTOR objPos = worldMatrix.r[3];
         float distance = XMVectorGetX(XMVector3Length(XMVectorSubtract(objPos, eye)));
 
-        // Get textures
+        // Get textures (async loading - returns placeholder until ready)
         ITexture* albedoTex = material->albedoTexture.empty() ?
-            defaultWhite : texMgr.Load(material->albedoTexture, true).get();
+            defaultWhite : texMgr.LoadAsync(material->albedoTexture, true)->GetTexture();
         ITexture* normalTex = material->normalMap.empty() ?
-            defaultNormal : texMgr.Load(material->normalMap, false).get();
+            defaultNormal : texMgr.LoadAsync(material->normalMap, false)->GetTexture();
         ITexture* metallicRoughnessTex = material->metallicRoughnessMap.empty() ?
-            defaultWhite : texMgr.Load(material->metallicRoughnessMap, false).get();
+            defaultWhite : texMgr.LoadAsync(material->metallicRoughnessMap, false)->GetTexture();
         ITexture* emissiveTex = material->emissiveMap.empty() ?
-            defaultBlack : texMgr.Load(material->emissiveMap, true).get();
+            defaultBlack : texMgr.LoadAsync(material->emissiveMap, true)->GetTexture();
 
         bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
         bool hasRealEmissiveMap = !material->emissiveMap.empty();
