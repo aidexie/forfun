@@ -166,9 +166,14 @@ static const char* kUpsamplePS = R"(
         result += s4 * 4.0;
         result *= (1.0 / 16.0);
 
+        // Apply scatter factor to control contribution from lower mip
+        // With additive blend: scatter=1 full glow, scatter=0 no glow
+        result *= gScatter;
+
         return float4(result, 1.0);
     }
 )";
+
 
 } // anonymous namespace
 
