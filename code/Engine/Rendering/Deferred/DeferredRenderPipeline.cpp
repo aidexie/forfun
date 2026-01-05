@@ -329,7 +329,22 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 6.5. Transparent Forward Pass
+    // 6.5. Skybox Pass
+    // ============================================
+    // Render skybox after deferred lighting, before transparent objects
+    // Skybox renders at depth=1.0 with LessEqual test
+    {
+        RHI::CScopedDebugEvent evt(cmdList, L"Skybox");
+        // Bind HDR RT + depth for skybox rendering
+        ITexture* hdrRT = m_offHDR.get();
+        cmdList->SetRenderTargets(1, &hdrRT, m_gbuffer.GetDepthBuffer());
+        cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height, 0.0f, 1.0f);
+        cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
+        ctx.scene.GetSkybox().Render(ctx.camera.GetViewMatrix(), ctx.camera.GetProjectionMatrix());
+    }
+
+    // ============================================
+    // 6.6. Transparent Forward Pass
     // ============================================
     // Render transparent objects using forward shading
     // (cannot be deferred due to blending requirements)

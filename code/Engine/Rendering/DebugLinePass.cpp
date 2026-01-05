@@ -154,6 +154,7 @@ void CDebugLinePass::CreatePipelineState() {
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
     psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;  // Match GBuffer depth
 
     // Blend state: alpha blending
     psoDesc.blend.blendEnable = true;

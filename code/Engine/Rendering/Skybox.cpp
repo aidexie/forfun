@@ -270,8 +270,8 @@ void CSkybox::createPipelineState() {
     // Render target format: HDR R16G16B16A16_FLOAT for skybox
     psoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
 
-    // Depth stencil format
-    psoDesc.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
+    // Depth stencil format (D32_FLOAT to match GBuffer depth for deferred rendering)
+    psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }

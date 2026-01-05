@@ -214,8 +214,11 @@ void CDepthPrePass::Render(
             material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
         }
 
-        // Skip transparent objects
-        if (material && material->alphaMode == EAlphaMode::Blend) {
+        // Skip transparent and alpha-tested objects
+        // - Blend: Cannot write depth (blending requires sorted rendering)
+        // - Mask: Cannot test alpha without pixel shader (would cause black holes)
+        if (material && (material->alphaMode == EAlphaMode::Blend ||
+                         material->alphaMode == EAlphaMode::Mask)) {
             continue;
         }
 

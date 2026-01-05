@@ -88,15 +88,25 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
 
 **验收测试**: TestGBuffer, TestMaterialTypes, TestDeferredPerf 通过
 
-### 3.3 后处理栈 - 1-2周
+### 3.3 后处理栈
 
-依赖 3.2 G-Buffer
+依赖 3.2 G-Buffer (velocity buffer ready in RT4)
 
-- **3.3.1 Bloom + ACES Tonemapping** - 4-5天
-- **3.3.2 SSAO** - 2-3天 (需要 depth + normal)
-- **3.3.3 SSR** - 3-4天 (需要 depth + normal + roughness)
+- **3.3.1 Bloom + ACES Tonemapping** (需要 HDR RT)
+- **3.3.2 SSAO** (需要 depth + normal)
+- **3.3.3 SSR** (需要 depth + normal + roughness)
+- **3.3.4 TAA** (需要 velocity + history buffer)
+  - Jittered projection matrix
+  - Motion vector reprojection
+  - Neighborhood clamping (3×3 or 5-tap)
+  - Exponential history blend
+- **3.3.5 DLSS** (需要 NVIDIA NGX SDK)
+  - DLSS 3.x integration
+  - Quality modes: Ultra Performance → Quality
+  - Motion vectors + depth input
+  - Optional: Frame Generation (DLSS 3)
 
-**验收标准**: TestBloom, TestSSAO, TestSSR 通过
+**验收标准**: TestBloom, TestSSAO, TestSSR, TestTAA, TestDLSS 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 

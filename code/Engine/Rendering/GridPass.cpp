@@ -131,6 +131,7 @@ void CGridPass::CreatePipelineState() {
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
     psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;  // Match GBuffer depth
 
     // Blend state: Alpha blending for RGB, preserve destination alpha
     psoDesc.blend.blendEnable = true;
