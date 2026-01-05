@@ -497,8 +497,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // Load default scene (deferred for both backends)
         if (!defaultSceneLoaded && !activeTest) {
-            // std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
-            std::string scenePath = FFPath::GetAbsolutePath("scenes/2d_lightmap_test.scene");
+             std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
+            //std::string scenePath = FFPath::GetAbsolutePath("scenes/2d_lightmap_test.scene");
             //std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;

@@ -138,11 +138,20 @@ bool CGBufferPass::Initialize()
     psoDesc.rasterizer.cullMode = ECullMode::Back;
     psoDesc.rasterizer.depthClipEnable = true;
 
-    // Depth stencil state: EQUAL test, write OFF
-    // This ensures only pixels that match the pre-pass depth are shaded
+    // Depth bias: compensate for FP precision difference between passes
+    // DepthPrePass uses: posWS * ViewProj (single matrix multiply)
+    // GBuffer uses: (posWS * View) * Proj (two matrix multiplies)
+    // Matrix multiplication is NOT associative in FP: (A*B)*C ≠ A*(B*C)
+    // The extra multiply causes GBuffer depth to be slightly LARGER than pre-pass
+    // Negative bias pushes GBuffer depth back toward pre-pass value for LessEqual match
+    psoDesc.rasterizer.depthBias = -1;
+    psoDesc.rasterizer.slopeScaledDepthBias = -1.0f;
+
+    // Depth stencil state: LessEqual test (with bias, effectively matches pre-pass depth)
+    // Write OFF since depth was already written by DepthPrePass
     psoDesc.depthStencil.depthEnable = true;
-    psoDesc.depthStencil.depthWriteEnable = false;  // Depth already written by pre-pass
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::Equal;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
 
     // No blending
     psoDesc.blend.blendEnable = false;

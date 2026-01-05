@@ -473,6 +473,8 @@ Each phase includes automated tests:
 |-------|----------|-------------|
 | Mesh loading errors | Medium | "Failed to load mesh" errors with garbage paths during deferred rendering. Appears to be memory corruption in scene iteration. |
 | CreateShaderResourceView E_INVALIDARG | Low | Occasional SRV creation failure, likely related to G-Buffer resize timing. |
+| DX12 texture first-load trigger | Medium | `TextureLoader.cpp:112` (`GenerateMips`) triggers during `cmdList->SetShaderResource` on first texture load. Likely DX12 resource state issue - texture not transitioned properly before binding. |
+| Depth Pre-Pass Z-fighting | Fixed | Black stripes in G-Buffer due to FP precision difference between pre-pass (`pos*ViewProj`) and G-Buffer pass (`(pos*View)*Proj`). Fixed with negative depth bias in GBufferPass. |
 
 These issues don't prevent the pipeline from functioning but should be investigated in Phase 3.2.4.
 
