@@ -8,6 +8,7 @@
 #include "Engine/Rendering/ShadowPass.h"
 #include "Engine/Rendering/ClusteredLightingPass.h"
 #include "Engine/Rendering/PostProcessPass.h"
+#include "Engine/Rendering/BloomPass.h"
 #include "Engine/Rendering/DebugLinePass.h"
 #include "Engine/Rendering/GridPass.h"
 #include "RHI/RHIPointers.h"
@@ -101,6 +102,7 @@ private:
     CDeferredLightingPass m_lightingPass;
     CTransparentForwardPass m_transparentPass;
     CClusteredLightingPass m_clusteredLighting;
+    CBloomPass m_bloomPass;
     CPostProcessPass m_postProcess;
     CDebugLinePass m_debugLinePass;
 

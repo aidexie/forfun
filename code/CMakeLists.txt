@@ -237,6 +237,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestGBuffer.cpp
     ${CODE_PATH}/Tests/TestMaterialTypes.cpp
     ${CODE_PATH}/Tests/TestDeferredPerf.cpp
+    ${CODE_PATH}/Tests/TestBloom.cpp
 )
 
 add_executable(forfun WIN32
@@ -323,6 +324,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/Skybox.cpp
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.h
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.cpp
+    ${CODE_PATH}/Engine/Rendering/BloomPass.h
+    ${CODE_PATH}/Engine/Rendering/BloomPass.cpp
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.h
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
     ${CODE_PATH}/Engine/Rendering/CubemapRenderer.h

@@ -16,7 +16,8 @@ struct FullscreenVertex {
 
 struct CB_PostProcess {
     float exposure;
-    float _pad[3];
+    float bloomIntensity;
+    float _pad[2];
 };
 
 bool CPostProcessPass::Initialize() {
@@ -58,9 +59,11 @@ void CPostProcessPass::Shutdown() {
 }
 
 void CPostProcessPass::Render(ITexture* hdrInput,
+                              ITexture* bloomTexture,
                               ITexture* ldrOutput,
                               uint32_t width, uint32_t height,
-                              float exposure) {
+                              float exposure,
+                              float bloomIntensity) {
     if (!m_initialized || !hdrInput || !ldrOutput || !m_pso) return;
 
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -70,10 +73,11 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     // Otherwise D3D11 will null out the SRV to avoid RTV/SRV hazard
     cmdList->UnbindRenderTargets();
 
-    // Update constant buffer with exposure
+    // Update constant buffer with exposure and bloom intensity
     CB_PostProcess cb;
     cb.exposure = exposure;
-    cb._pad[0] = cb._pad[1] = cb._pad[2] = 0.0f;
+    cb.bloomIntensity = bloomTexture ? bloomIntensity : 0.0f;
+    cb._pad[0] = cb._pad[1] = 0.0f;
 
     // Set render target (no depth)
     ITexture* renderTargets[] = { ldrOutput };
@@ -93,6 +97,9 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     // Set constant buffer and resources (use SetConstantBufferData for DX12 compatibility)
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_PostProcess));
     cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
+    if (bloomTexture) {
+        cmdList->SetShaderResource(EShaderStage::Pixel, 1, bloomTexture);
+    }
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Draw fullscreen quad
@@ -144,14 +151,16 @@ void CPostProcessPass::createShaders() {
         }
     )";
 
-    // Pixel shader: Tone mapping + Gamma correction
+    // Pixel shader: Tone mapping + Gamma correction + Bloom compositing
     const char* psCode = R"(
         Texture2D hdrTexture : register(t0);
+        Texture2D bloomTexture : register(t1);
         SamplerState samp : register(s0);
 
         cbuffer CB_PostProcess : register(b0) {
             float gExposure;
-            float3 _pad;
+            float gBloomIntensity;
+            float2 _pad;
         };
 
         struct PSIn {
@@ -172,6 +181,12 @@ void CPostProcessPass::createShaders() {
         float4 main(PSIn input) : SV_Target {
             // Sample HDR input (linear space)
             float3 hdrColor = hdrTexture.Sample(samp, input.uv).rgb;
+
+            // Add bloom contribution (bloom texture is half res, bilinear upsample)
+            if (gBloomIntensity > 0.0) {
+                float3 bloom = bloomTexture.Sample(samp, input.uv).rgb;
+                hdrColor += bloom * gBloomIntensity;
+            }
 
             // Apply exposure (adjust brightness before tone mapping)
             hdrColor *= gExposure;

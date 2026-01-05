@@ -14,6 +14,17 @@ enum class EDiffuseGIMode : int
 };
 
 // ============================================
+// Bloom Settings - HDR Bloom Post-Processing
+// ============================================
+struct SBloomSettings
+{
+    bool enabled = true;       // Enable/disable bloom effect
+    float threshold = 1.0f;    // Luminance cutoff (0-5)
+    float intensity = 1.0f;    // Bloom strength multiplier (0-3)
+    float scatter = 0.7f;      // Mip blend factor (0-1), higher = more diffuse glow
+};
+
+// ============================================
 // Volumetric Lightmap 配置
 // ============================================
 struct SVolumetricLightmapConfig
@@ -43,6 +54,9 @@ public:
 
     // Volumetric Lightmap
     SVolumetricLightmapConfig volumetricLightmap;
+
+    // Post-Processing: Bloom
+    SBloomSettings bloom;
 
     // Future additions:
     // float iblIntensity = 1.0f;

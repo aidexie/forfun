@@ -350,6 +350,35 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
         }
 
         ImGui::Spacing();
+        ImGui::Spacing();
+
+        // ============================================
+        // Post-Processing: Bloom Section
+        // ============================================
+        ImGui::Text("Post-Processing: Bloom");
+        ImGui::Separator();
+
+        auto& bloom = settings.bloom;
+        ImGui::Checkbox("Enable##Bloom", &bloom.enabled);
+
+        if (bloom.enabled) {
+            ImGui::PushItemWidth(150);
+            ImGui::SliderFloat("Threshold##Bloom", &bloom.threshold, 0.0f, 5.0f, "%.2f");
+            ImGui::SliderFloat("Intensity##Bloom", &bloom.intensity, 0.0f, 3.0f, "%.2f");
+            ImGui::SliderFloat("Scatter##Bloom", &bloom.scatter, 0.0f, 1.0f, "%.2f");
+            ImGui::PopItemWidth();
+
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(
+                    "Threshold: Luminance cutoff for bloom extraction\n"
+                    "Intensity: Bloom brightness multiplier\n"
+                    "Scatter: Blend factor between blur levels (higher = more diffuse glow)");
+            }
+        }
+
+        ImGui::Spacing();
 
         // Apply button (manual apply if needed)
         if (ImGui::Button("Apply Settings")) {

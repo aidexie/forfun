@@ -139,6 +139,7 @@ bool CDeferredRenderPipeline::Initialize()
 
     m_clusteredLighting.Initialize();
 
+    m_bloomPass.Initialize();
     m_postProcess.Initialize();
     m_debugLinePass.Initialize();
     CGridPass::Instance().Initialize();
@@ -158,6 +159,7 @@ void CDeferredRenderPipeline::Shutdown()
     m_lightingPass.Shutdown();
     m_transparentPass.Shutdown();
     m_clusteredLighting.Shutdown();
+    m_bloomPass.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
     CGridPass::Instance().Shutdown();
@@ -356,11 +358,27 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 7. Post-Processing (HDR -> LDR)
+    // 7. Bloom Pass (HDR -> half-res bloom texture)
+    // ============================================
+    ITexture* bloomResult = nullptr;
+    if (ctx.showFlags.PostProcessing) {
+        const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
+        if (bloomSettings.enabled) {
+            CScopedDebugEvent evt(cmdList, L"Bloom");
+            bloomResult = m_bloomPass.Render(
+                m_offHDR.get(), ctx.width, ctx.height, bloomSettings);
+        }
+    }
+
+    // ============================================
+    // 8. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
-        m_postProcess.Render(m_offHDR.get(), m_offLDR.get(), ctx.width, ctx.height, 1.0f);
+        const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
+        float bloomIntensity = (bloomSettings.enabled && bloomResult) ? bloomSettings.intensity : 0.0f;
+        m_postProcess.Render(m_offHDR.get(), bloomResult, m_offLDR.get(),
+                             ctx.width, ctx.height, 1.0f, bloomIntensity);
     } else {
         ITexture* ldrRT = m_offLDR.get();
         cmdList->SetRenderTargets(1, &ldrRT, nullptr);
@@ -369,7 +387,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 8. Debug Lines (if enabled)
+    // 9. Debug Lines (if enabled)
     // ============================================
     if (ctx.showFlags.DebugLines) {
         CScopedDebugEvent evt(cmdList, L"Debug Lines");
@@ -381,7 +399,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 9. Grid (if enabled)
+    // 10. Grid (if enabled)
     // ============================================
     if (ctx.showFlags.Grid) {
         CScopedDebugEvent evt(cmdList, L"Grid");
@@ -393,7 +411,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 10. Copy to final output (if provided)
+    // 11. Copy to final output (if provided)
     // ============================================
     if (ctx.finalOutputTexture) {
         cmdList->UnbindRenderTargets();
@@ -404,7 +422,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 11. Transition LDR to SRV state
+    // 12. Transition LDR to SRV state
     // ============================================
     cmdList->UnbindRenderTargets();
     cmdList->Barrier(m_offLDR.get(), EResourceState::RenderTarget, EResourceState::ShaderResource);

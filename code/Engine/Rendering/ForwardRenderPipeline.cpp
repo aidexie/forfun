@@ -135,10 +135,11 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // PostProcessing is enabled for both DX11 and DX12
     // It does tone mapping from HDR RT to LDR RT
+    // Note: Forward pipeline doesn't support bloom (use deferred for bloom)
     if (ctx.showFlags.PostProcessing) {
         RHI::CScopedDebugEvent evt(cmdList, L"Post-Processing");
-        m_postProcess.Render(m_offHDR.get(), m_offLDR.get(),
-                           ctx.width, ctx.height, 1.0f);
+        m_postProcess.Render(m_offHDR.get(), nullptr, m_offLDR.get(),
+                           ctx.width, ctx.height, 1.0f, 0.0f);
     } else {
         // No post-processing: clear LDR with black
         RHI::ITexture* ldrRT = m_offLDR.get();
