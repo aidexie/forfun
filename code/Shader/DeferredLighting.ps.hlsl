@@ -72,6 +72,14 @@ cbuffer CB_DeferredLighting : register(b0) {
 #define DIFFUSE_GI_NONE 2
 #define DIFFUSE_GI_LIGHTMAP_2D 3
 
+// Material types (must match EMaterialType in MaterialAsset.h and GBuffer.ps.hlsl)
+#define MATERIAL_STANDARD       0    // Default PBR (Cook-Torrance BRDF)
+#define MATERIAL_SUBSURFACE     1    // Skin, wax, leaves (SSS approximation)
+#define MATERIAL_CLOTH          2    // Fabric, velvet (modified specular)
+#define MATERIAL_HAIR           3    // Anisotropic hair shading
+#define MATERIAL_CLEAR_COAT     4    // Car paint, lacquer (dual-layer specular)
+#define MATERIAL_UNLIT          5    // Emissive only, no lighting
+
 // ============================================
 // Input/Output
 // ============================================
@@ -160,10 +168,18 @@ float4 main(PSIn i) : SV_Target {
     float3 albedo = rt2.rgb;
     float ao = rt2.a;
     float3 emissive = rt3.rgb;
-    float materialID = rt3.a * 255.0;  // Decode material ID
+    int materialID = (int)(rt3.a * 255.0 + 0.5);  // Decode material ID (rounded)
 
     // ============================================
-    // Calculate Vectors
+    // MATERIAL_UNLIT: Skip all lighting, output emissive only
+    // ============================================
+    if (materialID == MATERIAL_UNLIT) {
+        // Unlit materials only show emissive color (no lighting, no IBL)
+        return float4(emissive + albedo, 1.0);
+    }
+
+    // ============================================
+    // Calculate Vectors (for lit materials)
     // ============================================
     float3 V = normalize(gCamPosWS - posWS);
     float3 L = normalize(-gLightDirWS);

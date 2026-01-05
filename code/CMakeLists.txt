@@ -233,6 +233,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestLightmap2D.cpp
     ${CODE_PATH}/Tests/TestOIDNDenoiser.cpp
     ${CODE_PATH}/Tests/TestGBuffer.cpp
+    ${CODE_PATH}/Tests/TestMaterialTypes.cpp
 )
 
 add_executable(forfun WIN32

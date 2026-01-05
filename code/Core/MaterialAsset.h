@@ -14,6 +14,20 @@ enum class EAlphaMode : uint8_t {
 };
 
 /**
+ * Material Type - Defines the shading model used in deferred lighting
+ * Encoded in G-Buffer RT3.a (MaterialID) for shader branching
+ * Must match MATERIAL_* defines in GBuffer.ps.hlsl and DeferredLighting.ps.hlsl
+ */
+enum class EMaterialType : uint8_t {
+    Standard = 0,     // Default PBR (Cook-Torrance BRDF)
+    Subsurface = 1,   // Skin, wax, leaves (SSS approximation)
+    Cloth = 2,        // Fabric, velvet (modified specular)
+    Hair = 3,         // Anisotropic hair shading
+    ClearCoat = 4,    // Car paint, lacquer (dual-layer specular)
+    Unlit = 5         // Emissive only, no lighting
+};
+
+/**
  * Material Asset - Shared resource representing a PBR material
  *
  * This is NOT a component. Materials are shared resources that can be
@@ -42,6 +56,9 @@ public:
     // Transparency properties
     EAlphaMode alphaMode = EAlphaMode::Opaque;  // Alpha rendering mode
     float alphaCutoff = 0.5f;  // Cutoff threshold for Mask mode (0.0-1.0)
+
+    // Material type (shading model for deferred lighting)
+    EMaterialType materialType = EMaterialType::Standard;  // Default PBR
 
 
     // Texture paths (relative to assets directory)
@@ -72,6 +89,12 @@ public:
         visitor.VisitEnum("alphaMode", alphaModeInt, {"Opaque", "Mask", "Blend"});
         alphaMode = static_cast<EAlphaMode>(alphaModeInt);
         visitor.VisitFloatSlider("alphaCutoff", alphaCutoff, 0.0f, 1.0f);
+
+        // Material Type (shading model)
+        int materialTypeInt = static_cast<int>(materialType);
+        visitor.VisitEnum("materialType", materialTypeInt,
+            {"Standard", "Subsurface", "Cloth", "Hair", "ClearCoat", "Unlit"});
+        materialType = static_cast<EMaterialType>(materialTypeInt);
 
 
         // Texture Paths - using exact variable names for JSON keys

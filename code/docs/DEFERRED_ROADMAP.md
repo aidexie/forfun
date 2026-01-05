@@ -1,6 +1,6 @@
 # Deferred Rendering Pipeline - Design & Roadmap
 
-**Status**: Phase 3.2.3 Complete - Core Integration Done
+**Status**: Phase 3.2.4 Complete - Material System Done
 **Target**: True Deferred Pipeline for best rendering quality
 **Related**: `ROADMAP.md`, `docs/RENDERING.md`
 
@@ -346,12 +346,15 @@ Future:
 - [x] Polymorphic `CRenderPipeline*` in main.cpp
 - [x] Test: `TestGBuffer` - G-Buffer infrastructure validation
 
-### Phase 3.2.4: Material System
-- [ ] Implement MaterialID encoding/decoding
-- [ ] Add MATERIAL_STANDARD (default PBR)
-- [ ] Add MATERIAL_UNLIT (emissive only)
-- [ ] Design subsurface/cloth/hair shaders (future)
-- [ ] Test: `TestMaterialTypes` - verify material switching
+### Phase 3.2.4: Material System ✅ COMPLETE
+- [x] Implement MaterialID encoding/decoding
+- [x] Add `EMaterialType` enum to `MaterialAsset.h`
+- [x] Add MATERIAL_STANDARD (default PBR) - always supported
+- [x] Add MATERIAL_UNLIT (emissive only) - early-out in lighting shader
+- [x] Pass materialType from CMaterialAsset → GBufferPass → G-Buffer RT3.a
+- [x] Shader branching in DeferredLighting.ps.hlsl based on MaterialID
+- [x] Test: `TestMaterialTypes` - verify material switching
+- [ ] Design subsurface/cloth/hair shaders (future phases)
 
 ### Phase 3.2.5: Performance Optimization
 - [ ] Profile G-Buffer bandwidth

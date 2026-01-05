@@ -305,7 +305,7 @@ void CGBufferPass::Render(
         objData.alphaMode = static_cast<int>(material->alphaMode);
         objData.alphaCutoff = material->alphaCutoff;
         objData.lightmapIndex = meshRenderer->lightmapInfosIndex;
-        objData.materialID = 0.0f;  // MATERIAL_STANDARD
+        objData.materialID = static_cast<float>(material->materialType);  // EMaterialType → MaterialID
 
         cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &objData, sizeof(objData));
         cmdList->SetConstantBufferData(EShaderStage::Pixel, 1, &objData, sizeof(objData));
