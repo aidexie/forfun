@@ -62,7 +62,8 @@ public:
         uint32_t width,
         uint32_t height,
         const CShadowPass* shadowPass,
-        CClusteredLightingPass* clusteredLighting
+        CClusteredLightingPass* clusteredLighting,
+        RHI::ITexture* ssaoTexture = nullptr  // Optional SSAO texture (t18)
     );
 
 private:

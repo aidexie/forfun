@@ -138,6 +138,7 @@ bool CDeferredRenderPipeline::Initialize()
     }
 
     m_clusteredLighting.Initialize();
+    m_ssaoPass.Initialize();
 
     m_bloomPass.Initialize();
     m_postProcess.Initialize();
@@ -159,6 +160,7 @@ void CDeferredRenderPipeline::Shutdown()
     m_lightingPass.Shutdown();
     m_transparentPass.Shutdown();
     m_clusteredLighting.Shutdown();
+    m_ssaoPass.Shutdown();
     m_bloomPass.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
@@ -307,6 +309,22 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
+    // 5.5. SSAO Pass (Screen-Space Ambient Occlusion)
+    // ============================================
+    RHI::ITexture* ssaoTexture = nullptr;
+    if (m_ssaoPass.GetSettings().enabled) {
+        CScopedDebugEvent evt(cmdList, L"SSAO Pass");
+        m_ssaoPass.Render(cmdList,
+                          m_gbuffer.GetDepthBuffer(),
+                          m_gbuffer.GetNormalRoughness(),
+                          ctx.width, ctx.height,
+                          ctx.camera.GetViewMatrix(),
+                          ctx.camera.GetProjectionMatrix(),
+                          ctx.camera.nearZ, ctx.camera.farZ);
+        ssaoTexture = m_ssaoPass.GetSSAOTexture();
+    }
+
+    // ============================================
     // 6. Deferred Lighting Pass
     // ============================================
     {
@@ -326,7 +344,8 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
             // Full deferred lighting
             m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
                                   m_offHDR.get(), ctx.width, ctx.height,
-                                  &m_shadowPass, &m_clusteredLighting);
+                                  &m_shadowPass, &m_clusteredLighting,
+                                  ssaoTexture);
         }
     }
 

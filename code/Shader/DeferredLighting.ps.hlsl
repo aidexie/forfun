@@ -16,7 +16,7 @@ Texture2D gRT4_Velocity : register(t4);             // Velocity.xy (unused in li
 Texture2D gDepth : register(t5);                    // Scene depth (for sky masking)
 
 // ============================================
-// Shadow & IBL Textures (t6-t7, t16-t17)
+// Shadow & IBL Textures (t6-t7, t16-t18)
 // Note: t8-t10 used by ClusteredShading.hlsl
 //       t11-t15 used by VolumetricLightmap.hlsl
 // ============================================
@@ -24,6 +24,7 @@ Texture2DArray gShadowMaps : register(t6);          // CSM shadow maps
 Texture2D gBrdfLUT : register(t7);                  // BRDF lookup table
 TextureCubeArray gIrradianceArray : register(t16);  // IBL diffuse irradiance
 TextureCubeArray gPrefilteredArray : register(t17); // IBL specular pre-filtered
+Texture2D gSSAO : register(t18);                    // Screen-space AO (optional)
 
 // ============================================
 // Samplers (s0-s1, s3)
@@ -166,9 +167,13 @@ float4 main(PSIn i) : SV_Target {
     float3 N = normalize(rt1.xyz);
     float roughness = rt1.w;
     float3 albedo = rt2.rgb;
-    float ao = rt2.a;
+    float materialAO = rt2.a;
     float3 emissive = rt3.rgb;
     int materialID = (int)(rt3.a * 255.0 + 0.5);  // Decode material ID (rounded)
+
+    // Sample SSAO and combine with material AO
+    float ssao = gSSAO.Sample(gLinearSampler, i.uv).r;
+    float ao = materialAO * ssao;  // Multiplicative combination
 
     // ============================================
     // MATERIAL_UNLIT: Skip all lighting, output emissive only

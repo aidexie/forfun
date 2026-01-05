@@ -197,7 +197,8 @@ void CDeferredLightingPass::Render(
     uint32_t width,
     uint32_t height,
     const CShadowPass* shadowPass,
-    CClusteredLightingPass* clusteredLighting)
+    CClusteredLightingPass* clusteredLighting,
+    RHI::ITexture* ssaoTexture)
 {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
@@ -246,6 +247,13 @@ void CDeferredLightingPass::Render(
     cmdList->SetShaderResource(EShaderStage::Pixel, 7, probeManager.GetBrdfLutTexture());
     cmdList->SetShaderResource(EShaderStage::Pixel, 16, probeManager.GetIrradianceArrayTexture());
     cmdList->SetShaderResource(EShaderStage::Pixel, 17, probeManager.GetPrefilteredArrayTexture());
+
+    // ============================================
+    // Bind SSAO texture (t18)
+    // ============================================
+    if (ssaoTexture) {
+        cmdList->SetShaderResource(EShaderStage::Pixel, 18, ssaoTexture);
+    }
 
     // ============================================
     // Bind Clustered Lighting data (t8-t10, b3)

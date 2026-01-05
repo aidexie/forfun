@@ -238,6 +238,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestMaterialTypes.cpp
     ${CODE_PATH}/Tests/TestDeferredPerf.cpp
     ${CODE_PATH}/Tests/TestBloom.cpp
+    ${CODE_PATH}/Tests/TestSSAO.cpp
 )
 
 add_executable(forfun WIN32
@@ -372,6 +373,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/GridPass.h
     ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.h
     ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.cpp
+    ${CODE_PATH}/Engine/Rendering/SSAOPass.h
+    ${CODE_PATH}/Engine/Rendering/SSAOPass.cpp
     ${CODE_PATH}/Engine/Rendering/GridPass.cpp
     # Deferred Rendering Pipeline (Phase 3.2)
     ${CODE_PATH}/Engine/Rendering/Deferred/GBuffer.h

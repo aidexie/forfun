@@ -3,6 +3,8 @@
 #include "Engine/Scene.h"
 #include "Engine/Rendering/RenderPipeline.h"
 #include "Engine/Rendering/ClusteredLightingPass.h"
+#include "Engine/Rendering/SSAOPass.h"
+#include "Engine/Rendering/Deferred/DeferredRenderPipeline.h"
 #include "Engine/Rendering/VolumetricLightmap.h"
 #include "Engine/Rendering/Lightmap/LightmapBaker.h"
 #include "Engine/Rendering/Lightmap/Lightmap2DManager.h"
@@ -349,8 +351,46 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
             ImGui::Spacing();
         }
 
-        ImGui::Spacing();
-        ImGui::Spacing();
+        // ============================================
+        // SSAO Section (Screen-Space Ambient Occlusion)
+        // ============================================
+        CDeferredRenderPipeline* deferredPipeline = dynamic_cast<CDeferredRenderPipeline*>(pipeline);
+        if (deferredPipeline) {
+            ImGui::Text("Screen-Space Ambient Occlusion (SSAO)");
+            ImGui::Separator();
+
+            auto& ssaoSettings = deferredPipeline->GetSSAOPass().GetSettings();
+
+            ImGui::Checkbox("Enable##SSAO", &ssaoSettings.enabled);
+
+            if (ssaoSettings.enabled) {
+                ImGui::PushItemWidth(150);
+                ImGui::SliderFloat("Radius##SSAO", &ssaoSettings.radius, 0.1f, 2.0f, "%.2f");
+                ImGui::SliderFloat("Intensity##SSAO", &ssaoSettings.intensity, 0.0f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Falloff Start##SSAO", &ssaoSettings.falloffStart, 0.0f, 1.0f, "%.2f");
+                ImGui::SliderInt("Slices##SSAO", &ssaoSettings.numSlices,
+                    SSAOConfig::MIN_SLICES, SSAOConfig::MAX_SLICES);
+                ImGui::SliderInt("Steps##SSAO", &ssaoSettings.numSteps, 2, 8);
+                ImGui::SliderInt("Blur Radius##SSAO", &ssaoSettings.blurRadius, 1,
+                    SSAOConfig::MAX_BLUR_RADIUS);
+                ImGui::PopItemWidth();
+
+                ImGui::SameLine();
+                ImGui::TextDisabled("(?)");
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip(
+                        "Radius: View-space AO radius (larger = more spread)\n"
+                        "Intensity: AO strength multiplier\n"
+                        "Falloff Start: Distance falloff start (0-1 of radius)\n"
+                        "Slices: Number of direction slices (quality)\n"
+                        "Steps: Ray march steps per direction\n"
+                        "Blur Radius: Bilateral blur radius (edge-preserving)");
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::Spacing();
+        }
 
         // ============================================
         // Post-Processing: Bloom Section
