@@ -390,6 +390,31 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
 
             ImGui::Spacing();
             ImGui::Spacing();
+
+            // ============================================
+            // G-Buffer Debug Visualization
+            // ============================================
+            ImGui::Text("G-Buffer Debug Visualization");
+            ImGui::Separator();
+
+            int currentDebugMode = static_cast<int>(deferredPipeline->GetGBufferDebugMode());
+            ImGui::PushItemWidth(200);
+            if (ImGui::Combo("Debug Mode##GBuffer", &currentDebugMode,
+                           CDeferredRenderPipeline::GetGBufferDebugModeNames(),
+                           CDeferredRenderPipeline::GetGBufferDebugModeCount())) {
+                deferredPipeline->SetGBufferDebugMode(static_cast<CDeferredRenderPipeline::EGBufferDebugMode>(currentDebugMode));
+                CFFLog::Info("G-Buffer debug mode: %s", CDeferredRenderPipeline::GetGBufferDebugModeNames()[currentDebugMode]);
+            }
+            ImGui::PopItemWidth();
+
+            ImGui::SameLine();
+            ImGui::TextDisabled("(?)");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Visualize G-Buffer contents for debugging.\nSelect 'None' for normal rendering.");
+            }
+
+            ImGui::Spacing();
+            ImGui::Spacing();
         }
 
         // ============================================

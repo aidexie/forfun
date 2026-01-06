@@ -41,6 +41,7 @@ static const char* kDebugVisualizationPS = R"(
     Texture2D gRT3 : register(t3);  // Emissive + MaterialID
     Texture2D gRT4 : register(t4);  // Velocity
     Texture2D gDepth : register(t5); // Depth
+    Texture2D gSSAO : register(t6);  // Screen-Space Ambient Occlusion
 
     SamplerState gSamp : register(s0);
 
@@ -61,6 +62,7 @@ static const char* kDebugVisualizationPS = R"(
         float4 rt3 = gRT3.Sample(gSamp, i.uv);
         float2 rt4 = gRT4.Sample(gSamp, i.uv).xy;
         float depth = gDepth.Sample(gSamp, i.uv).r;
+        float ssao = gSSAO.Sample(gSamp, i.uv).r;
 
         float3 color = float3(0, 0, 0);
 
@@ -80,7 +82,7 @@ static const char* kDebugVisualizationPS = R"(
             case 5:  // Roughness
                 color = rt1.aaa;
                 break;
-            case 6:  // AO
+            case 6:  // AO (Material AO)
                 color = rt2.aaa;
                 break;
             case 7:  // Emissive
@@ -94,6 +96,9 @@ static const char* kDebugVisualizationPS = R"(
                 break;
             case 10: // Depth
                 color = pow(depth, 50.0).xxx;  // Non-linear for better visibility
+                break;
+            case 11: // SSAO
+                color = ssao.xxx;
                 break;
             default:
                 color = rt2.rgb;  // Default to albedo
@@ -464,6 +469,7 @@ void CDeferredRenderPipeline::renderDebugVisualization(uint32_t width, uint32_t 
     cmdList->SetShaderResource(EShaderStage::Pixel, 3, m_gbuffer.GetEmissiveMaterialID());
     cmdList->SetShaderResource(EShaderStage::Pixel, 4, m_gbuffer.GetVelocity());
     cmdList->SetShaderResource(EShaderStage::Pixel, 5, m_gbuffer.GetDepthBuffer());
+    cmdList->SetShaderResource(EShaderStage::Pixel, 6, m_ssaoPass.GetSSAOTexture());
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_debugSampler.get());
 
     // Set debug mode

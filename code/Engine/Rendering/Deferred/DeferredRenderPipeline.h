@@ -38,20 +38,41 @@
 class CDeferredRenderPipeline : public CRenderPipeline
 {
 public:
-    // G-Buffer debug visualization modes
+    // G-Buffer debug visualization modes - X-Macro definition
+    #define GBUFFER_DEBUG_MODES \
+        X(None, "None") \
+        X(WorldPosition, "World Position") \
+        X(Normal, "Normal") \
+        X(Albedo, "Albedo") \
+        X(Metallic, "Metallic") \
+        X(Roughness, "Roughness") \
+        X(AO, "AO") \
+        X(Emissive, "Emissive") \
+        X(MaterialID, "Material ID") \
+        X(Velocity, "Velocity") \
+        X(Depth, "Depth") \
+        X(SSAO, "SSAO")
+
     enum class EGBufferDebugMode : int {
-        None = 0,           // Normal rendering
-        WorldPosition = 1,  // Visualize world position
-        Normal = 2,         // Visualize normals
-        Albedo = 3,         // Visualize albedo
-        Metallic = 4,       // Visualize metallic
-        Roughness = 5,      // Visualize roughness
-        AO = 6,             // Visualize ambient occlusion
-        Emissive = 7,       // Visualize emissive
-        MaterialID = 8,     // Visualize material ID
-        Velocity = 9,       // Visualize velocity
-        Depth = 10          // Visualize depth
+        #define X(name, str) name,
+        GBUFFER_DEBUG_MODES
+        #undef X
+        COUNT
     };
+
+    // Get debug mode names for UI
+    static const char* const* GetGBufferDebugModeNames() {
+        static const char* names[] = {
+            #define X(name, str) str,
+            GBUFFER_DEBUG_MODES
+            #undef X
+        };
+        return names;
+    }
+
+    static constexpr int GetGBufferDebugModeCount() {
+        return static_cast<int>(EGBufferDebugMode::COUNT);
+    }
 
     CDeferredRenderPipeline() = default;
     ~CDeferredRenderPipeline() override = default;
