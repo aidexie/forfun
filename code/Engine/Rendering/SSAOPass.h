@@ -120,8 +120,10 @@ public:
     // ============================================
     // Output
     // ============================================
-    // Get final SSAO texture for lighting pass
-    RHI::ITexture* GetSSAOTexture() const { return m_ssaoFinal.get(); }
+    // Get final SSAO texture for lighting pass (returns white texture if disabled/uninitialized)
+    RHI::ITexture* GetSSAOTexture() const {
+        return (m_settings.enabled && m_ssaoFinal) ? m_ssaoFinal.get() : m_whiteFallback.get();
+    }
 
     // ============================================
     // Settings
@@ -133,6 +135,7 @@ private:
     void createShaders();
     void createTextures(uint32_t fullWidth, uint32_t fullHeight);
     void createNoiseTexture();
+    void createWhiteFallbackTexture();
     void createSamplers();
 
     // Dispatch helpers
@@ -185,6 +188,7 @@ private:
     RHI::TexturePtr m_noiseTexture;     // 4x4 random rotation vectors
     RHI::SamplerPtr m_pointSampler;     // Point sampling for depth/AO
     RHI::SamplerPtr m_linearSampler;    // Linear sampling for upsample
+    RHI::TexturePtr m_whiteFallback;    // 1x1 white texture (used when SSAO disabled)
 
     // ============================================
     // State

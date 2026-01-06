@@ -92,8 +92,16 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
 
 依赖 3.2 G-Buffer (velocity buffer ready in RT4)
 
-- **3.3.1 Bloom + ACES Tonemapping** (需要 HDR RT)
-- **3.3.2 SSAO** (需要 depth + normal)
+- **3.3.1 Bloom + ACES Tonemapping** ✅ COMPLETE
+  - HDR Bloom with Dual Kawase Blur (5 mip levels)
+  - Soft threshold with knee for smooth falloff
+  - ACES Filmic tonemapping
+  - 详细文档: `docs/BLOOM.md`
+- **3.3.2 SSAO** ✅ COMPLETE
+  - GTAO (Ground Truth Ambient Occlusion) algorithm
+  - Compute shader with configurable slices/steps
+  - Edge-preserving bilateral blur
+  - Multiplicative blend with material AO
 - **3.3.3 SSR** (需要 depth + normal + roughness)
 - **3.3.4 TAA** (需要 velocity + history buffer)
   - Jittered projection matrix
@@ -106,7 +114,7 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Motion vectors + depth input
   - Optional: Frame Generation (DLSS 3)
 
-**验收标准**: TestBloom, TestSSAO, TestSSR, TestTAA, TestDLSS 通过
+**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR, TestTAA, TestDLSS 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 
@@ -197,4 +205,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2026-01-04
+**Last Updated**: 2026-01-06

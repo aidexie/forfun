@@ -311,7 +311,6 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 5.5. SSAO Pass (Screen-Space Ambient Occlusion)
     // ============================================
-    RHI::ITexture* ssaoTexture = nullptr;
     if (m_ssaoPass.GetSettings().enabled) {
         CScopedDebugEvent evt(cmdList, L"SSAO Pass");
         m_ssaoPass.Render(cmdList,
@@ -321,8 +320,9 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
                           ctx.camera.GetViewMatrix(),
                           ctx.camera.GetProjectionMatrix(),
                           ctx.camera.nearZ, ctx.camera.farZ);
-        ssaoTexture = m_ssaoPass.GetSSAOTexture();
     }
+    // Always get SSAO texture (returns white fallback when disabled)
+    RHI::ITexture* ssaoTexture = m_ssaoPass.GetSSAOTexture();
 
     // ============================================
     // 6. Deferred Lighting Pass

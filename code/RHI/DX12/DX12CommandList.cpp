@@ -895,6 +895,42 @@ void CDX12CommandList::BindPendingResourcesCompute() {
         }
         m_uavDirty = false;
     }
+
+    // Bind Sampler table (parameter 9) - copy from CPU heap to contiguous staging region
+    if (m_samplerDirty) {
+        // Count how many samplers are actually bound
+        uint32_t maxBoundSlot = 0;
+        for (uint32_t i = 0; i < MAX_SAMPLER_SLOTS; ++i) {
+            if (m_pendingSamplerCpuHandles[i].ptr != 0) {
+                maxBoundSlot = i + 1;
+            }
+        }
+
+        if (maxBoundSlot > 0) {
+            // Allocate contiguous block from sampler staging ring
+            auto& samplerStagingRing = heapMgr.GetSamplerStagingRing();
+            SDescriptorHandle staging = samplerStagingRing.AllocateContiguous(maxBoundSlot);
+
+            if (staging.IsValid()) {
+                uint32_t increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
+                // Copy each bound sampler to the staging region
+                for (uint32_t i = 0; i < maxBoundSlot; ++i) {
+                    D3D12_CPU_DESCRIPTOR_HANDLE dest = { staging.cpuHandle.ptr + i * increment };
+                    if (m_pendingSamplerCpuHandles[i].ptr != 0) {
+                        device->CopyDescriptorsSimple(1, dest, m_pendingSamplerCpuHandles[i],
+                                                      D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+                    }
+                }
+
+                // Bind the contiguous staging region as the sampler descriptor table (parameter 9)
+                m_commandList->SetComputeRootDescriptorTable(9, staging.gpuHandle);
+            } else {
+                CFFLog::Error("[DX12CommandList] BindPendingResourcesCompute: Failed to allocate Sampler staging descriptors");
+            }
+        }
+        m_samplerDirty = false;
+    }
 }
 
 void CDX12CommandList::BindPendingResourcesRayTracing() {

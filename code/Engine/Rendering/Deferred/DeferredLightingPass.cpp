@@ -249,11 +249,9 @@ void CDeferredLightingPass::Render(
     cmdList->SetShaderResource(EShaderStage::Pixel, 17, probeManager.GetPrefilteredArrayTexture());
 
     // ============================================
-    // Bind SSAO texture (t18)
+    // Bind SSAO texture (t18) - always valid (white fallback if disabled)
     // ============================================
-    if (ssaoTexture) {
-        cmdList->SetShaderResource(EShaderStage::Pixel, 18, ssaoTexture);
-    }
+    cmdList->SetShaderResource(EShaderStage::Pixel, 18, ssaoTexture);
 
     // ============================================
     // Bind Clustered Lighting data (t8-t10, b3)

@@ -9,6 +9,7 @@
 #include "Engine/Components/DirectionalLight.h"
 #include "Engine/Rendering/RenderPipeline.h"
 #include "Engine/Rendering/Deferred/DeferredRenderPipeline.h"
+#include "Engine/Camera.h"
 #include <DirectXMath.h>
 
 using namespace DirectX;
@@ -43,6 +44,12 @@ public:
             CFFLog::Info("[TestSSAO:Frame1] Setting up test scene");
 
             auto& scene = CScene::Instance();
+
+            // Set up camera to view the scene
+            // Scene is centered around (0, 1, 6), camera positioned at front-right elevated
+            CCamera& cam = scene.GetEditorCamera();
+            cam.SetLookAt({4.0f, 4.0f, 0.0f}, {0.0f, 1.0f, 6.0f});
+            CFFLog::Info("[TestSSAO:Frame1] Camera positioned at (4, 4, 0) looking at (0, 1, 6)");
 
             // Directional light (moderate intensity to see AO clearly)
             auto* lightObj = scene.GetWorld().Create("DirectionalLight");

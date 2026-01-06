@@ -25,6 +25,7 @@ bool CSSAOPass::Initialize() {
     createShaders();
     createSamplers();
     createNoiseTexture();
+    createWhiteFallbackTexture();
 
     m_initialized = true;
     CFFLog::Info("[SSAOPass] Initialized successfully");
@@ -367,6 +368,29 @@ void CSSAOPass::createNoiseTexture() {
     m_noiseTexture.reset(ctx->CreateTexture(desc, noiseData.data()));
 
     CFFLog::Info("[SSAOPass] Noise texture created (%ux%u)", noiseSize, noiseSize);
+}
+
+// ============================================
+// White Fallback Texture
+// ============================================
+
+void CSSAOPass::createWhiteFallbackTexture() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Create 1x1 white texture (R8_UNORM, value 255 = fully lit, no occlusion)
+    uint8_t whitePixel = 255;
+
+    TextureDesc desc;
+    desc.width = 1;
+    desc.height = 1;
+    desc.format = ETextureFormat::R8_UNORM;
+    desc.usage = ETextureUsage::ShaderResource;
+    desc.debugName = "SSAO_WhiteFallback";
+
+    m_whiteFallback.reset(ctx->CreateTexture(desc, &whitePixel));
+
+    CFFLog::Info("[SSAOPass] White fallback texture created (1x1)");
 }
 
 // ============================================
