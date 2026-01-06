@@ -148,6 +148,7 @@ void CGridPass::CreatePipelineState() {
 
     // Render target format: LDR uses R8G8B8A8_UNORM_SRGB
     psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
+    psoDesc.debugName = "Grid_PSO";
 
     m_pso.reset(renderContext->CreatePipelineState(psoDesc));
 }

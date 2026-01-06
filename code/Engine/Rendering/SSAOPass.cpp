@@ -163,6 +163,7 @@ void CSSAOPass::createShaders() {
 
         ComputePipelineDesc psoDesc;
         psoDesc.computeShader = m_ssaoCS.get();
+        psoDesc.debugName = "SSAO_Main_PSO";
         m_ssaoPSO.reset(ctx->CreateComputePipelineState(psoDesc));
     }
 
@@ -183,6 +184,7 @@ void CSSAOPass::createShaders() {
 
         ComputePipelineDesc psoDesc;
         psoDesc.computeShader = m_blurHCS.get();
+        psoDesc.debugName = "SSAO_BlurH_PSO";
         m_blurHPSO.reset(ctx->CreateComputePipelineState(psoDesc));
     }
 
@@ -203,6 +205,7 @@ void CSSAOPass::createShaders() {
 
         ComputePipelineDesc psoDesc;
         psoDesc.computeShader = m_blurVCS.get();
+        psoDesc.debugName = "SSAO_BlurV_PSO";
         m_blurVPSO.reset(ctx->CreateComputePipelineState(psoDesc));
     }
 
@@ -223,6 +226,7 @@ void CSSAOPass::createShaders() {
 
         ComputePipelineDesc psoDesc;
         psoDesc.computeShader = m_upsampleCS.get();
+        psoDesc.debugName = "SSAO_BilateralUpsample_PSO";
         m_upsamplePSO.reset(ctx->CreateComputePipelineState(psoDesc));
     }
 
@@ -243,6 +247,7 @@ void CSSAOPass::createShaders() {
 
         ComputePipelineDesc psoDesc;
         psoDesc.computeShader = m_downsampleCS.get();
+        psoDesc.debugName = "SSAO_DepthDownsample_PSO";
         m_downsamplePSO.reset(ctx->CreateComputePipelineState(psoDesc));
     }
 
@@ -413,6 +418,7 @@ void CSSAOPass::dispatchDownsampleDepth(ICommandList* cmdList, ITexture* depthFu
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
     cmdList->SetShaderResource(EShaderStage::Compute, 0, depthFullRes);
     cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
+    cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());  // Must bind both samplers
     cmdList->SetUnorderedAccessTexture(0, m_depthHalfRes.get());
 
     uint32_t groupsX = (m_halfWidth + SSAOConfig::THREAD_GROUP_SIZE - 1) / SSAOConfig::THREAD_GROUP_SIZE;
@@ -458,6 +464,7 @@ void CSSAOPass::dispatchSSAO(ICommandList* cmdList,
     cmdList->SetShaderResource(EShaderStage::Compute, 1, normalBuffer);
     cmdList->SetShaderResource(EShaderStage::Compute, 2, m_noiseTexture.get());
     cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
+    cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());  // Must bind both samplers
     cmdList->SetUnorderedAccessTexture(0, m_ssaoRaw.get());
 
     uint32_t groupsX = (m_halfWidth + SSAOConfig::THREAD_GROUP_SIZE - 1) / SSAOConfig::THREAD_GROUP_SIZE;
@@ -484,6 +491,7 @@ void CSSAOPass::dispatchBlurH(ICommandList* cmdList) {
     cmdList->SetShaderResource(EShaderStage::Compute, 0, m_ssaoRaw.get());
     cmdList->SetShaderResource(EShaderStage::Compute, 1, m_depthHalfRes.get());
     cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
+    cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());  // Must bind both samplers
     cmdList->SetUnorderedAccessTexture(0, m_ssaoBlurTemp.get());
 
     uint32_t groupsX = (m_halfWidth + SSAOConfig::THREAD_GROUP_SIZE - 1) / SSAOConfig::THREAD_GROUP_SIZE;
@@ -509,6 +517,7 @@ void CSSAOPass::dispatchBlurV(ICommandList* cmdList) {
     cmdList->SetShaderResource(EShaderStage::Compute, 0, m_ssaoBlurTemp.get());
     cmdList->SetShaderResource(EShaderStage::Compute, 1, m_depthHalfRes.get());
     cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
+    cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());  // Must bind both samplers
     cmdList->SetUnorderedAccessTexture(0, m_ssaoHalfBlurred.get());
 
     uint32_t groupsX = (m_halfWidth + SSAOConfig::THREAD_GROUP_SIZE - 1) / SSAOConfig::THREAD_GROUP_SIZE;

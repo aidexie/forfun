@@ -272,6 +272,7 @@ void CSkybox::createPipelineState() {
 
     // Depth stencil format (D32_FLOAT to match GBuffer depth for deferred rendering)
     psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;
+    psoDesc.debugName = "Skybox_PSO";
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }
@@ -409,6 +410,7 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
     convPsoDesc.depthStencil.depthEnable = false;
     convPsoDesc.blend.blendEnable = false;
     convPsoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+    convPsoDesc.debugName = "Skybox_HDRConvert_PSO";
 
     PipelineStatePtr convPso(ctx->CreatePipelineState(convPsoDesc));
 

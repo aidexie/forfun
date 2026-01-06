@@ -104,6 +104,7 @@ bool CShadowPass::Initialize()
     // Depth-only pass: no render targets, only depth stencil
     psoDesc.renderTargetFormats = {};  // Empty - no color outputs
     psoDesc.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
+    psoDesc.debugName = "Shadow_PSO";
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 

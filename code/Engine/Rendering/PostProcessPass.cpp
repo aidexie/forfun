@@ -271,6 +271,7 @@ void CPostProcessPass::createPipelineState() {
 
     // No depth stencil for post-processing
     psoDesc.depthStencilFormat = ETextureFormat::Unknown;
+    psoDesc.debugName = "PostProcess_ToneMap_PSO";
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }

@@ -253,6 +253,7 @@ RHI::ITexture* CIBLGenerator::GenerateIrradianceMap(RHI::ITexture* envMap, int o
         psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
         psoDesc.depthStencil.depthEnable = false;
         psoDesc.depthStencil.depthWriteEnable = false;
+        psoDesc.debugName = "IBL_Irradiance_PSO";
 
         std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
         cmdList->SetPipelineState(pso.get());
@@ -328,6 +329,7 @@ RHI::ITexture* CIBLGenerator::GeneratePreFilteredMap(RHI::ITexture* envMap, int 
         psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
         psoDesc.depthStencil.depthEnable = false;
         psoDesc.depthStencil.depthWriteEnable = false;
+        psoDesc.debugName = "IBL_Prefilter_PSO";
 
         std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
         cmdList->SetPipelineState(pso.get());

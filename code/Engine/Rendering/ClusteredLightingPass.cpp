@@ -224,10 +224,12 @@ void CClusteredLightingPass::CreateShaders() {
     // Create compute pipeline states (cached to avoid per-frame creation overhead)
     ComputePipelineDesc buildGridPsoDesc;
     buildGridPsoDesc.computeShader = m_buildClusterGridCS.get();
+    buildGridPsoDesc.debugName = "Clustered_BuildGrid_PSO";
     m_buildClusterGridPSO.reset(ctx->CreateComputePipelineState(buildGridPsoDesc));
 
     ComputePipelineDesc cullLightsPsoDesc;
     cullLightsPsoDesc.computeShader = m_cullLightsCS.get();
+    cullLightsPsoDesc.debugName = "Clustered_CullLights_PSO";
     m_cullLightsPSO.reset(ctx->CreateComputePipelineState(cullLightsPsoDesc));
 
     CFFLog::Info("[ClusteredLightingPass] Compute shaders and PSOs created");

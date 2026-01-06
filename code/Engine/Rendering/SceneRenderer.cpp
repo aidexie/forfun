@@ -505,6 +505,7 @@ void CSceneRenderer::createPipeline()
     psoOpaque.primitiveTopology = EPrimitiveTopology::TriangleList;
     psoOpaque.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
     psoOpaque.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
+    psoOpaque.debugName = "Forward_Opaque_PSO";
 
     m_psoOpaque.reset(ctx->CreatePipelineState(psoOpaque));
 
@@ -525,6 +526,7 @@ void CSceneRenderer::createPipeline()
     psoTransparent.blend.srcBlendAlpha = EBlendFactor::One;
     psoTransparent.blend.dstBlendAlpha = EBlendFactor::Zero;
     psoTransparent.blend.blendOpAlpha = EBlendOp::Add;
+    psoTransparent.debugName = "Forward_Transparent_PSO";
 
     m_psoTransparent.reset(ctx->CreatePipelineState(psoTransparent));
 

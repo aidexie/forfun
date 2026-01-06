@@ -57,6 +57,7 @@ bool CDX12GenerateMipsPass::Initialize() {
     // Create compute PSO for array/cubemap
     ComputePipelineDesc psoDesc;
     psoDesc.computeShader = m_csArray.get();
+    psoDesc.debugName = "GenerateMips_Array_PSO";
     m_psoArray.reset(ctx->CreateComputePipelineState(psoDesc));
     if (!m_psoArray) {
         CFFLog::Error("[GenerateMipsPass] Failed to create array PSO");
@@ -85,6 +86,7 @@ bool CDX12GenerateMipsPass::Initialize() {
     // Create compute PSO for 2D textures
     ComputePipelineDesc pso2DDesc;
     pso2DDesc.computeShader = m_cs2D.get();
+    pso2DDesc.debugName = "GenerateMips_2D_PSO";
     m_pso2D.reset(ctx->CreateComputePipelineState(pso2DDesc));
     if (!m_pso2D) {
         CFFLog::Error("[GenerateMipsPass] Failed to create 2D PSO");
