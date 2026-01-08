@@ -53,9 +53,10 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // Set this to a test name to auto-run that test on startup (bypasses command line)
 // Set to nullptr or empty string "" to disable and use normal command line parsing
 // Examples:
-   static const char* CODE_TEST_NAME = nullptr;            // Normal mode
+   //static const char* CODE_TEST_NAME = nullptr;            // Normal mode
  //static const char* CODE_TEST_NAME = "TestDXRReadback";
-//static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
+   // static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
+    static const char* CODE_TEST_NAME = "TestSSAO";
 
 // -----------------------------------------------------------------------------
 // 全局
@@ -203,20 +204,13 @@ static void ListAllTests() {
 // -----------------------------------------------------------------------------
 // Parse command line for test mode
 // -----------------------------------------------------------------------------
-static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
+static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine, bool& outFromCommandLine) {
     std::string testName;
 
-    // Priority 1: Check CODE_TEST_NAME (code-configured test)
-    if (CODE_TEST_NAME != nullptr && CODE_TEST_NAME[0] != '\0') {
-        testName = CODE_TEST_NAME;
-        CFFLog::Info("=== Code-Configured Test Mode ===");
-        CFFLog::Info("Running test from CODE_TEST_NAME: %s", testName.c_str());
-    } else {
-        // Priority 2: Check command line
-        std::wstring cmdLine(lpCmdLine);
-        if (cmdLine.find(L"--test") == std::wstring::npos) {
-            return nullptr;  // Not in test mode
-        }
+    // Priority 1: Check command line
+    std::wstring cmdLine(lpCmdLine);
+    if (cmdLine.find(L"--test") != std::wstring::npos) {
+        outFromCommandLine = true;
 
         // Extract test name from command line
         size_t pos = cmdLine.find(L"--test");
@@ -235,6 +229,16 @@ static ITestCase* ParseCommandLineForTest(LPWSTR lpCmdLine) {
         // Remove leading/trailing spaces
         testName.erase(0, testName.find_first_not_of(" \t\n\r"));
         testName.erase(testName.find_last_not_of(" \t\n\r") + 1);
+    }
+    // Priority 2: Check CODE_TEST_NAME (for VS debugging)
+    else if (CODE_TEST_NAME != nullptr && CODE_TEST_NAME[0] != '\0') {
+        testName = CODE_TEST_NAME;
+        outFromCommandLine = false;
+        CFFLog::Info("=== Code-Configured Test Mode (Debug) ===");
+        CFFLog::Info("Running test from CODE_TEST_NAME: %s", testName.c_str());
+    } else {
+        outFromCommandLine = false;
+        return nullptr;  // Not in test mode
     }
 
     ITestCase* test = CTestRegistry::Instance().Get(testName);
@@ -312,7 +316,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         return 0;
     }
     // Parse command line for test mode
-    ITestCase* activeTest = ParseCommandLineForTest(lpCmdLine);
+    bool testFromCommandLine = false;
+    ITestCase* activeTest = ParseCommandLineForTest(lpCmdLine, testFromCommandLine);
     CTestContext testContext;
     // Setup test if in test mode
     if (activeTest) {
@@ -499,9 +504,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // Load default scene (deferred for both backends)
         if (!defaultSceneLoaded && !activeTest) {
-             std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
+            //  std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
             //std::string scenePath = FFPath::GetAbsolutePath("scenes/2d_lightmap_test.scene");
-            //std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
+            // std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
+             std::string scenePath = FFPath::GetAbsolutePath("scenes/ssao_test.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;
         }
@@ -525,17 +531,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             // Check if test is finished - set flag to exit after frame completes
             if (testContext.IsFinished())
             {
-              CFFLog::Info("=== Test Finished ===");
-              PostQuitMessage(testContext.testPassed ? 0 : 1);
-              shouldExitAfterFrame = true;
+                CFFLog::Info("=== Test Finished ===");
+                if (testFromCommandLine)
+                {
+                    PostQuitMessage(testContext.testPassed ? 0 : 1);
+                    shouldExitAfterFrame = true;
+                }
             }
 
             // Timeout protection
             if (frameCount > 1000)
             {
-              CFFLog::Error("Test timeout after 1000 frames");
-              PostQuitMessage(1);
-              shouldExitAfterFrame = true;
+                CFFLog::Error("Test timeout after 1000 frames");
+                if (testFromCommandLine)
+                {
+                    PostQuitMessage(1);
+                    shouldExitAfterFrame = true;
+                }
             }
         }
 
