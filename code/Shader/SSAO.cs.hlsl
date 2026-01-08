@@ -1,11 +1,21 @@
 // ============================================
-// SSAO.cs.hlsl - GTAO (Ground Truth Ambient Occlusion)
+// SSAO.cs.hlsl - Screen-Space Ambient Occlusion
 // ============================================
-// Reference: "Practical Real-Time Strategies for Accurate Indirect Occlusion"
-//            Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo (2016)
+// Implements three algorithms (selectable via gAlgorithm):
+//   0: GTAO   - Ground Truth AO (UE5, Unity HDRP) - Most accurate
+//   1: HBAO   - Horizon-Based AO (NVIDIA) - Good balance
+//   2: Crytek - Original SSAO (Crysis 2007) - Classic hemisphere sampling
+//
+// References:
+//   GTAO:   "Practical Real-Time Strategies for Accurate Indirect Occlusion"
+//           Jorge Jimenez et al. (2016)
+//   HBAO:   "Image-Space Horizon-Based Ambient Occlusion"
+//           Louis Bavoil, Miguel Sainz (NVIDIA, 2008)
+//   Crytek: "Finding Next Gen - CryEngine 2" (GDC 2007)
+//           Martin Mittring
 //
 // Entry Points:
-//   CSMain              - GTAO compute at half-res
+//   CSMain              - SSAO compute at half-res (algorithm selected by gAlgorithm)
 //   CSBlurH             - Horizontal bilateral blur
 //   CSBlurV             - Vertical bilateral blur
 //   CSBilateralUpsample - Edge-preserving upsample to full-res
@@ -14,6 +24,23 @@
 
 #define PI 3.14159265359
 #define HALF_PI 1.5707963268
+
+// Algorithm IDs
+#define SSAO_ALGORITHM_GTAO   0
+#define SSAO_ALGORITHM_HBAO   1
+#define SSAO_ALGORITHM_CRYTEK 2
+
+// Debug visualization modes (set via gAlgorithm when >= 100)
+// 100 = Raw depth value
+// 101 = Linearized depth (view-space Z)
+// 102 = View-space position.z normalized
+// 103 = View-space normal.z (facing camera = white)
+// 104 = Reconstructed position difference for first sample
+#define SSAO_DEBUG_RAW_DEPTH       100
+#define SSAO_DEBUG_LINEAR_DEPTH    101
+#define SSAO_DEBUG_VIEW_POS_Z      102
+#define SSAO_DEBUG_VIEW_NORMAL_Z   103
+#define SSAO_DEBUG_SAMPLE_DIFF     104
 
 // ============================================
 // Constant Buffers
@@ -32,7 +59,7 @@ cbuffer CB_SSAO : register(b0) {
     int gNumSlices;             // Number of direction slices (2-4)
     int gNumSteps;              // Steps per direction (4-8)
     float gThicknessHeuristic;  // Thin object heuristic threshold
-    float _pad;
+    int gAlgorithm;             // 0=GTAO, 1=HBAO, 2=Crytek
 };
 
 cbuffer CB_SSAOBlur : register(b0) {
@@ -99,7 +126,8 @@ float3 GetViewNormal(float2 uv) {
     // G-Buffer RT1 stores world-space normal in xyz
     float3 worldNormal = gNormal.SampleLevel(gPointSampler, uv, 0).xyz;
     // Transform world normal to view space
-    float3 viewNormal = mul((float3x3)gView, worldNormal);
+    // IMPORTANT: Use mul(vector, matrix) for row-major transposed matrices
+    float3 viewNormal = mul(float4(worldNormal, 0), gView).xyz;
     return normalize(viewNormal);
 }
 
@@ -147,8 +175,9 @@ float ComputeSliceAO(float h1, float h2, float n) {
 float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec) {
     float totalAO = 0.0;
 
-    // Radius in screen-space (approximate)
-    float screenRadius = gRadius / max(-viewPos.z, 0.1);
+    // UE-style: World radius → UV space
+    // gProj[1][1] = cot(FOV/2), maps world radius to NDC, then /2 to UV
+    float screenRadius = gRadius * gProj[1][1] * 0.5 / max(abs(viewPos.z), 0.1);
 
     // Slice angle step
     float sliceAngleStep = PI / float(gNumSlices);
@@ -180,18 +209,16 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
         projNormal /= projNormalLen;
 
         // Normal angle relative to view direction
-        float n = atan2(dot(projNormal, tangent), -projNormal.z);
+        float n = atan2(dot(projNormal, tangent), projNormal.z);
 
         // Initialize horizons to minimum (looking straight down)
         float h1 = -HALF_PI;  // Negative direction
         float h2 = -HALF_PI;  // Positive direction
 
-        // Step size in UV space
-        float uvStepSize = screenRadius * gTexelSize.x / float(gNumSteps);
-
         // March in negative direction
         for (int s = 1; s <= gNumSteps; s++) {
-            float2 sampleUV = uv - sliceDir * gTexelSize * float(s) * (screenRadius / float(gNumSteps));
+            // screenRadius is in UV space, so no gTexelSize needed
+            float2 sampleUV = uv - sliceDir * float(s) * (screenRadius / float(gNumSteps));
 
             // Bounds check
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
@@ -208,7 +235,7 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
                 float3 sampleDir = diff / dist;
 
                 // Horizon angle: angle between sample direction and view direction (Z)
-                float horizonAngle = atan2(dot(sampleDir, tangent), -sampleDir.z);
+                float horizonAngle = atan2(dot(sampleDir, tangent), sampleDir.z);
 
                 // Blend with falloff
                 h1 = max(h1, lerp(-HALF_PI, horizonAngle, falloff));
@@ -216,8 +243,9 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
         }
 
         // March in positive direction
-        for (int s = 1; s <= gNumSteps; s++) {
-            float2 sampleUV = uv + sliceDir * gTexelSize * float(s) * (screenRadius / float(gNumSteps));
+        for (int s2 = 1; s2 <= gNumSteps; s2++) {
+            // screenRadius is in UV space, so no gTexelSize needed
+            float2 sampleUV = uv + sliceDir * float(s2) * (screenRadius / float(gNumSteps));
 
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
 
@@ -232,7 +260,7 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
                 float falloff = ComputeFalloff(dist, gRadius);
                 float3 sampleDir = diff / dist;
 
-                float horizonAngle = atan2(dot(sampleDir, tangent), -sampleDir.z);
+                float horizonAngle = atan2(dot(sampleDir, tangent), sampleDir.z);
                 h2 = max(h2, lerp(-HALF_PI, horizonAngle, falloff));
             }
         }
@@ -252,7 +280,204 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
 }
 
 // ============================================
-// Main Compute Shader - GTAO
+// HBAO - Horizon-Based Ambient Occlusion (NVIDIA 2008)
+// ============================================
+// Marches along directions in screen space, finding the horizon angle
+// at each step. Uses sin(horizon) approximation for AO contribution.
+// Simpler than GTAO but still physically motivated.
+
+float ComputeHBAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec) {
+    float totalAO = 0.0;
+
+    // Screen-space radius
+    float screenRadius = gRadius * gProj[1][1] * 0.5 / max(abs(viewPos.z), 0.1);
+
+    // Direction step (evenly distributed around hemisphere)
+    float dirStep = 2.0 * PI / float(gNumSlices);
+
+    for (int dir = 0; dir < gNumSlices; dir++) {
+        // Direction angle with noise rotation
+        float angle = float(dir) * dirStep;
+        float2 direction;
+        direction.x = cos(angle) * noiseVec.x - sin(angle) * noiseVec.y;
+        direction.y = sin(angle) * noiseVec.x + cos(angle) * noiseVec.y;
+
+        // Ray march in this direction to find horizon
+        float maxHorizonCos = -1.0;  // cos(horizon angle), start at -1 (horizon at -90 deg)
+
+        for (int step = 1; step <= gNumSteps; step++) {
+            // Sample position along ray
+            float t = float(step) / float(gNumSteps);
+            float2 sampleUV = uv + direction * screenRadius * t;
+
+            // Bounds check
+            if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
+
+            // Sample depth
+            float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
+            if (sampleDepth >= 1.0) continue;
+
+            // Reconstruct view position
+            float3 samplePos = ReconstructViewPos(sampleUV, sampleDepth);
+            float3 diff = samplePos - viewPos;
+            float dist = length(diff);
+
+            if (dist < 0.001 || dist > gRadius) continue;
+
+            // Compute horizon angle
+            // Horizon = angle between view direction and direction to sample
+            float3 horizonDir = diff / dist;
+
+            // Cosine of angle between normal and horizon direction
+            // Higher value = horizon is more "up" relative to normal = less occlusion
+            float horizonCos = dot(viewNormal, horizonDir);
+
+            // Apply distance falloff
+            float falloff = ComputeFalloff(dist, gRadius);
+            horizonCos = lerp(-1.0, horizonCos, falloff);
+
+            // Track maximum horizon (highest point we can see)
+            maxHorizonCos = max(maxHorizonCos, horizonCos);
+        }
+
+        // HBAO uses sin(horizon) as AO approximation
+        // sin(acos(x)) = sqrt(1 - x^2)
+        // When horizon is at normal level (cos=0), sin=1, full visibility
+        // When horizon is above normal (cos>0), sin<1, some occlusion from above
+        // When horizon is below normal (cos<0), sin approaches 1, full visibility in that direction
+
+        // Clamp horizon to hemisphere (can't occlude from behind surface)
+        maxHorizonCos = max(maxHorizonCos, 0.0);
+
+        // AO contribution: 1 - sin(horizon) = 1 - sqrt(1 - cos^2)
+        // But we want visibility, so: sin(horizon)
+        float horizonSin = sqrt(1.0 - maxHorizonCos * maxHorizonCos);
+        totalAO += horizonSin;
+    }
+
+    // Average over all directions
+    totalAO /= float(gNumSlices);
+
+    // Apply intensity and convert to final AO
+    float ao = saturate(pow(totalAO, gIntensity));
+
+    return ao;
+}
+
+// ============================================
+// Crytek SSAO - Original Algorithm (Crysis 2007)
+// ============================================
+// Classic hemisphere sampling with random kernel
+// Samples random points in a hemisphere around the surface normal
+// and checks depth to estimate occlusion.
+
+// Pre-computed hemisphere sample kernel (16 samples)
+// Distributed using cosine-weighted hemisphere sampling
+static const float3 SSAO_KERNEL[16] = {
+    float3( 0.5381, 0.1856,-0.4319),
+    float3( 0.1379, 0.2486, 0.4430),
+    float3( 0.3371, 0.5679,-0.0057),
+    float3(-0.6999,-0.0451,-0.0019),
+    float3( 0.0689,-0.1598,-0.8547),
+    float3( 0.0560, 0.0069,-0.1843),
+    float3(-0.0146, 0.1402, 0.0762),
+    float3( 0.0100,-0.1924,-0.0344),
+    float3(-0.3577,-0.5301,-0.4358),
+    float3(-0.3169, 0.1063, 0.0158),
+    float3( 0.0103,-0.5869, 0.0046),
+    float3(-0.0897,-0.4940, 0.3287),
+    float3( 0.7119,-0.0154,-0.0918),
+    float3(-0.0533, 0.0596,-0.5411),
+    float3( 0.0352,-0.0631, 0.5460),
+    float3(-0.4776, 0.2847,-0.0271)
+};
+
+float ComputeCrytekSSAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec) {
+    float occlusion = 0.0;
+
+    // Build TBN matrix for orienting samples along normal
+    // Use Gram-Schmidt to create orthonormal basis from normal and noise
+    float3 randomVec = float3(noiseVec.x, noiseVec.y, 0.0);
+
+    // Create tangent perpendicular to normal
+    float3 tangent = normalize(randomVec - viewNormal * dot(randomVec, viewNormal));
+
+    // Handle degenerate case when randomVec is parallel to normal
+    if (length(tangent) < 0.001) {
+        tangent = normalize(float3(1, 0, 0) - viewNormal * viewNormal.x);
+    }
+
+    float3 bitangent = cross(viewNormal, tangent);
+    float3x3 TBN = float3x3(tangent, bitangent, viewNormal);
+
+    // Number of samples
+    int numSamples = min(gNumSlices * gNumSteps, 16);
+
+    for (int i = 0; i < numSamples; i++) {
+        // Get sample direction from kernel and orient to hemisphere around normal
+        float3 sampleDir = mul(SSAO_KERNEL[i], TBN);
+
+        // Flip sample if it's below the surface (ensure hemisphere sampling)
+        if (dot(sampleDir, viewNormal) < 0.0) {
+            sampleDir = -sampleDir;
+        }
+
+        // Scale sample position by radius (varying scale for better distribution)
+        float scale = float(i + 1) / float(numSamples);
+        scale = lerp(0.1, 1.0, scale * scale);
+
+        // Sample position in view space
+        float3 samplePos = viewPos + sampleDir * gRadius * scale;
+
+        // Project sample to screen space
+        float4 sampleClip = mul(float4(samplePos, 1.0), gProj);
+        float2 sampleUV = sampleClip.xy / sampleClip.w;
+        sampleUV = sampleUV * float2(0.5, -0.5) + 0.5;
+
+        // Bounds check
+        if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) continue;
+
+        // Sample depth at this position
+        float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
+        if (sampleDepth >= 1.0) continue;  // Skip sky
+
+        // Reconstruct actual position at sampled depth
+        float3 actualPos = ReconstructViewPos(sampleUV, sampleDepth);
+
+        // Distance from view position to actual surface
+        float3 diff = actualPos - viewPos;
+        float dist = length(diff);
+        // return dist;
+        // return actualPos.z/100.0;
+        // return dot(normalize(diff),viewNormal);
+        // Range check: smooth falloff at radius boundary
+        float rangeCheck = 1.0 - smoothstep(gRadius * 0.5, gRadius, dist);
+
+        // Occlusion check:
+        // In LEFT-HANDED view space with camera looking at +Z:
+        // Z values are POSITIVE (farther = larger Z)
+        // samplePos.z = expected depth if nothing blocks
+        // actualPos.z = actual surface depth at that screen position
+        // If actualPos.z < samplePos.z, actual surface is CLOSER = occludes the sample
+        float depthDiff = samplePos.z - actualPos.z;  // positive if actualPos is closer (occludes)
+
+        // Only count as occlusion if:
+        // 1. The actual surface is closer than our sample point (depthDiff > 0)
+        // 2. The depth difference is within reasonable bounds (not a backface or far surface)
+        if (depthDiff > 0.001 && depthDiff < gRadius) {
+            occlusion += rangeCheck;
+        }
+    }
+
+    // Normalize and apply intensity
+    occlusion = occlusion / float(numSamples);
+    float ao = saturate(1.0 - occlusion * gIntensity);
+
+    return ao;
+}
+
+// ============================================
+// Main Compute Shader - Unified Entry Point
 // ============================================
 
 [numthreads(8, 8, 1)]
@@ -273,15 +498,76 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
     float3 viewPos = ReconstructViewPos(uv, depth);
     float3 viewNormal = GetViewNormal(uv);
 
+    // ============================================
+    // Debug Visualization Modes
+    // ============================================
+    if (gAlgorithm >= 100) {
+        float debugValue = 0.0;
+
+        if (gAlgorithm == SSAO_DEBUG_RAW_DEPTH) {
+            // Raw depth buffer value [0, 1]
+            // Near plane should be dark, far plane should be white
+            debugValue = depth;
+        }
+        else if (gAlgorithm == SSAO_DEBUG_LINEAR_DEPTH) {
+            // View-space Z (linear depth)
+            // Normalize to visible range (assume max 100 units)
+            debugValue = saturate(abs(viewPos.z) / 100.0);
+        }
+        else if (gAlgorithm == SSAO_DEBUG_VIEW_POS_Z) {
+            // View-space Z sign check
+            // If LEFT-HANDED: Z should be POSITIVE (into screen)
+            // If RIGHT-HANDED: Z should be NEGATIVE
+            // Output: positive Z = green tint, negative Z = red tint
+            // For grayscale: output normalized absolute Z
+            debugValue = viewPos.z > 0.0 ? saturate(viewPos.z / 50.0) : 0.0;
+        }
+        else if (gAlgorithm == SSAO_DEBUG_VIEW_NORMAL_Z) {
+            // View-space normal Z component
+            // Surfaces facing camera should have negative Z (toward camera)
+            // Output: facing camera = white, facing away = black
+            debugValue = saturate(-viewNormal.z);
+        }
+        else if (gAlgorithm == SSAO_DEBUG_SAMPLE_DIFF) {
+            // Test sample reconstruction accuracy
+            // Sample a nearby pixel and compare reconstructed positions
+            float2 offsetUV = uv + float2(gTexelSize.x * 5.0, 0.0);
+            if (offsetUV.x < 1.0) {
+                float sampleDepth = gDepth.SampleLevel(gPointSampler, offsetUV, 0).r;
+                if (sampleDepth < 1.0) {
+                    float3 samplePos = ReconstructViewPos(offsetUV, sampleDepth);
+                    debugValue = samplePos.z > 0.0 ? saturate(samplePos.z / 50.0) : 0.0;
+                    // float3 diff = samplePos - viewPos;
+                    // // Show the XY distance (should be small for nearby pixels on same surface)
+                    // debugValue = saturate(length(diff.xy) / gRadius);
+                }
+            }
+        }
+
+        gSSAOOutput[pixelCoord] = debugValue;
+        return;
+    }
+
+    // ============================================
+    // Normal SSAO Algorithm Selection
+    // ============================================
+
     // Sample noise for random rotation (tiles across screen)
     float2 noiseUV = uv * gNoiseScale;
     float2 noise = gNoise.SampleLevel(gPointSampler, noiseUV, 0).rg;
-
-    // Convert noise from [0,1] to [-1,1] and normalize
     float2 noiseVec = normalize(noise * 2.0 - 1.0);
 
-    // Compute GTAO
-    float ao = ComputeGTAO(viewPos, viewNormal, uv, noiseVec);
+    // Select algorithm based on gAlgorithm
+    float ao = 1.0;
+    if (gAlgorithm == SSAO_ALGORITHM_GTAO) {
+        ao = ComputeGTAO(viewPos, viewNormal, uv, noiseVec);
+    }
+    else if (gAlgorithm == SSAO_ALGORITHM_HBAO) {
+        ao = ComputeHBAO(viewPos, viewNormal, uv, noiseVec);
+    }
+    else if (gAlgorithm == SSAO_ALGORITHM_CRYTEK) {
+        ao = ComputeCrytekSSAO(viewPos, viewNormal, uv, noiseVec);
+    }
 
     gSSAOOutput[pixelCoord] = ao;
 }

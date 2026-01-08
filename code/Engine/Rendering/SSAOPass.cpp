@@ -481,6 +481,7 @@ void CSSAOPass::dispatchSSAO(ICommandList* cmdList,
     cb.numSlices = m_settings.numSlices;
     cb.numSteps = m_settings.numSteps;
     cb.thicknessHeuristic = m_settings.thicknessHeuristic;
+    cb.algorithm = static_cast<int>(m_settings.algorithm);
 
     cmdList->SetPipelineState(m_ssaoPSO.get());
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));

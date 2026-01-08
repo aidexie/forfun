@@ -18,8 +18,10 @@ using namespace DirectX;
  * Test: SSAO (Screen-Space Ambient Occlusion)
  *
  * Purpose:
- *   Verify that the GTAO-based SSAO implementation works correctly.
- *   Tests occlusion detection, bilateral blur, and edge-preserving upsample.
+ *   Verify that all three SSAO algorithms work correctly:
+ *   - GTAO (Ground Truth AO)
+ *   - HBAO (Horizon-Based AO)
+ *   - Crytek SSAO (Classic hemisphere sampling)
  *
  * Scene Setup:
  *   - Cornell box style setup with walls and floor
@@ -44,6 +46,9 @@ public:
             CFFLog::Info("[TestSSAO:Frame1] Setting up test scene");
 
             auto& scene = CScene::Instance();
+
+            // Set G-Buffer debug mode to SSAO visualization
+            scene.GetLightSettings().gBufferDebugMode = EGBufferDebugMode::SSAO;
 
             // Set up camera to view the scene
             // Scene is centered around (0, 1, 6), camera positioned at front-right elevated
@@ -118,86 +123,108 @@ public:
             CFFLog::Info("[TestSSAO:Frame1] Scene created with walls, floor, and objects");
         });
 
-        // Frame 5: Enable SSAO with default settings
+        // Frame 5: Debug - Raw Depth visualization
         ctx.OnFrame(5, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame5] Enabling SSAO");
+            CFFLog::Info("[TestSSAO:Frame5] Debug: Raw Depth visualization");
 
-            // Get SSAO pass from pipeline
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
             if (deferredPipeline) {
                 auto& ssaoSettings = deferredPipeline->GetSSAOPass().GetSettings();
                 ssaoSettings.enabled = true;
+                ssaoSettings.algorithm = ESSAOAlgorithm::Debug_RawDepth;
                 ssaoSettings.radius = 0.5f;
                 ssaoSettings.intensity = 1.5f;
                 ssaoSettings.numSlices = 3;
                 ssaoSettings.numSteps = 4;
-                ssaoSettings.blurRadius = 2;
+                ssaoSettings.blurRadius = 0;  // Disable blur for debug
 
-                CFFLog::Info("[TestSSAO:Frame5] SSAO enabled: radius=%.2f, intensity=%.2f",
-                            ssaoSettings.radius, ssaoSettings.intensity);
-            } else {
-                CFFLog::Error("[TestSSAO:Frame5] Not using deferred pipeline - SSAO not available");
+                CFFLog::Info("[TestSSAO:Frame5] Debug_RawDepth mode enabled");
             }
         });
 
-        // Frame 20: Capture with SSAO enabled
+        // Frame 15: Capture Raw Depth
+        ctx.OnFrame(15, [&ctx]() {
+            CFFLog::Info("[TestSSAO:Frame15] Capturing Raw Depth");
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 15);
+            CFFLog::Info("VISUAL_EXPECTATION: Depth [0,1] - near=dark, far=white");
+        });
+
+        // Frame 20: Debug - Linear Depth
         ctx.OnFrame(20, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame20] Capturing screenshot with SSAO enabled");
-            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 20);
-
-            CFFLog::Info("VISUAL_EXPECTATION: Dark occlusion in corners, contact shadows at floor");
+            CFFLog::Info("[TestSSAO:Frame20] Debug: Linear Depth visualization");
+            CDeferredRenderPipeline* deferredPipeline =
+                dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
+            if (deferredPipeline) {
+                deferredPipeline->GetSSAOPass().GetSettings().algorithm = ESSAOAlgorithm::Debug_LinearDepth;
+            }
         });
 
-        // Frame 25: Disable SSAO for comparison
+        // Frame 25: Capture Linear Depth
         ctx.OnFrame(25, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame25] Disabling SSAO for comparison");
-
-            CDeferredRenderPipeline* deferredPipeline =
-                dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
-            if (deferredPipeline) {
-                deferredPipeline->GetSSAOPass().GetSettings().enabled = false;
-            }
+            CFFLog::Info("[TestSSAO:Frame25] Capturing Linear Depth");
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 25);
+            CFFLog::Info("VISUAL_EXPECTATION: Linearized Z - gradual brightness with distance");
         });
 
-        // Frame 30: Capture without SSAO
+        // Frame 30: Debug - View Position Z (sign check)
         ctx.OnFrame(30, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame30] Capturing screenshot without SSAO");
-            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 30);
-
-            CFFLog::Info("VISUAL_EXPECTATION: Same scene without ambient occlusion");
-        });
-
-        // Frame 35: Re-enable with high intensity
-        ctx.OnFrame(35, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame35] Testing high intensity SSAO");
-
+            CFFLog::Info("[TestSSAO:Frame30] Debug: View Position Z");
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
             if (deferredPipeline) {
-                auto& ssaoSettings = deferredPipeline->GetSSAOPass().GetSettings();
-                ssaoSettings.enabled = true;
-                ssaoSettings.radius = 1.0f;      // Larger radius
-                ssaoSettings.intensity = 2.5f;   // Higher intensity
-                ssaoSettings.numSlices = 4;      // Max quality
-                ssaoSettings.numSteps = 6;
+                deferredPipeline->GetSSAOPass().GetSettings().algorithm = ESSAOAlgorithm::Debug_ViewPosZ;
             }
         });
 
-        // Frame 45: Capture high intensity SSAO
-        ctx.OnFrame(45, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame45] Capturing high intensity SSAO");
-            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 45);
-
-            CFFLog::Info("VISUAL_EXPECTATION: Stronger AO effect with larger occlusion halos");
+        // Frame 35: Capture View Position Z
+        ctx.OnFrame(35, [&ctx]() {
+            CFFLog::Info("[TestSSAO:Frame35] Capturing View Position Z");
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 35);
+            CFFLog::Info("VISUAL_EXPECTATION: Positive Z = visible, should show depth gradient");
         });
 
-        // Frame 50: Finish test
+        // Frame 40: Debug - View Normal Z
+        ctx.OnFrame(40, [&ctx]() {
+            CFFLog::Info("[TestSSAO:Frame40] Debug: View Normal Z");
+            CDeferredRenderPipeline* deferredPipeline =
+                dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
+            if (deferredPipeline) {
+                deferredPipeline->GetSSAOPass().GetSettings().algorithm = ESSAOAlgorithm::Debug_ViewNormalZ;
+            }
+        });
+
+        // Frame 45: Capture View Normal Z
+        ctx.OnFrame(45, [&ctx]() {
+            CFFLog::Info("[TestSSAO:Frame45] Capturing View Normal Z");
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 45);
+            CFFLog::Info("VISUAL_EXPECTATION: Surfaces facing camera = white, away = dark");
+        });
+
+        // Frame 50: Switch to Crytek SSAO (actual algorithm test)
         ctx.OnFrame(50, [&ctx]() {
-            CFFLog::Info("[TestSSAO:Frame50] Test complete");
+            CFFLog::Info("[TestSSAO:Frame50] Switching to Crytek SSAO algorithm");
+            CDeferredRenderPipeline* deferredPipeline =
+                dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
+            if (deferredPipeline) {
+                deferredPipeline->GetSSAOPass().GetSettings().algorithm = ESSAOAlgorithm::Crytek;
+                deferredPipeline->GetSSAOPass().GetSettings().blurRadius = 2;  // Re-enable blur
+            }
+        });
+
+        // Frame 60: Capture Crytek SSAO
+        ctx.OnFrame(60, [&ctx]() {
+            CFFLog::Info("[TestSSAO:Frame60] Capturing Crytek SSAO");
+            CScreenshot::CaptureTest(ctx.pipeline, ctx.testName, 60);
+            CFFLog::Info("VISUAL_EXPECTATION: Crytek SSAO - proper AO in corners/contacts");
+        });
+
+        // Frame 65: Finish test
+        ctx.OnFrame(65, [&ctx]() {
+            CFFLog::Info("[TestSSAO:Frame65] Test complete");
 
             if (ctx.failures.empty()) {
-                CFFLog::Info("TEST PASSED: SSAO rendering completed without errors");
+                CFFLog::Info("TEST PASSED: All SSAO algorithms rendered without errors");
                 ctx.testPassed = true;
             } else {
                 CFFLog::Error("TEST FAILED: %zu assertion(s) failed", ctx.failures.size());

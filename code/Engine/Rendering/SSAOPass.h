@@ -20,22 +20,36 @@ namespace SSAOConfig {
     constexpr uint32_t MAX_SLICES = 4;          // Maximum slices (quality mode)
 }
 
+// SSAO Algorithm selection
+enum class ESSAOAlgorithm : int {
+    GTAO = 0,    // Ground Truth AO (most accurate, UE5/Unity HDRP)
+    HBAO = 1,    // Horizon-Based AO (NVIDIA, good balance)
+    Crytek = 2,  // Original SSAO (Crysis 2007, classic)
+
+    // Debug visualization modes (100+)
+    Debug_RawDepth = 100,      // Raw depth buffer value [0,1]
+    Debug_LinearDepth = 101,   // Linearized view-space Z
+    Debug_ViewPosZ = 102,      // View-space position.z (check sign)
+    Debug_ViewNormalZ = 103,   // View-space normal.z (facing camera = white)
+    Debug_SampleDiff = 104     // Sample reconstruction accuracy
+};
+
 // SSAO Settings (exposed to editor, serialized with scene)
-// Uses GTAO (Ground Truth Ambient Occlusion) algorithm
 struct SSSAOSettings {
+    ESSAOAlgorithm algorithm = ESSAOAlgorithm::GTAO;  // Algorithm selection
     float radius = 0.5f;            // View-space AO radius
     float intensity = 1.5f;         // AO strength multiplier
     float falloffStart = 0.2f;      // Distance falloff start (0.0-1.0 of radius)
     float falloffEnd = 1.0f;        // Distance falloff end
     float depthSigma = 0.1f;        // Bilateral blur depth threshold
     float thicknessHeuristic = 0.1f;// Thin object heuristic
-    int numSlices = 3;              // Number of direction slices (2-4)
-    int numSteps = 4;               // Steps per direction (4-8)
+    int numSlices = 10;              // Number of direction slices (2-4)
+    int numSteps = 20;               // Steps per direction (4-8)
     int blurRadius = 2;             // Bilateral blur radius (1-4)
     bool enabled = true;            // Enable/disable SSAO
 };
 
-// Constant buffer for GTAO compute shader (b0)
+// Constant buffer for SSAO compute shader (b0)
 struct alignas(16) CB_SSAO {
     DirectX::XMFLOAT4X4 proj;
     DirectX::XMFLOAT4X4 invProj;
@@ -49,7 +63,7 @@ struct alignas(16) CB_SSAO {
     int numSlices;                      // Number of direction slices (2-4)
     int numSteps;                       // Steps per direction (4-8)
     float thicknessHeuristic;           // Thin object heuristic threshold
-    float _pad;
+    int algorithm;                      // 0=GTAO, 1=HBAO, 2=Crytek
 };
 
 // Constant buffer for bilateral blur (b0)
