@@ -397,13 +397,13 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
             ImGui::Text("G-Buffer Debug Visualization");
             ImGui::Separator();
 
-            int currentDebugMode = static_cast<int>(deferredPipeline->GetGBufferDebugMode());
+            int currentDebugMode = static_cast<int>(settings.gBufferDebugMode);
             ImGui::PushItemWidth(200);
             if (ImGui::Combo("Debug Mode##GBuffer", &currentDebugMode,
-                           CDeferredRenderPipeline::GetGBufferDebugModeNames(),
-                           CDeferredRenderPipeline::GetGBufferDebugModeCount())) {
-                deferredPipeline->SetGBufferDebugMode(static_cast<CDeferredRenderPipeline::EGBufferDebugMode>(currentDebugMode));
-                CFFLog::Info("G-Buffer debug mode: %s", CDeferredRenderPipeline::GetGBufferDebugModeNames()[currentDebugMode]);
+                           GetGBufferDebugModeNames(),
+                           GetGBufferDebugModeCount())) {
+                settings.gBufferDebugMode = static_cast<EGBufferDebugMode>(currentDebugMode);
+                CFFLog::Info("G-Buffer debug mode: %s", GetGBufferDebugModeNames()[currentDebugMode]);
             }
             ImGui::PopItemWidth();
 

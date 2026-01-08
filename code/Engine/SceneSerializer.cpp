@@ -202,6 +202,7 @@ bool CSceneSerializer::SaveScene(const CScene& scene, const std::string& filepat
         json settingsJson;
         settingsJson["skyboxAssetPath"] = scene.GetLightSettings().skyboxAssetPath;
         settingsJson["diffuseGIMode"] = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
+        settingsJson["gBufferDebugMode"] = static_cast<int>(scene.GetLightSettings().gBufferDebugMode);
 
         // Serialize Volumetric Lightmap config
         const auto& vlConfig = scene.GetLightSettings().volumetricLightmap;
@@ -263,6 +264,9 @@ bool CSceneSerializer::LoadScene(CScene& scene, const std::string& filepath) {
             }
             if (settingsJson.contains("diffuseGIMode")) {
                 scene.GetLightSettings().diffuseGIMode = static_cast<EDiffuseGIMode>(settingsJson["diffuseGIMode"].get<int>());
+            }
+            if (settingsJson.contains("gBufferDebugMode")) {
+                scene.GetLightSettings().gBufferDebugMode = static_cast<EGBufferDebugMode>(settingsJson["gBufferDebugMode"].get<int>());
             }
 
             // Load Volumetric Lightmap config

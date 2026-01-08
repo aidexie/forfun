@@ -334,7 +334,8 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     {
         // Debug visualization mode or full lighting
-        if (m_debugMode != EGBufferDebugMode::None) {
+        EGBufferDebugMode debugMode = CScene::Instance().GetLightSettings().gBufferDebugMode;
+        if (debugMode != EGBufferDebugMode::None) {
             // Set HDR render target for debug vis
             ITexture* hdrRT = m_offHDR.get();
             cmdList->SetRenderTargets(1, &hdrRT, nullptr);
@@ -476,7 +477,7 @@ void CDeferredRenderPipeline::renderDebugVisualization(uint32_t width, uint32_t 
     struct {
         int debugMode;
         float _pad[3];
-    } debugData = { static_cast<int>(m_debugMode), {0, 0, 0} };
+    } debugData = { static_cast<int>(CScene::Instance().GetLightSettings().gBufferDebugMode), {0, 0, 0} };
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &debugData, sizeof(debugData));
 
     // Draw full-screen triangle (3 vertices, no vertex buffer)

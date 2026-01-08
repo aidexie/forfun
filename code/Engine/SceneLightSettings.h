@@ -14,6 +14,43 @@ enum class EDiffuseGIMode : int
 };
 
 // ============================================
+// G-Buffer Debug Visualization Mode
+// ============================================
+#define GBUFFER_DEBUG_MODES \
+    X(None, "None") \
+    X(WorldPosition, "World Position") \
+    X(Normal, "Normal") \
+    X(Albedo, "Albedo") \
+    X(Metallic, "Metallic") \
+    X(Roughness, "Roughness") \
+    X(AO, "AO") \
+    X(Emissive, "Emissive") \
+    X(MaterialID, "Material ID") \
+    X(Velocity, "Velocity") \
+    X(Depth, "Depth") \
+    X(SSAO, "SSAO")
+
+enum class EGBufferDebugMode : int {
+    #define X(name, str) name,
+    GBUFFER_DEBUG_MODES
+    #undef X
+    COUNT
+};
+
+inline const char* const* GetGBufferDebugModeNames() {
+    static const char* names[] = {
+        #define X(name, str) str,
+        GBUFFER_DEBUG_MODES
+        #undef X
+    };
+    return names;
+}
+
+inline constexpr int GetGBufferDebugModeCount() {
+    return static_cast<int>(EGBufferDebugMode::COUNT);
+}
+
+// ============================================
 // Bloom Settings - HDR Bloom Post-Processing
 // ============================================
 struct SBloomSettings
@@ -57,6 +94,9 @@ public:
 
     // Post-Processing: Bloom
     SBloomSettings bloom;
+
+    // G-Buffer Debug Visualization
+    EGBufferDebugMode gBufferDebugMode = EGBufferDebugMode::None;
 
     // Future additions:
     // float iblIntensity = 1.0f;

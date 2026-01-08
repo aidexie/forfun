@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine/Rendering/RenderPipeline.h"
+#include "Engine/SceneLightSettings.h"
 #include "GBuffer.h"
 #include "DepthPrePass.h"
 #include "GBufferPass.h"
@@ -38,42 +39,6 @@
 class CDeferredRenderPipeline : public CRenderPipeline
 {
 public:
-    // G-Buffer debug visualization modes - X-Macro definition
-    #define GBUFFER_DEBUG_MODES \
-        X(None, "None") \
-        X(WorldPosition, "World Position") \
-        X(Normal, "Normal") \
-        X(Albedo, "Albedo") \
-        X(Metallic, "Metallic") \
-        X(Roughness, "Roughness") \
-        X(AO, "AO") \
-        X(Emissive, "Emissive") \
-        X(MaterialID, "Material ID") \
-        X(Velocity, "Velocity") \
-        X(Depth, "Depth") \
-        X(SSAO, "SSAO")
-
-    enum class EGBufferDebugMode : int {
-        #define X(name, str) name,
-        GBUFFER_DEBUG_MODES
-        #undef X
-        COUNT
-    };
-
-    // Get debug mode names for UI
-    static const char* const* GetGBufferDebugModeNames() {
-        static const char* names[] = {
-            #define X(name, str) str,
-            GBUFFER_DEBUG_MODES
-            #undef X
-        };
-        return names;
-    }
-
-    static constexpr int GetGBufferDebugModeCount() {
-        return static_cast<int>(EGBufferDebugMode::COUNT);
-    }
-
     CDeferredRenderPipeline() = default;
     ~CDeferredRenderPipeline() override = default;
 
@@ -109,10 +74,6 @@ public:
     CSSAOPass& GetSSAOPass() { return m_ssaoPass; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
 
-    // Debug visualization
-    void SetGBufferDebugMode(EGBufferDebugMode mode) { m_debugMode = mode; }
-    EGBufferDebugMode GetGBufferDebugMode() const { return m_debugMode; }
-
 private:
     void ensureOffscreen(unsigned int w, unsigned int h);
 
@@ -145,9 +106,6 @@ private:
     // Frame State
     // ============================================
     DirectX::XMMATRIX m_viewProjPrev = DirectX::XMMatrixIdentity();  // Previous frame VP matrix
-
-    // Debug visualization mode
-    EGBufferDebugMode m_debugMode = EGBufferDebugMode::None;
 
     // G-Buffer debug visualization resources
     RHI::ShaderPtr m_debugVS;
