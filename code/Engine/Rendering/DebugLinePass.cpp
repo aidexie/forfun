@@ -6,6 +6,7 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include <fstream>
 #include <sstream>
 
@@ -153,7 +154,7 @@ void CDebugLinePass::CreatePipelineState() {
     // Depth stencil state: test but no write
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
     psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;  // Match GBuffer depth
 
     // Blend state: alpha blending

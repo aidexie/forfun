@@ -60,6 +60,8 @@ cbuffer CB_SSAO : register(b0) {
     int gNumSteps;              // Steps per direction (4-8)
     float gThicknessHeuristic;  // Thin object heuristic threshold
     int gAlgorithm;             // 0=GTAO, 1=HBAO, 2=Crytek
+    uint gUseReversedZ;         // 0 = standard-Z, 1 = reversed-Z
+    float3 _pad;                // Padding to 16-byte alignment
 };
 
 cbuffer CB_SSAOBlur : register(b0) {
@@ -79,7 +81,8 @@ cbuffer CB_SSAOUpsample : register(b0) {
 
 cbuffer CB_SSAODownsample : register(b0) {
     float2 gDownsampleTexelSize;
-    float2 _downsamplePad;
+    uint gDownsampleUseReversedZ;   // 0 = standard-Z, 1 = reversed-Z
+    float _downsamplePad;
 };
 
 // ============================================
@@ -135,6 +138,21 @@ float3 GetViewNormal(float2 uv) {
 float ComputeFalloff(float dist, float radius) {
     float t = saturate((dist - gFalloffStart * radius) / ((gFalloffEnd - gFalloffStart) * radius));
     return 1.0 - t * t;
+}
+
+// Check if depth value represents sky (far plane)
+// Standard-Z: sky at 1.0, Reversed-Z: sky at 0.0
+bool IsSkyDepth(float depth) {
+    return gUseReversedZ ? (depth <= 0.001) : (depth >= 0.999);
+}
+
+// Get closest depth from multiple samples
+// Standard-Z: min = closest, Reversed-Z: max = closest
+float GetClosestDepth(float d0, float d1, float d2, float d3) {
+    if (gUseReversedZ) {
+        return max(max(d0, d1), max(d2, d3));
+    }
+    return min(min(d0, d1), min(d2, d3));
 }
 
 // ============================================
@@ -224,7 +242,7 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
 
             float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
-            if (sampleDepth >= 1.0) continue;  // Skip sky
+            if (IsSkyDepth(sampleDepth)) continue;  // Skip sky
 
             float3 samplePos = ReconstructViewPos(sampleUV, sampleDepth);
             float3 diff = samplePos - viewPos;
@@ -250,7 +268,7 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
 
             float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
-            if (sampleDepth >= 1.0) continue;
+            if (IsSkyDepth(sampleDepth)) continue;
 
             float3 samplePos = ReconstructViewPos(sampleUV, sampleDepth);
             float3 diff = samplePos - viewPos;
@@ -315,7 +333,7 @@ float ComputeHBAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
 
             // Sample depth
             float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
-            if (sampleDepth >= 1.0) continue;
+            if (IsSkyDepth(sampleDepth)) continue;
 
             // Reconstruct view position
             float3 samplePos = ReconstructViewPos(sampleUV, sampleDepth);
@@ -427,11 +445,13 @@ float ComputeCrytekSSAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noi
         scale = lerp(0.1, 1.0, scale * scale);
 
         // Sample position in view space
-        float3 samplePos = viewPos + sampleDir * gRadius * scale;
+        // float3 samplePos = viewPos + sampleDir * gRadius * scale;
+        float3 samplePos = viewPos + float3(1,0,0) * gRadius * scale;
 
         // Project sample to screen space
         float4 sampleClip = mul(float4(samplePos, 1.0), gProj);
         float2 sampleUV = sampleClip.xy / sampleClip.w;
+        // return sampleClip.z/sampleClip.w*10.0;
         sampleUV = sampleUV * float2(0.5, -0.5) + 0.5;
 
         // Bounds check
@@ -439,7 +459,8 @@ float ComputeCrytekSSAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noi
 
         // Sample depth at this position
         float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
-        if (sampleDepth >= 1.0) continue;  // Skip sky
+        // return sampleDepth*10;
+        // if (IsSkyDepth(sampleDepth)) continue;  // Skip sky
 
         // Reconstruct actual position at sampled depth
         float3 actualPos = ReconstructViewPos(sampleUV, sampleDepth);
@@ -447,8 +468,9 @@ float ComputeCrytekSSAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noi
         // Distance from view position to actual surface
         float3 diff = actualPos - viewPos;
         float dist = length(diff);
-        // return dist;
+        return dist;
         // return actualPos.z/100.0;
+        // return sampleClip.z/sampleClip.w;
         // return dot(normalize(diff),viewNormal);
         // Range check: smooth falloff at radius boundary
         float rangeCheck = 1.0 - smoothstep(gRadius * 0.5, gRadius, dist);
@@ -464,14 +486,15 @@ float ComputeCrytekSSAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noi
         // Only count as occlusion if:
         // 1. The actual surface is closer than our sample point (depthDiff > 0)
         // 2. The depth difference is within reasonable bounds (not a backface or far surface)
-        if (depthDiff > 0.001 && depthDiff < gRadius) {
+        if (depthDiff > 0.001 && depthDiff < gRadius) 
+        {
             occlusion += rangeCheck;
         }
     }
 
     // Normalize and apply intensity
     occlusion = occlusion / float(numSamples);
-    float ao = saturate(1.0 - occlusion * gIntensity);
+    float ao = saturate(1.0 - occlusion);
 
     return ao;
 }
@@ -489,7 +512,7 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
     float depth = gDepth.SampleLevel(gPointSampler, uv, 0).r;
 
     // Skip sky pixels
-    if (depth >= 1.0) {
+    if (IsSkyDepth(depth)) {
         gSSAOOutput[pixelCoord] = 1.0;
         return;
     }
@@ -501,45 +524,49 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
     // ============================================
     // Debug Visualization Modes
     // ============================================
-    if (gAlgorithm >= 100) {
+    if (gAlgorithm >= 100) 
+    {
         float debugValue = 0.0;
 
-        if (gAlgorithm == SSAO_DEBUG_RAW_DEPTH) {
-            // Raw depth buffer value [0, 1]
-            // Near plane should be dark, far plane should be white
-            debugValue = depth;
-        }
-        else if (gAlgorithm == SSAO_DEBUG_LINEAR_DEPTH) {
-            // View-space Z (linear depth)
-            // Normalize to visible range (assume max 100 units)
-            debugValue = saturate(abs(viewPos.z) / 100.0);
-        }
-        else if (gAlgorithm == SSAO_DEBUG_VIEW_POS_Z) {
-            // View-space Z sign check
-            // If LEFT-HANDED: Z should be POSITIVE (into screen)
-            // If RIGHT-HANDED: Z should be NEGATIVE
-            // Output: positive Z = green tint, negative Z = red tint
-            // For grayscale: output normalized absolute Z
-            debugValue = viewPos.z > 0.0 ? saturate(viewPos.z / 50.0) : 0.0;
-        }
-        else if (gAlgorithm == SSAO_DEBUG_VIEW_NORMAL_Z) {
-            // View-space normal Z component
-            // Surfaces facing camera should have negative Z (toward camera)
-            // Output: facing camera = white, facing away = black
-            debugValue = saturate(-viewNormal.z);
-        }
-        else if (gAlgorithm == SSAO_DEBUG_SAMPLE_DIFF) {
+        // if (gAlgorithm == SSAO_DEBUG_RAW_DEPTH) {
+        //     // Raw depth buffer value [0, 1]
+        //     // Near plane should be dark, far plane should be white
+        //     debugValue = depth;
+        // }
+        // else if (gAlgorithm == SSAO_DEBUG_LINEAR_DEPTH) {
+        //     // View-space Z (linear depth)
+        //     // Normalize to visible range (assume max 100 units)
+        //     debugValue = saturate(abs(viewPos.z) / 100.0);
+        // }
+        // else if (gAlgorithm == SSAO_DEBUG_VIEW_POS_Z) {
+        //     // View-space Z sign check
+        //     // If LEFT-HANDED: Z should be POSITIVE (into screen)
+        //     // If RIGHT-HANDED: Z should be NEGATIVE
+        //     // Output: positive Z = green tint, negative Z = red tint
+        //     // For grayscale: output normalized absolute Z
+        //     debugValue = viewPos.z > 0.0 ? saturate(viewPos.z / 50.0) : 0.0;
+        // }
+        // else if (gAlgorithm == SSAO_DEBUG_VIEW_NORMAL_Z) {
+        //     // View-space normal Z component
+        //     // Surfaces facing camera should have negative Z (toward camera)
+        //     // Output: facing camera = white, facing away = black
+        //     debugValue = saturate(-viewNormal.z);
+        // }
+        // else if (gAlgorithm == SSAO_DEBUG_SAMPLE_DIFF) 
+        {
             // Test sample reconstruction accuracy
             // Sample a nearby pixel and compare reconstructed positions
-            float2 offsetUV = uv + float2(gTexelSize.x * 5.0, 0.0);
+            float2 offsetUV = uv + float2(gTexelSize.y * 5.0, 0.0);
+            // float2 offsetUV = uv;
             if (offsetUV.x < 1.0) {
                 float sampleDepth = gDepth.SampleLevel(gPointSampler, offsetUV, 0).r;
                 if (sampleDepth < 1.0) {
                     float3 samplePos = ReconstructViewPos(offsetUV, sampleDepth);
-                    debugValue = samplePos.z > 0.0 ? saturate(samplePos.z / 50.0) : 0.0;
-                    // float3 diff = samplePos - viewPos;
+                    // debugValue = saturate(samplePos.z / 50.0);
+                    // debugValue = sampleDepth*10;
+                    float3 diff = samplePos - viewPos;
                     // // Show the XY distance (should be small for nearby pixels on same surface)
-                    // debugValue = saturate(length(diff.xy) / gRadius);
+                    debugValue = saturate(length(diff.xy) / gRadius);
                 }
             }
         }
@@ -586,8 +613,8 @@ void CSBlurH(uint3 dispatchThreadID : SV_DispatchThreadID) {
     float centerDepth = gDepthInput.SampleLevel(gPointSampler, uv, 0).r;
     float centerAO = gSSAOInput.SampleLevel(gPointSampler, uv, 0).r;
 
-    // Skip sky
-    if (centerDepth >= 1.0) {
+    // Skip sky (works for both standard-Z and reversed-Z)
+    if (centerDepth >= 0.999 || centerDepth <= 0.001) {
         gSSAOOutput[pixelCoord] = 1.0;
         return;
     }
@@ -642,8 +669,8 @@ void CSBlurV(uint3 dispatchThreadID : SV_DispatchThreadID) {
     float centerDepth = gDepthInput.SampleLevel(gPointSampler, uv, 0).r;
     float centerAO = gSSAOInput.SampleLevel(gPointSampler, uv, 0).r;
 
-    // Skip sky
-    if (centerDepth >= 1.0) {
+    // Skip sky (works for both standard-Z and reversed-Z)
+    if (centerDepth >= 0.999 || centerDepth <= 0.001) {
         gSSAOOutput[pixelCoord] = 1.0;
         return;
     }
@@ -697,8 +724,8 @@ void CSBilateralUpsample(uint3 dispatchThreadID : SV_DispatchThreadID) {
     // Sample full-res depth
     float centerDepth = gDepthFullRes.SampleLevel(gPointSampler, fullResUV, 0).r;
 
-    // Skip sky
-    if (centerDepth >= 1.0) {
+    // Skip sky (works for both standard-Z and reversed-Z)
+    if (centerDepth >= 0.999 || centerDepth <= 0.001) {
         gSSAOOutput[fullResCoord] = 1.0;
         return;
     }
@@ -737,14 +764,20 @@ void CSDownsampleDepth(uint3 dispatchThreadID : SV_DispatchThreadID) {
     uint2 halfResCoord = dispatchThreadID.xy;
     float2 halfResUV = (float2(halfResCoord) + 0.5) * gDownsampleTexelSize * 2.0;
 
-    // Sample 4 full-res depth values and take closest (min depth = closest)
+    // Sample 4 full-res depth values
     float d0 = gDepthSource.SampleLevel(gPointSampler, halfResUV + float2(-0.25, -0.25) * gDownsampleTexelSize, 0).r;
     float d1 = gDepthSource.SampleLevel(gPointSampler, halfResUV + float2( 0.25, -0.25) * gDownsampleTexelSize, 0).r;
     float d2 = gDepthSource.SampleLevel(gPointSampler, halfResUV + float2(-0.25,  0.25) * gDownsampleTexelSize, 0).r;
     float d3 = gDepthSource.SampleLevel(gPointSampler, halfResUV + float2( 0.25,  0.25) * gDownsampleTexelSize, 0).r;
 
     // Use closest depth (preserves edges better for bilateral operations)
-    float closestDepth = min(min(d0, d1), min(d2, d3));
+    // Standard-Z: min = closest, Reversed-Z: max = closest
+    float closestDepth;
+    if (gDownsampleUseReversedZ) {
+        closestDepth = max(max(d0, d1), max(d2, d3));
+    } else {
+        closestDepth = min(min(d0, d1), min(d2, d3));
+    }
 
     gSSAOOutput[halfResCoord] = closestDepth;
 }

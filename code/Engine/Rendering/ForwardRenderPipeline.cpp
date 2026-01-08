@@ -4,6 +4,7 @@
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Components/DirectionalLight.h"
@@ -116,7 +117,8 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
 
     const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };  // Match optimizedClearValue in CreateTexture
     cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
-    cmdList->ClearDepthStencil(m_offDepth.get(), true, 1.0f, true, 0);
+    float clearDepth = UseReversedZ() ? 0.0f : 1.0f;
+    cmdList->ClearDepthStencil(m_offDepth.get(), true, clearDepth, true, 0);
 
     // ============================================
     // 5. Scene Rendering (Opaque + Transparent + Skybox)

@@ -352,6 +352,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             std::filesystem::create_directories(std::filesystem::path(configPath).parent_path());
             SRenderConfig::Save(configPath, g_renderConfig);
         }
+        // Register global config for engine-wide access
+        SetGlobalRenderConfig(&g_renderConfig);
     }
 
     // 3) 窗口 (use config dimensions)
@@ -531,9 +533,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             // Check if test is finished - set flag to exit after frame completes
             if (testContext.IsFinished())
             {
-                CFFLog::Info("=== Test Finished ===");
                 if (testFromCommandLine)
                 {
+                    CFFLog::Info("=== Test Finished ===");
                     PostQuitMessage(testContext.testPassed ? 0 : 1);
                     shouldExitAfterFrame = true;
                 }
@@ -542,9 +544,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             // Timeout protection
             if (frameCount > 1000)
             {
-                CFFLog::Error("Test timeout after 1000 frames");
                 if (testFromCommandLine)
                 {
+                    CFFLog::Error("Test timeout after 1000 frames");
                     PostQuitMessage(1);
                     shouldExitAfterFrame = true;
                 }
@@ -592,7 +594,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             const float clearColor[4] = { 0.1f, 0.1f, 0.12f, 1.0f };
             cmdList->ClearRenderTarget(backbuffer, clearColor);
             if (depthStencil) {
-                cmdList->ClearDepthStencil(depthStencil, true, 1.0f, true, 0);
+                float clearDepth = UseReversedZ() ? 0.0f : 1.0f;
+                cmdList->ClearDepthStencil(depthStencil, true, clearDepth, true, 0);
             }
         }
 

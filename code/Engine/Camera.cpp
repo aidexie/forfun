@@ -1,7 +1,32 @@
 #include "Camera.h"
+#include "Core/RenderConfig.h"
 #include <cmath>
 
 using namespace DirectX;
+
+// ============================================
+// Reversed-Z Projection Matrix (Left-Hand, DirectX)
+// ============================================
+// Maps: nearZ -> 1.0, farZ -> 0.0 (opposite of standard projection)
+// This provides better depth precision for distant objects.
+static XMMATRIX XMMatrixPerspectiveFovLH_ReversedZ(float fovY, float aspect, float nearZ, float farZ) {
+    float h = 1.0f / tanf(fovY * 0.5f);
+    float w = h / aspect;
+
+    // Standard projection Z component: z' = (z*far) / (z*(far-near)) - near*far / (z*(far-near))
+    // After perspective divide: z_ndc = (far*(z-near)) / (z*(far-near))
+    // At z=near: z_ndc = 0, at z=far: z_ndc = 1
+    //
+    // Reversed-Z: swap 0 and 1
+    // z_ndc = near*(far-z) / (z*(far-near))
+    // At z=near: z_ndc = 1, at z=far: z_ndc = 0
+    return XMMatrixSet(
+        w,    0.0f, 0.0f,                               0.0f,
+        0.0f, h,    0.0f,                               0.0f,
+        0.0f, 0.0f, nearZ / (nearZ - farZ),             1.0f,
+        0.0f, 0.0f, -farZ * nearZ / (nearZ - farZ),     0.0f
+    );
+}
 
 // ============================================
 // 辅助函数：从 yaw/pitch 构建 Quaternion
@@ -50,6 +75,9 @@ XMMATRIX CCamera::GetViewMatrix() const {
 }
 
 XMMATRIX CCamera::GetProjectionMatrix() const {
+    if (UseReversedZ()) {
+        return XMMatrixPerspectiveFovLH_ReversedZ(fovY, aspectRatio, nearZ, farZ);
+    }
     return XMMatrixPerspectiveFovLH(fovY, aspectRatio, nearZ, farZ);
 }
 

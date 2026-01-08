@@ -9,6 +9,7 @@
 #include "DX12RayTracingPipeline.h"
 #include "DX12ShaderBindingTable.h"
 #include "../../Core/FFLog.h"
+#include "../../Core/RenderConfig.h"
 
 namespace RHI {
 namespace DX12 {
@@ -592,7 +593,12 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
         pClearValue = &clearValue;
     } else if (desc.usage & ETextureUsage::DepthStencil) {
         clearValue.Format = (desc.dsvFormat != ETextureFormat::Unknown) ? ToDXGIFormat(desc.dsvFormat) : resourceDesc.Format;
-        clearValue.DepthStencil.Depth = 1.0f;
+        // Use explicit depthClearValue if set, otherwise auto-determine from UseReversedZ()
+        if (desc.depthClearValue >= 0.0f) {
+            clearValue.DepthStencil.Depth = desc.depthClearValue;
+        } else {
+            clearValue.DepthStencil.Depth = UseReversedZ() ? 0.0f : 1.0f;
+        }
         clearValue.DepthStencil.Stencil = 0;
         pClearValue = &clearValue;
     }

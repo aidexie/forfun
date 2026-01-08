@@ -3,6 +3,8 @@
 
 cbuffer CB : register(b0) {
     float4x4 viewProj;
+    uint useReversedZ;
+    uint3 padding;
 }
 
 struct VSIn {
@@ -17,7 +19,15 @@ struct VSOut {
 VSOut main(VSIn input) {
     VSOut output;
     output.localPos = input.pos;
-    // Set z=w to ensure skybox renders at far plane (depth = 1.0)
-    output.posH = mul(float4(input.pos, 1.0), viewProj).xyww;
+
+    // Render skybox at far plane
+    // Standard Z: far plane = 1.0 (z=w)
+    // Reversed Z: far plane = 0.0 (z=0)
+    float4 clipPos = mul(float4(input.pos, 1.0), viewProj);
+    if (useReversedZ) {
+        output.posH = float4(clipPos.xy, 0.0, clipPos.w);
+    } else {
+        output.posH = clipPos.xyww;  // z=w means depth=1.0 after perspective divide
+    }
     return output;
 }

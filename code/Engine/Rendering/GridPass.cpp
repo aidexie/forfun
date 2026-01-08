@@ -1,6 +1,7 @@
 // Engine/Rendering/GridPass.cpp
 #include "GridPass.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "RHI/RHIDescriptors.h"
 #include "RHI/RHIManager.h"
 #include "RHI/ShaderCompiler.h"
@@ -130,7 +131,7 @@ void CGridPass::CreatePipelineState() {
     // Depth stencil state: Read depth but don't write
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
     psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;  // Match GBuffer depth
 
     // Blend state: Alpha blending for RGB, preserve destination alpha

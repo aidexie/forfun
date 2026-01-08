@@ -5,6 +5,7 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "Core/PathManager.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
@@ -142,16 +143,19 @@ bool CGBufferPass::Initialize()
     // DepthPrePass uses: posWS * ViewProj (single matrix multiply)
     // GBuffer uses: (posWS * View) * Proj (two matrix multiplies)
     // Matrix multiplication is NOT associative in FP: (A*B)*C ≠ A*(B*C)
-    // The extra multiply causes GBuffer depth to be slightly LARGER than pre-pass
-    // Negative bias pushes GBuffer depth back toward pre-pass value for LessEqual match
-    psoDesc.rasterizer.depthBias = -1;
-    psoDesc.rasterizer.slopeScaledDepthBias = -1.0f;
+    // The extra multiply causes GBuffer depth to be slightly different than pre-pass
+    // Depth bias pushes GBuffer depth to match pre-pass value
+    // For reversed-Z, we need positive bias (opposite direction)
+    int depthBias = UseReversedZ() ? 1 : -1;
+    float slopeScaledBias = UseReversedZ() ? 1.0f : -1.0f;
+    psoDesc.rasterizer.depthBias = depthBias;
+    psoDesc.rasterizer.slopeScaledDepthBias = slopeScaledBias;
 
-    // Depth stencil state: LessEqual test (with bias, effectively matches pre-pass depth)
+    // Depth stencil state: test (with bias, effectively matches pre-pass depth)
     // Write OFF since depth was already written by DepthPrePass
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
 
     // No blending
     psoDesc.blend.blendEnable = false;

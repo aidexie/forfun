@@ -64,6 +64,8 @@ struct alignas(16) CB_SSAO {
     int numSteps;                       // Steps per direction (4-8)
     float thicknessHeuristic;           // Thin object heuristic threshold
     int algorithm;                      // 0=GTAO, 1=HBAO, 2=Crytek
+    uint32_t useReversedZ;              // 0 = standard-Z, 1 = reversed-Z
+    float _pad[3];                      // Padding to 16-byte alignment
 };
 
 // Constant buffer for bilateral blur (b0)

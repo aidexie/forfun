@@ -9,6 +9,7 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Engine/Scene.h"
@@ -497,7 +498,7 @@ void CSceneRenderer::createPipeline()
     // Depth stencil state (depth test + write)
     psoOpaque.depthStencil.depthEnable = true;
     psoOpaque.depthStencil.depthWriteEnable = true;
-    psoOpaque.depthStencil.depthFunc = EComparisonFunc::Less;
+    psoOpaque.depthStencil.depthFunc = GetDepthComparisonFunc(false);  // Less or Greater
 
     // No blending
     psoOpaque.blend.blendEnable = false;
@@ -514,9 +515,9 @@ void CSceneRenderer::createPipeline()
     // ============================================
     PipelineStateDesc psoTransparent = psoOpaque;  // Copy opaque settings
 
-    // Depth: read-only (no write) with LessEqual
+    // Depth: read-only (no write)
     psoTransparent.depthStencil.depthWriteEnable = false;
-    psoTransparent.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoTransparent.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
 
     // Alpha blending
     psoTransparent.blend.blendEnable = true;

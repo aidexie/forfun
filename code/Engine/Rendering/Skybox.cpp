@@ -7,6 +7,7 @@
 #include "Core/Loader/HdrLoader.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include <vector>
 #include <fstream>
 #include <sstream>
@@ -33,6 +34,8 @@ struct SkyboxVertex {
 
 struct CB_SkyboxTransform {
     XMMATRIX viewProj;
+    uint32_t useReversedZ;
+    uint32_t padding[3];  // Align to 16 bytes
 };
 
 bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
@@ -121,6 +124,8 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     // Update constant buffer
     CB_SkyboxTransform cb;
     cb.viewProj = XMMatrixTranspose(viewNoTranslation * proj);
+    cb.useReversedZ = UseReversedZ() ? 1 : 0;
+    cb.padding[0] = cb.padding[1] = cb.padding[2] = 0;
 
     // Set pipeline state (includes rasterizer, depth stencil, blend states)
     cmdList->SetPipelineState(m_pso.get());
@@ -259,7 +264,7 @@ void CSkybox::createPipelineState() {
     // Depth stencil state: depth test but no write (skybox at far plane)
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
 
     // Blend state: no blending
     psoDesc.blend.blendEnable = false;

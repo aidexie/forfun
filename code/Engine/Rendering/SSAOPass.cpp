@@ -7,6 +7,7 @@
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
+#include "Core/RenderConfig.h"
 #include <cmath>
 #include <random>
 
@@ -432,11 +433,13 @@ void CSSAOPass::dispatchDownsampleDepth(ICommandList* cmdList, ITexture* depthFu
     // Constant buffer for downsample
     struct CB_Downsample {
         float texelSizeX, texelSizeY;
-        float _pad[2];
+        uint32_t useReversedZ;
+        float _pad;
     } cb;
 
     cb.texelSizeX = 1.0f / static_cast<float>(m_fullWidth);
     cb.texelSizeY = 1.0f / static_cast<float>(m_fullHeight);
+    cb.useReversedZ = UseReversedZ() ? 1 : 0;
 
     cmdList->SetPipelineState(m_downsamplePSO.get());
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
@@ -482,6 +485,7 @@ void CSSAOPass::dispatchSSAO(ICommandList* cmdList,
     cb.numSteps = m_settings.numSteps;
     cb.thicknessHeuristic = m_settings.thicknessHeuristic;
     cb.algorithm = static_cast<int>(m_settings.algorithm);
+    cb.useReversedZ = UseReversedZ() ? 1 : 0;
 
     cmdList->SetPipelineState(m_ssaoPSO.get());
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));

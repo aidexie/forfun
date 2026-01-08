@@ -6,6 +6,7 @@
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
+#include "Core/RenderConfig.h"
 #include "Engine/Scene.h"
 #include "Engine/Camera.h"
 #include "Engine/GameObject.h"
@@ -52,7 +53,7 @@ struct alignas(16) CB_DeferredLighting {
     float iblIntensity;
     int diffuseGIMode;
     int probeIndex;
-    float _pad3;
+    uint32_t useReversedZ;
 };
 
 // Full-screen triangle vertex shader
@@ -341,6 +342,7 @@ void CDeferredLightingPass::Render(
     cb.camPosWS = camera.position;
     cb.diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
     cb.probeIndex = 0;  // Default global probe
+    cb.useReversedZ = UseReversedZ() ? 1 : 0;
 
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
 

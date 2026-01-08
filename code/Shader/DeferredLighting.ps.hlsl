@@ -64,7 +64,7 @@ cbuffer CB_DeferredLighting : register(b0) {
     float gIblIntensity;
     int gDiffuseGIMode;             // 0=VL, 1=GlobalIBL, 2=None, 3=Lightmap2D
     int gProbeIndex;                // Default probe index (0 = global)
-    float _pad3;
+    uint gUseReversedZ;             // 0 = standard-Z, 1 = reversed-Z
 }
 
 // Diffuse GI modes (must match MainPass.ps.hlsl)
@@ -156,8 +156,9 @@ float4 main(PSIn i) : SV_Target {
     float4 rt3 = gRT3_EmissiveMaterialID.Sample(gPointSampler, i.uv);
     float depth = gDepth.Sample(gPointSampler, i.uv).r;
 
-    // Skip sky pixels (depth == 1.0)
-    if (depth >= 1.0) {
+    // Skip sky pixels (standard-Z: depth >= 1.0, reversed-Z: depth <= 0.0)
+    bool isSky = gUseReversedZ ? (depth <= 0.001) : (depth >= 0.999);
+    if (isSky) {
         return float4(0, 0, 0, 1);  // Sky will be rendered separately
     }
 

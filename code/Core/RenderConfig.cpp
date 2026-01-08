@@ -7,6 +7,23 @@
 using json = nlohmann::json;
 
 // ============================================
+// Global Render Config Storage
+// ============================================
+static const SRenderConfig* s_globalRenderConfig = nullptr;
+static SRenderConfig s_defaultConfig;  // Fallback if not set
+
+const SRenderConfig& GetRenderConfig() {
+    if (s_globalRenderConfig) {
+        return *s_globalRenderConfig;
+    }
+    return s_defaultConfig;
+}
+
+void SetGlobalRenderConfig(const SRenderConfig* config) {
+    s_globalRenderConfig = config;
+}
+
+// ============================================
 // Helper: Backend enum to/from string
 // ============================================
 
@@ -83,6 +100,7 @@ bool SRenderConfig::Load(const std::string& path, SRenderConfig& outConfig) {
             auto& gfx = j["graphics"];
             if (gfx.contains("msaaSamples")) outConfig.msaaSamples = gfx["msaaSamples"].get<uint32_t>();
             if (gfx.contains("enableValidation")) outConfig.enableValidation = gfx["enableValidation"].get<bool>();
+            if (gfx.contains("useReversedZ")) outConfig.useReversedZ = gfx["useReversedZ"].get<bool>();
         }
 
         CFFLog::Info("[RenderConfig] Loaded config from %s", path.c_str());
@@ -90,6 +108,7 @@ bool SRenderConfig::Load(const std::string& path, SRenderConfig& outConfig) {
         CFFLog::Info("[RenderConfig]   Pipeline: %s", PipelineToString(outConfig.pipeline).c_str());
         CFFLog::Info("[RenderConfig]   Resolution: %dx%d", outConfig.windowWidth, outConfig.windowHeight);
         CFFLog::Info("[RenderConfig]   VSync: %s", outConfig.vsync ? "On" : "Off");
+        CFFLog::Info("[RenderConfig]   Reversed-Z: %s", outConfig.useReversedZ ? "On" : "Off");
 
         return true;
     }
@@ -118,6 +137,7 @@ bool SRenderConfig::Save(const std::string& path, const SRenderConfig& config) {
         // Graphics settings
         j["graphics"]["msaaSamples"] = config.msaaSamples;
         j["graphics"]["enableValidation"] = config.enableValidation;
+        j["graphics"]["useReversedZ"] = config.useReversedZ;
 
         // Write to file
         std::ofstream file(path);

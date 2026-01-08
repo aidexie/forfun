@@ -5,6 +5,7 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Engine/Scene.h"
@@ -108,10 +109,10 @@ bool CDepthPrePass::Initialize()
     psoDesc.rasterizer.cullMode = ECullMode::Back;
     psoDesc.rasterizer.depthClipEnable = true;
 
-    // Depth stencil state: LESS test, write ON
+    // Depth stencil state: test, write ON
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = true;
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::Less;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(false);  // Less or Greater
 
     // No blending (no color output)
     psoDesc.blend.blendEnable = false;
@@ -180,7 +181,8 @@ void CDepthPrePass::Render(
     cmdList->SetScissorRect(0, 0, width, height);
 
     // Clear depth buffer
-    cmdList->ClearDepthStencil(depthTarget, true, 1.0f, false, 0);
+    float clearDepth = UseReversedZ() ? 0.0f : 1.0f;
+    cmdList->ClearDepthStencil(depthTarget, true, clearDepth, false, 0);
 
     // Set pipeline state
     cmdList->SetPipelineState(m_pso.get());

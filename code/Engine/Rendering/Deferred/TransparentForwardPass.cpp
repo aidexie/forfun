@@ -5,6 +5,7 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "Core/PathManager.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/MaterialManager.h"
@@ -184,10 +185,10 @@ void CTransparentForwardPass::createPipeline()
     psoDesc.rasterizer.frontCounterClockwise = false;
     psoDesc.rasterizer.depthClipEnable = true;
 
-    // Depth: read-only (no write) with LessEqual
+    // Depth: read-only (no write)
     psoDesc.depthStencil.depthEnable = true;
     psoDesc.depthStencil.depthWriteEnable = false;
-    psoDesc.depthStencil.depthFunc = EComparisonFunc::LessEqual;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
 
     // Alpha blending: SrcAlpha * Src + InvSrcAlpha * Dst
     psoDesc.blend.blendEnable = true;

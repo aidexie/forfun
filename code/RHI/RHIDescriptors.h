@@ -60,6 +60,11 @@ struct TextureDesc {
     // Render targets cleared with this value will be faster
     float clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // Default: black with alpha 0
 
+    // Optimized depth clear value (DX12 performance optimization)
+    // -1.0f means "auto" - will use UseReversedZ() to determine (0.0 or 1.0)
+    // Set explicitly to 1.0f for shadow maps (always standard-Z)
+    float depthClearValue = -1.0f;
+
     // Legacy compatibility (mapped to dimension)
     bool isCubemap = false;     // DEPRECATED: use dimension = TexCube
     bool isCubemapArray = false; // DEPRECATED: use dimension = TexCubeArray
@@ -121,6 +126,7 @@ struct TextureDesc {
     }
 
     // Depth stencil with SRV access (for shadow mapping, etc.)
+    // Uses standard-Z clear value (1.0) for shadow maps
     static TextureDesc DepthStencilWithSRV(uint32_t w, uint32_t h) {
         TextureDesc desc;
         desc.width = w;
@@ -130,10 +136,12 @@ struct TextureDesc {
         desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
         desc.dsvFormat = ETextureFormat::D24_UNORM_S8_UINT;
         desc.srvFormat = ETextureFormat::R24_UNORM_X8_TYPELESS;  // Read depth from R24G8
+        desc.depthClearValue = 1.0f;  // Shadow maps always use standard-Z
         return desc;
     }
 
     // Depth stencil array with SRV access (for cascaded shadow mapping)
+    // Uses standard-Z clear value (1.0) for shadow maps
     static TextureDesc DepthStencilArrayWithSRV(uint32_t w, uint32_t h, uint32_t arrayCount) {
         TextureDesc desc;
         desc.width = w;
@@ -144,6 +152,7 @@ struct TextureDesc {
         desc.usage = ETextureUsage::DepthStencil | ETextureUsage::ShaderResource;
         desc.dsvFormat = ETextureFormat::D24_UNORM_S8_UINT;
         desc.srvFormat = ETextureFormat::R24_UNORM_X8_TYPELESS;  // Read depth from R24G8
+        desc.depthClearValue = 1.0f;  // Shadow maps always use standard-Z
         return desc;
     }
 

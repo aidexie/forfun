@@ -95,7 +95,8 @@ static const char* kDebugVisualizationPS = R"(
                 color = float3(rt4.xy * 10.0 + 0.5, 0.5);  // Scale for visibility
                 break;
             case 10: // Depth
-                color = pow(depth, 50.0).xxx;  // Non-linear for better visibility
+                color = float3(depth*10,depth*10,depth*10);  // Non-linear for better visibility
+                // color = pow(depth, 50.0).xxx;  // Non-linear for better visibility
                 break;
             case 11: // SSAO
                 color = ssao.xxx;

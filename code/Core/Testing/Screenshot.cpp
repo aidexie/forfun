@@ -60,7 +60,8 @@ bool CScreenshot::Capture(ITexture* texture, const std::string& path) {
     }
 
     // Copy source texture to staging texture
-    cmdList->CopyTexture(stagingTexture.get(), texture);
+    cmdList->CopyTextureToSlice(stagingTexture.get(), 0, 0, texture);
+    ctx->ExecuteAndWait();
 
     // Map staging texture to read pixels
     MappedTexture mapped = stagingTexture->Map(0, 0);
