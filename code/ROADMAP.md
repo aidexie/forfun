@@ -98,10 +98,11 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - ACES Filmic tonemapping
   - 详细文档: `docs/BLOOM.md`
 - **3.3.2 SSAO** ✅ COMPLETE
-  - GTAO (Ground Truth Ambient Occlusion) algorithm
-  - Compute shader with configurable slices/steps
-  - Edge-preserving bilateral blur
-  - Multiplicative blend with material AO
+  - Three algorithms: GTAO, HBAO, Crytek (runtime selectable)
+  - Half-resolution compute with bilateral blur/upsample
+  - Reversed-Z depth buffer support
+  - Debug visualization modes
+  - 详细文档: `docs/SSAO.md`
 - **3.3.3 SSR** (需要 depth + normal + roughness)
 - **3.3.4 TAA** (需要 velocity + history buffer)
   - Jittered projection matrix
@@ -205,4 +206,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2026-01-06
+**Last Updated**: 2026-01-12
