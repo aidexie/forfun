@@ -207,7 +207,7 @@ public:
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
             if (deferredPipeline) {
-                deferredPipeline->GetSSAOPass().GetSettings().algorithm = ESSAOAlgorithm::Crytek;
+                deferredPipeline->GetSSAOPass().GetSettings().algorithm = ESSAOAlgorithm::GTAO;
                 deferredPipeline->GetSSAOPass().GetSettings().blurRadius = 2;  // Re-enable blur
             }
         });

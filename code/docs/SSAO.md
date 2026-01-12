@@ -396,3 +396,13 @@ The `gUseReversedZ` flag controls:
 - **GTAO**: "Practical Real-Time Strategies for Accurate Indirect Occlusion" - Jimenez, Wu, Pesce, Jarabo (2016)
 - **HBAO**: "Image-Space Horizon-Based Ambient Occlusion" - Bavoil, Sainz (NVIDIA, 2008)
 - **Crytek SSAO**: "Finding Next Gen - CryEngine 2" - Mittring (GDC 2007)
+
+## reflection
+1. cc给出的算法有较多错误
+2. GTAO本身有一定的复杂度，我低估了它的难度
+3. 我对屏幕空间相关的问题不够熟悉。主要是屏幕空间的坐标系的问题，例如uv和xy坐标系不一致(y和v轴方向相反的)，z+的轴是向屏幕里的。
+4. 从数学推导到真正实现上缺失了步骤。
+
+## improve
+1. 从最早算法版本开始实现，一直到最新的版本。有cc在，这种实现方式是不会增加实现时间，对理解这个算法帮助很大。
+2. 基于数学的理解从基础到实现要走完整。
