@@ -96,7 +96,7 @@ cmake --build build --target forfun
   "renderBackend": "DX11"
 }
 ```
-可选值: `"DX11"` (默认, 稳定) | `"DX12"` (开发中)
+可选值: `"DX11"` (稳定) | `"DX12"` (默认, 稳定)
 
 **Paths**:
 - Source: `E:/forfun/source/code`
@@ -124,7 +124,7 @@ timeout 15 E:/forfun/source/code/build/Debug/forfun.exe --test TestXXX
 ```
 
 **测试运行后 AI 必须自动**:
-1. 读取 `E:/forfun/debug/{TestName}/test.log` - 检查断言
+1. 读取 `E:/forfun/debug/{TestName}/runtime.log` - 检查断言
 2. 读取 `E:/forfun/debug/{TestName}/screenshot_frame20.png` - 视觉验证
 3. 生成测试分析报告
 
@@ -204,13 +204,36 @@ visitor.VisitFloat3("Albedo", albedo);
 
 ---
 
-## Coordinate System
+## Coordinate System & Matrix Convention
 
 **DirectX 左手坐标系**: +X Right, +Y Up, +Z Forward (into screen)
 
 **UV Convention**: 原点左上角 (0,0), U 左→右, V 上→下
 
 所有矩阵操作使用 `LH` 后缀函数 (`XMMatrixLookAtLH`, `XMMatrixPerspectiveFovLH`)。
+
+**Matrix Storage Convention**:
+
+| Component | Convention |
+|-----------|-----------|
+| DirectXMath (C++) | Row-major storage, row vectors (`v * M`) |
+| HLSL (shaders) | Column-major storage (default) |
+| Bridge | `XMMatrixTranspose()` before uploading to constant buffer |
+
+```cpp
+// C++ - transpose before upload
+cb.viewProj = XMMatrixTranspose(viewProj);  // HLSL expects column-major
+```
+
+```hlsl
+// HLSL - no row_major qualifier, uses default column-major
+float4x4 gViewProj;
+float4 result = mul(position, gViewProj);  // row vector convention
+```
+
+**HLSL `mul()` vs `*`**:
+- `mul(A, B)` - Matrix multiplication
+- `A * B` - Element-wise multiplication (NOT matrix product!)
 
 ---
 
