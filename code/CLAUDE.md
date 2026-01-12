@@ -276,37 +276,7 @@ CFFLog::Error("Buffer creation failed");      // Errors
 
 **详细文档**: `docs/RENDERING.md`
 
-### Physics-Based Rendering
-
 **所有图形特性必须物理正确**。禁止非物理 hack。
-
-**Color Space**:
-- Albedo/Emissive: `UNORM_SRGB`
-- Normal/Metallic/Roughness/AO: `UNORM`
-- Intermediate RT: `R16G16B16A16_FLOAT`
-
-**CSM Shadow**: 1-4 cascades, PCF 3×3
-
-**IBL**: Diffuse (32×32) + Specular pre-filtered (128×128, 7 mip)
-
-### Volumetric Lightmap (NEW)
-
-**位置**: `Engine/Rendering/VolumetricLightmap.h/cpp`
-
-**架构**: UE4/5 风格，用于高质量 Per-Pixel 漫反射全局光照
-- 自适应八叉树 Brick 系统
-- 两级 GPU 查找: World Position → Indirection → Brick Atlas
-- L1 球谐 (SH9) 编码
-- Overlap Baking 消除接缝
-
-**Diffuse GI Mode** (`SceneLightSettings.h`):
-```cpp
-enum class EDiffuseGIMode : int {
-    VolumetricLightmap = 0,  // Per-Pixel GI
-    GlobalIBL = 1,           // Skybox Irradiance
-    None = 2                 // Disabled
-};
-```
 
 ---
 
@@ -321,15 +291,6 @@ enum class EDiffuseGIMode : int {
 4. 在 main loop 中调用
 
 **Transform Gizmo**: W (Translate) / E (Rotate) / R (Scale), World/Local 切换
-
----
-
-## DX12 Known Issues
-
-参见 `ROADMAP.md` "已知问题" 章节：
-- 纹理初始数据上传未完成
-- Buffer 初始数据上传未完成
-- 资源状态跟踪警告
 
 ---
 

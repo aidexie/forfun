@@ -37,6 +37,34 @@ float3 ambient = kD_IBL * (diffuseIBL / PI) + specularIBL;
 
 **References**: pbrt, UE4 Real Shading (Karis), Disney BRDF (Burley)
 
+### Color Space & Texture Formats
+
+| Texture Type | Format |
+|--------------|--------|
+| Albedo/Emissive | `UNORM_SRGB` |
+| Normal/Metallic/Roughness/AO | `UNORM` |
+| Intermediate RT (HDR) | `R16G16B16A16_FLOAT` |
+
+### CSM Shadow
+
+1-4 cascades, PCF 3×3 filtering, bounding sphere stabilization + texel snapping.
+
+### IBL (Image-Based Lighting)
+
+- Diffuse irradiance: 32×32 cubemap
+- Specular pre-filtered: 128×128 cubemap, 7 mip levels
+
+### Diffuse GI Mode
+
+```cpp
+// SceneLightSettings.h
+enum class EDiffuseGIMode : int {
+    VolumetricLightmap = 0,  // Per-Pixel GI (highest quality)
+    GlobalIBL = 1,           // Skybox Irradiance (fallback)
+    None = 2                 // Disabled
+};
+```
+
 ---
 
 ## Rendering Pipeline
