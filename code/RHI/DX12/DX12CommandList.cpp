@@ -699,17 +699,12 @@ void CDX12CommandList::UnbindShaderResources(EShaderStage stage, uint32_t startS
 // ============================================
 
 void CDX12CommandList::BeginEvent(const wchar_t* name) {
-#ifdef USE_PIX
-    PIXBeginEvent(m_commandList.Get(), 0, name);
-#else
-    (void)name;
-#endif
+    // Use D3D12 native markers - works with RenderDoc, PIX, and other tools
+    m_commandList->BeginEvent(1, name, static_cast<UINT>((wcslen(name) + 1) * sizeof(wchar_t)));
 }
 
 void CDX12CommandList::EndEvent() {
-#ifdef USE_PIX
-    PIXEndEvent(m_commandList.Get());
-#endif
+    m_commandList->EndEvent();
 }
 
 // ============================================
