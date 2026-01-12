@@ -258,6 +258,20 @@ FFPath::GetSourceDir();   // "E:/forfun/source/code"
 
 ---
 
+## Logging (FFLog)
+
+```cpp
+#include "Core/FFLog.h"
+
+CFFLog::Info("Loaded %d meshes", count);      // General info
+CFFLog::Warning("Texture missing: %s", path); // Warnings
+CFFLog::Error("Buffer creation failed");      // Errors
+```
+
+**Output**: `debug/logs/runtime.log` (editor) or `debug/{TestName}/runtime.log` (test mode)
+
+---
+
 ## Graphics Rendering (Quick Reference)
 
 **详细文档**: `docs/RENDERING.md`
