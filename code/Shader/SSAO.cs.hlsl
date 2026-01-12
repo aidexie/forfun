@@ -161,10 +161,10 @@ float GetClosestDepth(float d0, float d1, float d2, float d3) {
 
 // Compute the inner integral for a single horizon
 // h = horizon angle, n = projected normal angle
-float GTAOIntegral(float cosN, float sinN, float h) {
-    // Integral: 0.25 * (-cos(2h) + cos^2(n) + 2h*sin(n))
-    float cos2h = cos(2.0 * h);
-    return 0.25 * (-cos2h + cosN * cosN + 2.0 * h * sinN);
+// Paper Equation (3): â(h, n) = ¼ × [-cos(2h - n) + cos(n) + 2h·sin(n)]
+float GTAOIntegral(float cosN, float sinN, float h, float n) {
+    float cos2hMinusN = cos(2.0 * h - n);
+    return 0.25 * (-cos2hMinusN + cosN + 2.0 * h * sinN);
 }
 
 // Compute AO contribution from a single slice
@@ -180,8 +180,8 @@ float ComputeSliceAO(float h1, float h2, float n) {
     h1 = max(h1, n - HALF_PI);
     h2 = min(h2, n + HALF_PI);
 
-    // Compute integral for both horizons
-    float ao = GTAOIntegral(cosN, sinN, h2) - GTAOIntegral(cosN, sinN, h1);
+    // Compute integral for both horizons using paper formula
+    float ao = GTAOIntegral(cosN, sinN, h2, n) + GTAOIntegral(cosN, sinN, h1, n);
 
     return ao;
 }
@@ -210,12 +210,13 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
         float2 sliceDir;
         sliceDir.x = cosA * noiseVec.x - sinA * noiseVec.y;
         sliceDir.y = sinA * noiseVec.x + cosA * noiseVec.y;
+        // sliceDir = float2(0.0,1.0);
 
         // Convert to view-space direction on the tangent plane
-        float3 tangent = normalize(float3(sliceDir.x, sliceDir.y, 0.0));
+        float3 tangent = normalize(float3(sliceDir.x, -sliceDir.y, 0.0));
 
         // Project normal onto slice plane
-        float3 orthoDir = normalize(cross(tangent, float3(0, 0, 1)));
+        float3 orthoDir = normalize(cross(tangent, float3(0,0,-1)));
         float3 projNormal = viewNormal - orthoDir * dot(viewNormal, orthoDir);
         float projNormalLen = length(projNormal);
 
@@ -227,16 +228,14 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
         projNormal /= projNormalLen;
 
         // Normal angle relative to view direction
-        float n = atan2(dot(projNormal, tangent), projNormal.z);
-
+        float n = atan2(dot(projNormal, tangent), -projNormal.z);
         // Initialize horizons to minimum (looking straight down)
-        float h1 = -HALF_PI;  // Negative direction
-        float h2 = -HALF_PI;  // Positive direction
-
+        float h1 = -PI;  // Negative direction
+        float h2 = PI;  // Positive direction
         // March in negative direction
         for (int s = 1; s <= gNumSteps; s++) {
             // screenRadius is in UV space, so no gTexelSize needed
-            float2 sampleUV = uv - sliceDir * float(s) * (screenRadius / float(gNumSteps));
+            float2 sampleUV = uv - sliceDir * float(s) * gTexelSize;
 
             // Bounds check
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
@@ -253,17 +252,19 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
                 float3 sampleDir = diff / dist;
 
                 // Horizon angle: angle between sample direction and view direction (Z)
-                float horizonAngle = atan2(dot(sampleDir, tangent), sampleDir.z);
+                float horizonAngle = atan2(dot(sampleDir, tangent), -sampleDir.z);
+                if(horizonAngle > HALF_PI){
+                    horizonAngle = -PI - (PI - horizonAngle);
+                }
 
                 // Blend with falloff
-                h1 = max(h1, lerp(-HALF_PI, horizonAngle, falloff));
+                h1 = max(h1, lerp(-PI, horizonAngle, falloff));
             }
         }
 
         // March in positive direction
         for (int s2 = 1; s2 <= gNumSteps; s2++) {
-            // screenRadius is in UV space, so no gTexelSize needed
-            float2 sampleUV = uv + sliceDir * float(s2) * (screenRadius / float(gNumSteps));
+            float2 sampleUV = uv + sliceDir * float(s2) * gTexelSize;
 
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
 
@@ -278,13 +279,14 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
                 float falloff = ComputeFalloff(dist, gRadius);
                 float3 sampleDir = diff / dist;
 
-                float horizonAngle = atan2(dot(sampleDir, tangent), sampleDir.z);
-                h2 = max(h2, lerp(-HALF_PI, horizonAngle, falloff));
+                float horizonAngle = atan2(dot(sampleDir, tangent), -sampleDir.z);
+                if(horizonAngle < -HALF_PI){
+                    horizonAngle = PI+(PI+horizonAngle);
+                }
+                h2 = min(h2, lerp(horizonAngle, PI, 1.0-falloff));
             }
         }
-
-        // Compute slice AO (negate h1 for proper integral)
-        float sliceAO = ComputeSliceAO(-h1, h2, n);
+        float sliceAO = 1.0 - ComputeSliceAO(h1, h2, n);
         totalAO += sliceAO;
     }
 
@@ -321,12 +323,16 @@ float ComputeHBAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
         direction.y = sin(angle) * noiseVec.x + cos(angle) * noiseVec.y;
 
         // Ray march in this direction to find horizon
-        float maxHorizonCos = -1.0;  // cos(horizon angle), start at -1 (horizon at -90 deg)
+        // NVIDIA approach: track horizon and its falloff separately
+        float maxHorizonCos = 0.0;   // Start at tangent plane (cos=0)
+        float horizonFalloff = 0.0;  // Falloff weight for the best horizon
 
         for (int step = 1; step <= gNumSteps; step++) {
-            // Sample position along ray
-            float t = float(step) / float(gNumSteps);
-            float2 sampleUV = uv + direction * screenRadius * t;
+            // Sample position along ray (use integer pixel offset for precision)
+            int pixelStep = int(screenRadius / gTexelSize.x * float(step) / float(gNumSteps));
+            if (pixelStep == 0) continue;
+
+            float2 sampleUV = uv + direction * float(pixelStep) * gTexelSize;
 
             // Bounds check
             if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) break;
@@ -342,35 +348,29 @@ float ComputeHBAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
 
             if (dist < 0.001 || dist > gRadius) continue;
 
-            // Compute horizon angle
-            // Horizon = angle between view direction and direction to sample
+            // Compute horizon angle (no falloff modification)
             float3 horizonDir = diff / dist;
-
-            // Cosine of angle between normal and horizon direction
-            // Higher value = horizon is more "up" relative to normal = less occlusion
             float horizonCos = dot(viewNormal, horizonDir);
 
-            // Apply distance falloff
-            float falloff = ComputeFalloff(dist, gRadius);
-            horizonCos = lerp(-1.0, horizonCos, falloff);
+            // Only consider samples above the tangent plane (in front hemisphere)
+            if (horizonCos <= 0.0) continue;
 
-            // Track maximum horizon (highest point we can see)
-            maxHorizonCos = max(maxHorizonCos, horizonCos);
+            // Update max horizon if this sample is higher
+            // NVIDIA approach: track the falloff of the winning horizon
+            if (horizonCos > maxHorizonCos) {
+                maxHorizonCos = horizonCos;
+                horizonFalloff = ComputeFalloff(dist, gRadius);
+            }
         }
 
-        // HBAO uses sin(horizon) as AO approximation
+        // NVIDIA HBAO+: Apply falloff to the AO contribution, not the horizon
+        // AO contribution = (1 - sin(horizon)) * falloff
         // sin(acos(x)) = sqrt(1 - x^2)
-        // When horizon is at normal level (cos=0), sin=1, full visibility
-        // When horizon is above normal (cos>0), sin<1, some occlusion from above
-        // When horizon is below normal (cos<0), sin approaches 1, full visibility in that direction
-
-        // Clamp horizon to hemisphere (can't occlude from behind surface)
-        maxHorizonCos = max(maxHorizonCos, 0.0);
-
-        // AO contribution: 1 - sin(horizon) = 1 - sqrt(1 - cos^2)
-        // But we want visibility, so: sin(horizon)
         float horizonSin = sqrt(1.0 - maxHorizonCos * maxHorizonCos);
-        totalAO += horizonSin;
+
+        // Occlusion = 1 - visibility, weighted by falloff
+        float dirOcclusion = (1.0 - horizonSin) * horizonFalloff;
+        totalAO += (1.0 - dirOcclusion);  // Convert back to visibility
     }
 
     // Average over all directions
@@ -413,88 +413,90 @@ static const float3 SSAO_KERNEL[16] = {
 float ComputeCrytekSSAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec) {
     float occlusion = 0.0;
 
-    // Build TBN matrix for orienting samples along normal
-    // Use Gram-Schmidt to create orthonormal basis from normal and noise
-    float3 randomVec = float3(noiseVec.x, noiseVec.y, 0.0);
+    // Screen-space radius in PIXELS (not UV)
+    // gProj[1][1] = cot(FOV/2), converts world radius to NDC, then to pixels
+    float screenRadiusPixels = gRadius * gProj[1][1] * 0.5 / max(abs(viewPos.z), 0.1);
+    screenRadiusPixels /= gTexelSize.y;  // Convert from UV to pixels
 
-    // Create tangent perpendicular to normal
-    float3 tangent = normalize(randomVec - viewNormal * dot(randomVec, viewNormal));
+    // 2D sample kernel - INTEGER pixel offsets (normalized direction + distance scale)
+    // Using int2 to avoid precision issues
+    static const int2 KERNEL_2D[16] = {
+        int2( 2,  1),   // scale 0.25
+        int2( 1,  2),   // scale 0.50
+        int2( 3,  5),   // scale 0.75
+        int2(-3,  0),   // scale 0.30
+        int2( 1, -2),   // scale 0.45
+        int2( 1,  0),   // scale 0.60
+        int2( 0,  2),   // scale 0.80
+        int2( 0, -1),   // scale 0.35
+        int2(-3, -4),   // scale 0.55
+        int2(-2,  1),   // scale 0.70
+        int2( 0, -5),   // scale 0.85
+        int2(-1, -3),   // scale 0.40
+        int2( 5,  0),   // scale 0.65
+        int2( 0,  1),   // scale 0.90
+        int2( 0, -1),   // scale 0.50
+        int2(-3,  2)    // scale 1.00
+    };
 
-    // Handle degenerate case when randomVec is parallel to normal
-    if (length(tangent) < 0.001) {
-        tangent = normalize(float3(1, 0, 0) - viewNormal * viewNormal.x);
-    }
+    static const float KERNEL_SCALE[16] = {
+        0.25, 0.50, 0.75, 0.30, 0.45, 0.60, 0.80, 0.35,
+        0.55, 0.70, 0.85, 0.40, 0.65, 0.90, 0.50, 1.00
+    };
 
-    float3 bitangent = cross(viewNormal, tangent);
-    float3x3 TBN = float3x3(tangent, bitangent, viewNormal);
-
-    // Number of samples
     int numSamples = min(gNumSlices * gNumSteps, 16);
 
+    // Build 2D rotation matrix from noise (for randomizing directions)
+    float cosA = noiseVec.x;
+    float sinA = noiseVec.y;
+
     for (int i = 0; i < numSamples; i++) {
-        // Get sample direction from kernel and orient to hemisphere around normal
-        float3 sampleDir = mul(SSAO_KERNEL[i], TBN);
+        // Get kernel offset and apply rotation
+        float2 kernelDir = float2(KERNEL_2D[i]);
+        float2 rotatedDir;
+        rotatedDir.x = kernelDir.x * cosA - kernelDir.y * sinA;
+        rotatedDir.y = kernelDir.x * sinA + kernelDir.y * cosA;
 
-        // Flip sample if it's below the surface (ensure hemisphere sampling)
-        if (dot(sampleDir, viewNormal) < 0.0) {
-            sampleDir = -sampleDir;
-        }
+        // Scale by screen radius and kernel scale, then round to INTEGER pixels
+        int2 pixelOffset = int2(round(rotatedDir * screenRadiusPixels * KERNEL_SCALE[i]));
 
-        // Scale sample position by radius (varying scale for better distribution)
-        float scale = float(i + 1) / float(numSamples);
-        scale = lerp(0.1, 1.0, scale * scale);
+        // Skip zero offset
+        if (pixelOffset.x == 0 && pixelOffset.y == 0) continue;
 
-        // Sample position in view space
-        // float3 samplePos = viewPos + sampleDir * gRadius * scale;
-        float3 samplePos = viewPos + float3(1,0,0) * gRadius * scale;
-
-        // Project sample to screen space
-        float4 sampleClip = mul(float4(samplePos, 1.0), gProj);
-        float2 sampleUV = sampleClip.xy / sampleClip.w;
-        // return sampleClip.z/sampleClip.w*10.0;
-        sampleUV = sampleUV * float2(0.5, -0.5) + 0.5;
+        // Compute sample UV from integer pixel offset
+        float2 sampleUV = uv + float2(pixelOffset) * gTexelSize;
 
         // Bounds check
         if (any(sampleUV < 0.0) || any(sampleUV > 1.0)) continue;
 
-        // Sample depth at this position
+        // Sample depth and reconstruct position
         float sampleDepth = gDepth.SampleLevel(gPointSampler, sampleUV, 0).r;
-        // return sampleDepth*10;
-        // if (IsSkyDepth(sampleDepth)) continue;  // Skip sky
+        if (IsSkyDepth(sampleDepth)) continue;
 
-        // Reconstruct actual position at sampled depth
-        float3 actualPos = ReconstructViewPos(sampleUV, sampleDepth);
-
-        // Distance from view position to actual surface
-        float3 diff = actualPos - viewPos;
+        float3 samplePos = ReconstructViewPos(sampleUV, sampleDepth);
+        float3 diff = samplePos - viewPos;
         float dist = length(diff);
-        return dist;
-        // return actualPos.z/100.0;
-        // return sampleClip.z/sampleClip.w;
-        // return dot(normalize(diff),viewNormal);
-        // Range check: smooth falloff at radius boundary
-        float rangeCheck = 1.0 - smoothstep(gRadius * 0.5, gRadius, dist);
 
-        // Occlusion check:
-        // In LEFT-HANDED view space with camera looking at +Z:
-        // Z values are POSITIVE (farther = larger Z)
-        // samplePos.z = expected depth if nothing blocks
-        // actualPos.z = actual surface depth at that screen position
-        // If actualPos.z < samplePos.z, actual surface is CLOSER = occludes the sample
-        float depthDiff = samplePos.z - actualPos.z;  // positive if actualPos is closer (occludes)
+        // Skip samples outside world-space radius
+        if (dist < 0.001 || dist > gRadius) continue;
 
-        // Only count as occlusion if:
-        // 1. The actual surface is closer than our sample point (depthDiff > 0)
-        // 2. The depth difference is within reasonable bounds (not a backface or far surface)
-        if (depthDiff > 0.001 && depthDiff < gRadius) 
-        {
-            occlusion += rangeCheck;
-        }
+        // Hemisphere check: only count samples in front hemisphere
+        float3 sampleDir = diff / dist;
+        float NdotS = dot(viewNormal, sampleDir);
+
+        // Sample must be in front hemisphere (NdotS > small bias)
+        if (NdotS < 0.01) continue;
+
+        // Occlusion contribution (NdotS weighted):
+        // - Closer to hemisphere boundary = less occlusion
+        // - More aligned with normal = more occlusion
+        float rangeWeight = 1.0 - (dist / gRadius);  // Distance falloff
+        occlusion += rangeWeight * NdotS;
     }
 
     // Normalize and apply intensity
     occlusion = occlusion / float(numSamples);
-    float ao = saturate(1.0 - occlusion);
+    float ao = saturate(1.0 - occlusion * gIntensity * 2.0);
 
     return ao;
 }

@@ -17,7 +17,7 @@ namespace SSAOConfig {
     constexpr uint32_t DEFAULT_STEPS = 4;       // Default steps per direction
     constexpr uint32_t MAX_BLUR_RADIUS = 4;     // Maximum bilateral blur radius
     constexpr uint32_t MIN_SLICES = 2;          // Minimum slices (fast mode)
-    constexpr uint32_t MAX_SLICES = 4;          // Maximum slices (quality mode)
+    constexpr uint32_t MAX_SLICES = 16;          // Maximum slices (quality mode)
 }
 
 // SSAO Algorithm selection

@@ -366,7 +366,7 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
             if (ssaoSettings.enabled) {
                 ImGui::PushItemWidth(150);
                 ImGui::SliderFloat("Radius##SSAO", &ssaoSettings.radius, 0.1f, 2.0f, "%.2f");
-                ImGui::SliderFloat("Intensity##SSAO", &ssaoSettings.intensity, 0.0f, 3.0f, "%.2f");
+                ImGui::SliderFloat("Intensity##SSAO", &ssaoSettings.intensity, 0.0f, 13.0f, "%.2f");
                 ImGui::SliderFloat("Falloff Start##SSAO", &ssaoSettings.falloffStart, 0.0f, 1.0f, "%.2f");
                 ImGui::SliderInt("Slices##SSAO", &ssaoSettings.numSlices,
                     SSAOConfig::MIN_SLICES, SSAOConfig::MAX_SLICES);
