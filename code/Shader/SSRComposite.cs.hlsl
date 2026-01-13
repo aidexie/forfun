@@ -22,12 +22,12 @@ cbuffer CB_SSRComposite : register(b0)
 // ============================================
 // Resources
 // ============================================
-Texture2D<float4> g_HDRInput : register(t0);     // Current HDR scene (with IBL)
+// HDR buffer for read-modify-write (UAV allows both read and write)
+RWTexture2D<float4> g_HDRBuffer : register(u0);
+
 Texture2D<float4> g_SSRResult : register(t1);    // SSR: rgb=reflection, a=confidence
 Texture2D<float4> g_WorldPosMetallic : register(t2);  // G-Buffer RT0
 Texture2D<float4> g_NormalRoughness : register(t3);   // G-Buffer RT1
-
-RWTexture2D<float4> g_HDROutput : register(u0);  // Output HDR
 
 SamplerState g_LinearSampler : register(s0);
 SamplerState g_PointSampler : register(s1);
@@ -56,8 +56,8 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
 
     float2 uv = (DTid.xy + 0.5) * g_TexelSize;
 
-    // Sample inputs
-    float4 hdrColor = g_HDRInput.SampleLevel(g_LinearSampler, uv, 0);
+    // Sample inputs - read HDR via UAV to avoid SRV/UAV state conflict
+    float4 hdrColor = g_HDRBuffer[DTid.xy];
     float4 ssrData = g_SSRResult.SampleLevel(g_PointSampler, uv, 0);
     float4 rt0 = g_WorldPosMetallic.SampleLevel(g_PointSampler, uv, 0);
     float4 rt1 = g_NormalRoughness.SampleLevel(g_PointSampler, uv, 0);
@@ -75,7 +75,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
     // Early out for non-reflective surfaces
     if (ssrConfidence <= 0.001 || roughness >= g_RoughnessFade)
     {
-        g_HDROutput[DTid.xy] = hdrColor;
+        g_HDRBuffer[DTid.xy] = hdrColor;
         return;
     }
 
@@ -114,5 +114,5 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
     // For now, use additive blend with intensity control:
     float3 finalColor = hdrColor.rgb + ssrContribution * (1.0 - metallic * 0.5 * blendWeight);
 
-    g_HDROutput[DTid.xy] = float4(finalColor, hdrColor.a);
+    g_HDRBuffer[DTid.xy] = float4(finalColor, hdrColor.a);
 }

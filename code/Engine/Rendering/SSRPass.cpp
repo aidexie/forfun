@@ -356,8 +356,8 @@ void CSSRPass::Composite(ICommandList* cmdList,
         return;
     }
 
-    // Transition HDR buffer to UAV state
-    cmdList->Barrier(hdrBuffer, EResourceState::ShaderResource, EResourceState::UnorderedAccess);
+    // Transition HDR buffer to UAV state for read-modify-write
+    cmdList->Barrier(hdrBuffer, EResourceState::RenderTarget, EResourceState::UnorderedAccess);
 
     // Set PSO
     cmdList->SetPipelineState(m_compositePSO.get());
