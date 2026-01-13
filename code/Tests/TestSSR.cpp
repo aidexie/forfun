@@ -6,7 +6,6 @@
 #include "Engine/SceneLightSettings.h"
 #include "Engine/Components/Transform.h"
 #include "Engine/Components/MeshRenderer.h"
-#include "Engine/Components/Material.h"
 #include "Engine/Components/DirectionalLight.h"
 #include "Engine/Rendering/RenderPipeline.h"
 #include "Engine/Rendering/Deferred/DeferredRenderPipeline.h"
@@ -27,7 +26,7 @@ using namespace DirectX;
  *   - Roughness fadeout works
  *
  * Scene Setup:
- *   - Reflective floor (roughness=0, metallic=1)
+ *   - Reflective floor (roughness=0, metallic=1) using mirror.ffasset
  *   - Colored cubes to be reflected
  *   - Camera looking at reflections
  *
@@ -61,25 +60,22 @@ public:
             dirLight->color = XMFLOAT3(1.0f, 1.0f, 0.95f);
             dirLight->intensity = 3.0f;
 
-            // Reflective floor (mirror-like)
+            // Reflective floor (mirror-like) - uses mirror.ffasset (metallic=1, roughness=0)
             auto* floor = scene.GetWorld().Create("ReflectiveFloor");
             auto* floorT = floor->AddComponent<STransform>();
             floorT->position = XMFLOAT3(0.0f, 0.0f, 5.0f);
             floorT->scale = XMFLOAT3(15.0f, 0.1f, 15.0f);
             auto* floorMesh = floor->AddComponent<SMeshRenderer>();
             floorMesh->path = "mesh/cube.obj";
-            auto* floorMat = floor->AddComponent<SMaterial>();
-            floorMat->albedo = XMFLOAT3(0.8f, 0.8f, 0.8f);
-            floorMat->metallic = 1.0f;
-            floorMat->roughness = 0.0f;  // Perfect mirror
+            floorMesh->materialPath = "materials/mirror.ffasset";
 
-            // Colored cubes to reflect
-            const XMFLOAT3 colors[] = {
-                {1.0f, 0.2f, 0.2f},  // Red
-                {0.2f, 1.0f, 0.2f},  // Green
-                {0.2f, 0.2f, 1.0f},  // Blue
-                {1.0f, 1.0f, 0.2f},  // Yellow
-                {1.0f, 0.2f, 1.0f},  // Magenta
+            // Colored cubes using different material assets
+            const char* matPaths[] = {
+                "materials/default_red.ffasset",
+                "materials/default_green.ffasset",
+                "materials/default_blue.ffasset",
+                "materials/default_white.ffasset",
+                "materials/default_gray.ffasset",
             };
 
             for (int i = 0; i < 5; ++i) {
@@ -89,10 +85,7 @@ public:
                 boxT->scale = XMFLOAT3(0.8f, 0.8f, 0.8f);
                 auto* boxMesh = box->AddComponent<SMeshRenderer>();
                 boxMesh->path = "mesh/cube.obj";
-                auto* boxMat = box->AddComponent<SMaterial>();
-                boxMat->albedo = colors[i];
-                boxMat->metallic = 0.0f;
-                boxMat->roughness = 0.5f;
+                boxMesh->materialPath = matPaths[i];
             }
 
             // Tall box in background (to test reflection at distance)
@@ -102,8 +95,7 @@ public:
             tallT->scale = XMFLOAT3(1.0f, 4.0f, 1.0f);
             auto* tallMesh = tallBox->AddComponent<SMeshRenderer>();
             tallMesh->path = "mesh/cube.obj";
-            auto* tallMat = tallBox->AddComponent<SMaterial>();
-            tallMat->albedo = XMFLOAT3(0.9f, 0.9f, 0.9f);
+            tallMesh->materialPath = "materials/default_white.ffasset";
 
             CFFLog::Info("[TestSSR:Frame1] Scene created with reflective floor and colored cubes");
         });
