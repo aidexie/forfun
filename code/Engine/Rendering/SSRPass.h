@@ -31,11 +31,21 @@ enum class ESSRQuality : int {
 };
 
 // ============================================
+// SSR Algorithm Mode
+// ============================================
+enum class ESSRMode : int {
+    HiZTrace = 0,       // Single ray Hi-Z tracing (default)
+    Stochastic = 1,     // Multiple rays with importance sampling
+    Temporal = 2        // Stochastic + temporal accumulation
+};
+
+// ============================================
 // SSR Settings (exposed to editor)
 // ============================================
 struct SSSRSettings {
     bool enabled = true;            // Enable/disable SSR
     ESSRQuality quality = ESSRQuality::High;  // Quality preset
+    ESSRMode mode = ESSRMode::HiZTrace;       // Algorithm mode
     float maxDistance = 50.0f;      // Maximum ray distance (view-space)
     float thickness = 0.5f;         // Surface thickness for hit detection
     float stride = 1.0f;            // Initial step stride (pixels)
@@ -49,6 +59,14 @@ struct SSSRSettings {
     float intensity = 1.0f;         // SSR intensity multiplier
     bool debugVisualize = false;    // Show SSR debug mode
 
+    // Stochastic settings (Mode: Stochastic/Temporal)
+    int numRays = 4;                // Rays per pixel (1-8)
+    float brdfBias = 0.5f;          // BRDF importance sampling bias (0=uniform, 1=full GGX)
+
+    // Temporal settings (Mode: Temporal)
+    float temporalBlend = 0.9f;     // History blend factor (0=current only, 1=history only)
+    float motionThreshold = 0.01f;  // Motion rejection threshold
+
     // Apply quality preset
     void ApplyPreset(ESSRQuality preset) {
         quality = preset;
@@ -57,21 +75,25 @@ struct SSSRSettings {
                 maxSteps = 32;
                 binarySearchSteps = 4;
                 stride = 2.0f;
+                numRays = 1;
                 break;
             case ESSRQuality::Medium:
                 maxSteps = 48;
                 binarySearchSteps = 6;
                 stride = 1.5f;
+                numRays = 2;
                 break;
             case ESSRQuality::High:
                 maxSteps = 64;
                 binarySearchSteps = 8;
                 stride = 1.0f;
+                numRays = 4;
                 break;
             case ESSRQuality::Ultra:
                 maxSteps = 96;
                 binarySearchSteps = 12;
                 stride = 0.5f;
+                numRays = 8;
                 break;
             case ESSRQuality::Custom:
                 // Keep current settings
@@ -88,6 +110,7 @@ struct alignas(16) CB_SSR {
     DirectX::XMFLOAT4X4 invProj;        // Inverse projection matrix
     DirectX::XMFLOAT4X4 view;           // View matrix (world to view)
     DirectX::XMFLOAT4X4 invView;        // Inverse view matrix (view to world)
+    DirectX::XMFLOAT4X4 prevViewProj;   // Previous frame view-projection (for temporal)
     DirectX::XMFLOAT2 screenSize;       // Full resolution (width, height)
     DirectX::XMFLOAT2 texelSize;        // 1.0 / screenSize
     float maxDistance;                   // Maximum ray distance
@@ -104,6 +127,12 @@ struct alignas(16) CB_SSR {
     float farZ;                          // Camera far plane
     int hiZMipCount;                     // Number of Hi-Z mip levels
     uint32_t useReversedZ;               // 0 = standard-Z, 1 = reversed-Z
+    int ssrMode;                         // 0=HiZ, 1=Stochastic, 2=Temporal
+    int numRays;                         // Rays per pixel (stochastic/temporal)
+    float brdfBias;                      // BRDF importance sampling bias
+    float temporalBlend;                 // History blend factor
+    float motionThreshold;               // Motion rejection threshold
+    uint32_t frameIndex;                 // Frame counter for temporal jitter
     float _pad[2];                       // Padding to 16-byte alignment
 };
 
@@ -201,6 +230,7 @@ private:
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
     void createFallbackTexture();
+    void createBlueNoiseTexture();
 
     // ============================================
     // Compute Shaders
@@ -218,6 +248,8 @@ private:
     // Textures
     // ============================================
     RHI::TexturePtr m_ssrResult;        // SSR reflection color + confidence
+    RHI::TexturePtr m_ssrHistory;       // SSR history for temporal accumulation
+    RHI::TexturePtr m_blueNoise;        // Blue noise texture for stochastic jitter
     RHI::TexturePtr m_blackFallback;    // Black fallback when SSR disabled
 
     // ============================================
@@ -233,4 +265,6 @@ private:
     uint32_t m_width = 0;
     uint32_t m_height = 0;
     bool m_initialized = false;
+    uint32_t m_frameIndex = 0;
+    DirectX::XMMATRIX m_prevViewProj = DirectX::XMMatrixIdentity();
 };

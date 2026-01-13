@@ -8,6 +8,8 @@
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <algorithm>
+#include <vector>
+#include <cmath>
 
 using namespace DirectX;
 using namespace RHI;
@@ -25,6 +27,7 @@ bool CSSRPass::Initialize() {
     createCompositeShader();
     createSamplers();
     createFallbackTexture();
+    createBlueNoiseTexture();
 
     m_initialized = true;
     CFFLog::Info("[SSRPass] Initialized successfully");
@@ -38,6 +41,8 @@ void CSSRPass::Shutdown() {
     m_compositePSO.reset();
 
     m_ssrResult.reset();
+    m_ssrHistory.reset();
+    m_blueNoise.reset();
     m_blackFallback.reset();
 
     m_pointSampler.reset();
@@ -46,6 +51,8 @@ void CSSRPass::Shutdown() {
     m_width = 0;
     m_height = 0;
     m_initialized = false;
+    m_frameIndex = 0;
+    m_prevViewProj = XMMatrixIdentity();
 
     CFFLog::Info("[SSRPass] Shutdown");
 }
@@ -98,6 +105,8 @@ void CSSRPass::Render(ICommandList* cmdList,
     cmdList->SetShaderResource(EShaderStage::Compute, 1, normalBuffer);
     cmdList->SetShaderResource(EShaderStage::Compute, 2, hiZTexture);
     cmdList->SetShaderResource(EShaderStage::Compute, 3, sceneColor);
+    cmdList->SetShaderResource(EShaderStage::Compute, 4, m_blueNoise.get());
+    cmdList->SetShaderResource(EShaderStage::Compute, 5, m_ssrHistory.get());
 
     cmdList->SetUnorderedAccessTexture(0, m_ssrResult.get());
 
@@ -114,6 +123,7 @@ void CSSRPass::Render(ICommandList* cmdList,
     XMStoreFloat4x4(&cb.invProj, XMMatrixTranspose(invProj));
     XMStoreFloat4x4(&cb.view, XMMatrixTranspose(view));
     XMStoreFloat4x4(&cb.invView, XMMatrixTranspose(invView));
+    XMStoreFloat4x4(&cb.prevViewProj, XMMatrixTranspose(m_prevViewProj));
     cb.screenSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
     cb.texelSize = XMFLOAT2(1.0f / width, 1.0f / height);
     cb.maxDistance = m_settings.maxDistance;
@@ -130,7 +140,16 @@ void CSSRPass::Render(ICommandList* cmdList,
     cb.farZ = farZ;
     cb.hiZMipCount = static_cast<int>(hiZMipCount);
     cb.useReversedZ = 1;  // Always use reversed-Z (project default)
+    cb.ssrMode = static_cast<int>(m_settings.mode);
+    cb.numRays = m_settings.numRays;
+    cb.brdfBias = m_settings.brdfBias;
+    cb.temporalBlend = m_settings.temporalBlend;
+    cb.motionThreshold = m_settings.motionThreshold;
+    cb.frameIndex = m_frameIndex++;
     cb._pad[0] = cb._pad[1] = 0.0f;
+
+    // Store current view-proj for next frame
+    m_prevViewProj = XMMatrixMultiply(view, proj);
 
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
 
@@ -217,6 +236,14 @@ void CSSRPass::createTextures(uint32_t width, uint32_t height) {
     if (!m_ssrResult) {
         CFFLog::Error("[SSRPass] Failed to create SSR result texture");
         return;
+    }
+
+    // Create SSR history texture for temporal accumulation
+    desc.debugName = "SSR_History";
+    m_ssrHistory.reset(ctx->CreateTexture(desc, nullptr));
+
+    if (!m_ssrHistory) {
+        CFFLog::Warning("[SSRPass] Failed to create SSR history texture (temporal disabled)");
     }
 
     CFFLog::Info("[SSRPass] Created SSR textures: %ux%u", width, height);
@@ -366,4 +393,59 @@ void CSSRPass::Composite(ICommandList* cmdList,
 
     // Transition HDR buffer back to RTV/SRV state
     cmdList->Barrier(hdrBuffer, EResourceState::UnorderedAccess, EResourceState::RenderTarget);
+}
+
+void CSSRPass::createBlueNoiseTexture() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Generate 64x64 blue noise texture using procedural LDS (Low Discrepancy Sequence)
+    // This is a simplified approach; production would use precomputed blue noise
+    constexpr uint32_t NOISE_SIZE = 64;
+    std::vector<uint8_t> noiseData(NOISE_SIZE * NOISE_SIZE * 4);  // RGBA8
+
+    // Use R2 sequence for low-discrepancy 2D sampling
+    // R2 is based on generalized golden ratio: alpha = 0.7548776662...
+    const float g = 1.32471795724f;  // Plastic constant
+    const float a1 = 1.0f / g;
+    const float a2 = 1.0f / (g * g);
+
+    for (uint32_t y = 0; y < NOISE_SIZE; ++y) {
+        for (uint32_t x = 0; x < NOISE_SIZE; ++x) {
+            uint32_t idx = (y * NOISE_SIZE + x) * 4;
+            uint32_t n = y * NOISE_SIZE + x;
+
+            // R2 sequence
+            float r1 = fmodf(0.5f + a1 * n, 1.0f);
+            float r2 = fmodf(0.5f + a2 * n, 1.0f);
+
+            // Additional randomness using simple hash
+            uint32_t hash = n * 747796405u + 2891336453u;
+            hash = ((hash >> ((hash >> 28) + 4)) ^ hash) * 277803737u;
+            float r3 = (hash & 0xFFFFu) / 65535.0f;
+            float r4 = ((hash >> 16) & 0xFFFFu) / 65535.0f;
+
+            noiseData[idx + 0] = static_cast<uint8_t>(r1 * 255.0f);
+            noiseData[idx + 1] = static_cast<uint8_t>(r2 * 255.0f);
+            noiseData[idx + 2] = static_cast<uint8_t>(r3 * 255.0f);
+            noiseData[idx + 3] = static_cast<uint8_t>(r4 * 255.0f);
+        }
+    }
+
+    TextureDesc desc;
+    desc.width = NOISE_SIZE;
+    desc.height = NOISE_SIZE;
+    desc.format = ETextureFormat::R8G8B8A8_UNORM;
+    desc.mipLevels = 1;
+    desc.usage = ETextureUsage::ShaderResource;
+    desc.dimension = ETextureDimension::Tex2D;
+    desc.debugName = "SSR_BlueNoise";
+
+    m_blueNoise.reset(ctx->CreateTexture(desc, noiseData.data()));
+
+    if (!m_blueNoise) {
+        CFFLog::Warning("[SSRPass] Failed to create blue noise texture (stochastic mode may have artifacts)");
+    } else {
+        CFFLog::Info("[SSRPass] Blue noise texture created (64x64)");
+    }
 }

@@ -390,8 +390,43 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
             ssrSettings.ApplyPreset(static_cast<ESSRQuality>(currentQuality));
         }
 
+        // Mode dropdown
+        static const char* modeNames[] = { "HiZ Trace", "Stochastic", "Temporal" };
+        int currentMode = static_cast<int>(ssrSettings.mode);
+        if (ImGui::Combo("Mode##SSR", &currentMode, modeNames, 3)) {
+            ssrSettings.mode = static_cast<ESSRMode>(currentMode);
+        }
+
+        HelpTooltip(
+            "HiZ Trace: Single ray per pixel (fastest)\n"
+            "Stochastic: Multiple rays with GGX sampling (better quality)\n"
+            "Temporal: Stochastic + history accumulation (best quality)");
+
         // Intensity slider (always visible)
         ImGui::SliderFloat("Intensity##SSR", &ssrSettings.intensity, 0.0f, 2.0f, "%.2f");
+
+        // Stochastic/Temporal settings
+        if (ssrSettings.mode != ESSRMode::HiZTrace) {
+            if (ImGui::TreeNode("Stochastic Settings##SSR")) {
+                ImGui::SliderInt("Rays/Pixel##SSR", &ssrSettings.numRays, 1, 8);
+                ImGui::SliderFloat("BRDF Bias##SSR", &ssrSettings.brdfBias, 0.0f, 1.0f, "%.2f");
+                HelpTooltip(
+                    "Rays/Pixel: More rays = better quality, slower\n"
+                    "BRDF Bias: 0=uniform sampling, 1=full GGX importance sampling");
+                ImGui::TreePop();
+            }
+        }
+
+        if (ssrSettings.mode == ESSRMode::Temporal) {
+            if (ImGui::TreeNode("Temporal Settings##SSR")) {
+                ImGui::SliderFloat("History Blend##SSR", &ssrSettings.temporalBlend, 0.0f, 0.98f, "%.2f");
+                ImGui::SliderFloat("Motion Threshold##SSR", &ssrSettings.motionThreshold, 0.001f, 0.1f, "%.3f");
+                HelpTooltip(
+                    "History Blend: Higher = smoother but more ghosting\n"
+                    "Motion Threshold: Higher = accept more motion before rejection");
+                ImGui::TreePop();
+            }
+        }
 
         // Advanced settings (collapsible)
         if (ImGui::TreeNode("Advanced Settings##SSR")) {
@@ -415,6 +450,7 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
 
         HelpTooltip(
             "Quality: Preset balancing quality vs performance\n"
+            "Mode: Algorithm for SSR computation\n"
             "Intensity: SSR reflection brightness multiplier\n"
             "Max Distance: Maximum ray travel distance (view-space)\n"
             "Thickness: Surface thickness for hit detection\n"
