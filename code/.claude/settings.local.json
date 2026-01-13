@@ -21,13 +21,37 @@
       "WebFetch(domain:developer.nvidia.com)",
       "mcp__ide__executeCode",
       "WebFetch(domain:www.activision.com)",
-      "WebFetch(domain:docs.anthropic.com)"
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(findstr:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"E:/forfun/source/code/.claude/notify.ps1\" -TabNumber 1 -Message \"Test notification\":*)",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"Get-Module -ListAvailable BurntToast\":*)",
+      "Bash(powershell -ExecutionPolicy Bypass -Command:*)",
+      "Bash(where:*)",
+      "Bash(start \"\":*)",
+      "Bash(del:*)"
     ],
     "deny": [],
     "ask": []
   },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"E:/forfun/source/code/.claude/notify.ps1\""
+          }
+        ]
+      }
+    ]
+  },
   "enabledPlugins": {
     "code-review@claude-plugins-official": true,
-    "commit-commands@claude-plugins-official": true
+    "commit-commands@claude-plugins-official": true,
+    "github@claude-plugins-official": true
   }
 }
