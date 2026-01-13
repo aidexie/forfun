@@ -221,6 +221,8 @@ visitor.VisitFloat3("Albedo", albedo);
 
 **UV Convention**: 原点左上角 (0,0), U 左→右, V 上→下
 
+**Reversed-Z (Default)**: Near=1.0, Far=0.0. Improves depth precision for distant objects. Use `GREATER` depth comparison instead of `LESS`.
+
 所有矩阵操作使用 `LH` 后缀函数 (`XMMatrixLookAtLH`, `XMMatrixPerspectiveFovLH`)。
 
 **Matrix Storage Convention**:
