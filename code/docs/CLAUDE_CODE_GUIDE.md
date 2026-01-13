@@ -10,12 +10,13 @@ Comprehensive guide to Claude Code features, extensibility, and how agents work.
 2. [Plugins](#plugins)
 3. [Agents](#agents)
 4. [Hooks](#hooks)
-5. [MCP Servers](#mcp-servers)
+5. [MCP Servers (Model Context Protocol)](#mcp-servers)
 6. [Skills (Slash Commands)](#skills-slash-commands)
 7. [Memory (CLAUDE.md)](#memory-claudemd)
 8. [Settings](#settings)
 9. [How Agents Work](#how-agents-work)
 10. [Why Agents Are Effective](#why-agents-are-effective)
+11. [Plugin Features](#plugin-features)
 
 ---
 
@@ -286,7 +287,42 @@ User: "Create a new React component"
 
 ## MCP Servers
 
-MCP (Model Context Protocol) servers are external processes that provide additional tools to Claude.
+MCP (Model Context Protocol) is a **standardized protocol** for connecting AI models to external tools and data sources. Think of it as a **USB for AI** - a universal way to plug in capabilities.
+
+### What is MCP?
+
+```
+┌─────────────┐         MCP Protocol         ┌─────────────┐
+│   Claude    │ ◄──────────────────────────► │  MCP Server │
+│   (Client)  │      JSON-RPC over stdio     │  (Tools)    │
+└─────────────┘                              └─────────────┘
+```
+
+**Core Principle - Separation of Concerns**:
+- **AI Model**: Reasoning, decision-making
+- **MCP Server**: Tool execution, data access
+
+The AI doesn't need to know HOW tools work - just WHAT they do.
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    Claude Code (Host)                   │
+├────────────────────────────────────────────────────────┤
+│                    MCP Client                          │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │  Discovers servers → Calls tools → Gets results  │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────┬───────────────────────────────────┘
+                     │ JSON-RPC (stdio/HTTP)
+     ┌───────────────┼───────────────┬───────────────┐
+     ▼               ▼               ▼               ▼
+┌─────────┐   ┌─────────┐     ┌─────────┐     ┌─────────┐
+│ GitHub  │   │Postgres │     │  Slack  │     │  File   │
+│ Server  │   │ Server  │     │ Server  │     │ System  │
+└─────────┘   └─────────┘     └─────────┘     └─────────┘
+```
 
 ### Configuration
 
@@ -322,7 +358,132 @@ MCP (Model Context Protocol) servers are external processes that provide additio
 }
 ```
 
-### How MCP Works
+### Communication Flow
+
+```
+Step 1: Discovery
+─────────────────
+Client: "What tools do you have?"
+Server: [
+  { name: "query", description: "Run SQL query" },
+  { name: "insert", description: "Insert data" }
+]
+
+Step 2: Tool Call
+─────────────────
+Client: { method: "query", params: { sql: "SELECT * FROM users" } }
+Server: { result: [{ id: 1, name: "John" }, ...] }
+
+Step 3: Result
+─────────────────
+Claude receives data and uses it in response
+```
+
+### Protocol Details
+
+MCP uses **JSON-RPC 2.0** over stdio:
+
+```json
+// Request (Client → Server)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "github_create_issue",
+    "arguments": {
+      "repo": "owner/repo",
+      "title": "Bug report",
+      "body": "Description..."
+    }
+  }
+}
+
+// Response (Server → Client)
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "issue_url": "https://github.com/owner/repo/issues/123"
+  }
+}
+```
+
+### What a Server Provides
+
+| Capability | Description |
+|------------|-------------|
+| **Tools** | Actions the AI can take |
+| **Resources** | Data the AI can read |
+| **Prompts** | Pre-built prompt templates |
+
+### Example MCP Server (TypeScript)
+
+```typescript
+import { Server } from "@modelcontextprotocol/sdk/server";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio";
+
+const server = new Server({
+  name: "my-server",
+  version: "1.0.0"
+}, {
+  capabilities: { tools: {} }
+});
+
+// Define a tool
+server.setRequestHandler("tools/list", async () => ({
+  tools: [{
+    name: "get_weather",
+    description: "Get weather for a city",
+    inputSchema: {
+      type: "object",
+      properties: {
+        city: { type: "string" }
+      }
+    }
+  }]
+}));
+
+// Handle tool calls
+server.setRequestHandler("tools/call", async (request) => {
+  if (request.params.name === "get_weather") {
+    const city = request.params.arguments.city;
+    const weather = await fetchWeather(city);
+    return { content: [{ type: "text", text: weather }] };
+  }
+});
+
+// Start server
+const transport = new StdioServerTransport();
+server.connect(transport);
+```
+
+### Example MCP Server (Python)
+
+```python
+from mcp import Server
+
+server = Server("postgres-server")
+
+@server.tool("query")
+def query(sql: str) -> list:
+    """Execute a SQL query"""
+    return database.execute(sql)
+
+@server.tool("insert")
+def insert(table: str, data: dict) -> bool:
+    """Insert a row into a table"""
+    return database.insert(table, data)
+
+@server.resource("schema")
+def get_schema() -> str:
+    """Get database schema"""
+    return database.get_schema()
+
+server.run()
+```
+
+### How MCP Works in Practice
 
 ```
 User: "Query the database for all users created this week"
@@ -334,6 +495,90 @@ User: "Create a GitHub issue for this bug"
 → Claude uses github MCP server
 → Creates issue via GitHub API
 ```
+
+### What Happens on Startup
+
+```
+1. Claude Code starts
+2. Spawns each MCP server as subprocess
+3. Connects via stdio
+4. Asks each server: "What tools do you have?"
+5. Tools become available to Claude
+```
+
+### Core Principles
+
+#### 1. Standardization
+
+One protocol for all tools:
+
+```
+Before MCP:
+├── Claude has custom GitHub integration
+├── Claude has custom Slack integration
+├── Claude has custom Database integration
+└── Each is different, hard to maintain
+
+After MCP:
+├── GitHub MCP Server (standard protocol)
+├── Slack MCP Server (standard protocol)
+├── Database MCP Server (standard protocol)
+└── All use the same interface
+```
+
+#### 2. Decoupling
+
+AI model is separate from tool implementation:
+
+```
+┌─────────────────┐         ┌─────────────────┐
+│     Claude      │         │   MCP Server    │
+├─────────────────┤         ├─────────────────┤
+│ Knows: "I can   │   →→→   │ Knows: How to   │
+│ call 'query'"   │         │ execute SQL     │
+│                 │   ←←←   │                 │
+│ Gets: Results   │         │ Returns: Data   │
+└─────────────────┘         └─────────────────┘
+```
+
+#### 3. Security Boundary
+
+Server controls what's exposed:
+
+```
+┌─────────────────────────────────────────┐
+│              MCP Server                  │
+├─────────────────────────────────────────┤
+│  Exposes:          │  Hidden:           │
+│  - query()         │  - Connection str  │
+│  - insert()        │  - Credentials     │
+│                    │  - Internal logic  │
+└─────────────────────────────────────────┘
+```
+
+#### 4. Composability
+
+Multiple servers work together:
+
+```
+Claude Code
+├── GitHub Server    → Create issues, PRs
+├── Postgres Server  → Query database
+├── Slack Server     → Send messages
+└── File Server      → Read/write files
+
+All available simultaneously!
+```
+
+### MCP vs Direct API Calls
+
+| Aspect | Direct API | MCP |
+|--------|------------|-----|
+| **Integration** | Custom per-service | Standardized |
+| **Security** | API keys in prompt | Server manages auth |
+| **Discovery** | Hardcoded | Dynamic tool listing |
+| **Maintenance** | Update Claude | Update server only |
+| **Extensibility** | Requires model changes | Add new servers |
 
 ---
 
@@ -801,6 +1046,151 @@ Edit `~/.claude/settings.json`:
 | `~/.claude/plugins/cache/` | Plugin cache |
 | `./CLAUDE.md` | Project instructions |
 | `./.claude/settings.json` | Project settings |
+
+---
+
+## Plugin Features
+
+Plugins can include multiple types of features:
+
+### 1. Skills (Slash Commands)
+
+User-invocable commands:
+
+```bash
+/commit           # from commit-commands plugin
+/code-review      # from code-review plugin
+/code-simplifier  # from code-simplifier plugin
+```
+
+### 2. Agents
+
+Autonomous AI entities that can be spawned:
+
+```
+code-simplifier plugin includes:
+└── agents/code-simplifier.md  # Agent definition
+
+The agent:
+- Uses Opus model
+- Simplifies recently modified code
+- Follows project standards
+```
+
+### 3. LSP Servers (Language Server Protocol)
+
+Code intelligence backends:
+
+```json
+// clangd-lsp plugin
+{
+  "lspServers": {
+    "clangd": {
+      "command": "clangd",
+      "args": ["--background-index"],
+      "extensionToLanguage": {
+        ".cpp": "cpp",
+        ".h": "c"
+      }
+    }
+  }
+}
+```
+
+### 4. MCP Servers (Model Context Protocol)
+
+External tool providers:
+
+```json
+// github plugin
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-github"]
+    }
+  }
+}
+```
+
+### 5. Hooks
+
+Event-triggered commands:
+
+```json
+// security-guidance plugin
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [{
+          "type": "command",
+          "command": "security-check.sh"
+        }]
+      }
+    ]
+  }
+}
+```
+
+### Plugin Structure
+
+A typical plugin folder:
+
+```
+plugin-name/
+├── .claude-plugin/
+│   └── plugin.json       # Plugin metadata
+├── agents/
+│   └── agent-name.md     # Agent definitions
+├── skills/
+│   └── skill-name.md     # Skill definitions
+└── hooks/
+    └── hook-config.json  # Hook configurations
+```
+
+### plugin.json Example
+
+```json
+{
+  "name": "code-simplifier",
+  "version": "1.0.0",
+  "description": "Simplifies code for clarity",
+  "author": {
+    "name": "Anthropic",
+    "email": "support@anthropic.com"
+  }
+}
+```
+
+### Feature Matrix by Plugin
+
+| Plugin | Skills | Agents | LSP | MCP | Hooks |
+|--------|--------|--------|-----|-----|-------|
+| `commit-commands` | ✅ `/commit`, `/commit-push-pr` | | | | |
+| `code-review` | ✅ `/code-review` | ✅ | | | |
+| `code-simplifier` | ✅ `/code-simplifier` | ✅ | | | |
+| `clangd-lsp` | | | ✅ | | |
+| `typescript-lsp` | | | ✅ | | |
+| `github` | | | | ✅ | |
+| `playwright` | | | | ✅ | |
+| `security-guidance` | | | | | ✅ |
+| `hookify` | ✅ | | | | ✅ |
+| `pr-review-toolkit` | | ✅ Multiple | | | |
+| `feature-dev` | ✅ | ✅ Multiple | | | |
+
+### Summary
+
+| Feature Type | Purpose | Example |
+|--------------|---------|---------|
+| **Skills** | User-invoked commands | `/commit` |
+| **Agents** | Autonomous task execution | code-simplifier agent |
+| **LSP** | Code intelligence | clangd, typescript-lsp |
+| **MCP** | External tool integration | GitHub, Postgres |
+| **Hooks** | Event-triggered actions | Security warnings |
+
+A single plugin can include **any combination** of these features.
 
 ---
 
