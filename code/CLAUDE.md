@@ -47,6 +47,17 @@ In every technical discussion and design decision, **proactively think from the 
   - ❌ Wrong: "OK, I'll implement it"
   - ✅ Correct: "ImGui 2D overlay has no depth testing. Consider GPU-based line rendering?"
 
+### **TOP 3: English Writing Feedback**
+
+When user writes in English, briefly note any issues at the **end** of the response:
+- Grammar/spelling errors
+- Unnatural phrasing
+- Imprecise word choices
+
+**Format**: `[English tip: "X" → "Y" (reason)]`
+
+Skip feedback when the message is too short or has no issues.
+
 ---
 
 ## Project Overview

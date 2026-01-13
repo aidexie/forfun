@@ -1,17 +1,33 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"E:/forfun/source/code\" add docs/RHI.md)",
-      "Bash(git -C \"E:/forfun/source/code\" add docs/DX12_3D_RENDERING_ROADMAP.md docs/DX12_MIGRATION_ROADMAP.md docs/DX12_STEP_BY_STEP.md docs/RHI_MIGRATION_ROADMAP.md)",
-      "Bash(git -C \"E:/forfun/source/code\" commit -m \"$(cat <<''EOF''\nDocs: Consolidate RHI/DX11/DX12 documentation into single RHI.md\n\nMerged the following documents into docs/RHI.md:\n- DX12_MIGRATION_ROADMAP.md - Implementation phases and design decisions\n- DX12_STEP_BY_STEP.md - Step-by-step migration notes and resolved issues\n- RHI_MIGRATION_ROADMAP.md - RHI abstraction layer migration progress\n- DX12_3D_RENDERING_ROADMAP.md - 3D rendering pipeline enablement steps\n\nNew RHI.md covers:\n- Architecture overview (DX11/DX12 dual backend)\n- Public interfaces (IRenderContext, ICommandList)\n- File structure\n- DX12-specific details (root signature, descriptor heaps, frame sync)\n- Deferred binding and deletion queue patterns\n- DX11 vs DX12 differences\n- Resolved issues and solutions\n- Usage examples\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git:*)",
+      "Bash(cmake:*)",
       "Bash(cmake --build:*)",
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nRHI/DXR: Add ray tracing acceleration structure foundation\n\nImplement Phase 1 of DXR integration for GPU-based lightmap baking:\n\nNew interfaces (RHI/RHIRayTracing.h):\n- IAccelerationStructure: BLAS/TLAS abstraction\n- IRayTracingPipelineState: RT pipeline state object interface\n- IShaderBindingTable: Shader binding table interface\n- Supporting types: GeometryDesc, BLASDesc, TLASDesc, DispatchRaysDesc\n\nDX12 implementation:\n- CDX12AccelerationStructure: Full BLAS/TLAS building support\n- Triangle and procedural geometry types\n- Instance descriptor generation for TLAS\n- Prebuild info queries for buffer sizing\n- BuildAccelerationStructure command list method\n\nInterface extensions:\n- IRenderContext: CreateBLAS, CreateTLAS, GetAccelerationStructurePrebuildInfo\n- ICommandList: BuildAccelerationStructure, SetRayTracingPipelineState,\n  DispatchRays, SetAccelerationStructure\n\nDX11 stubs: All ray tracing methods return nullptr/no-op\n\nAlso adds R32G32B32_FLOAT format for vertex position data and\nDXR roadmap documentation.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git commit -m \"$(cat <<''EOF''\nRHI/DXR: Implement ray tracing pipeline state and shader binding table\n\nComplete Phase 1.3 and 1.4 of DXR integration:\n\nRay Tracing Pipeline State (DX12RayTracingPipeline.h/cpp):\n- CDX12RayTracingPipelineState: Wraps ID3D12StateObject\n- Shader identifier caching for efficient SBT creation\n- CDX12RayTracingPipelineBuilder: Fluent API for pipeline construction\n  - DXIL library configuration\n  - Ray generation, miss shader, and hit group exports\n  - Shader/pipeline config (payload size, recursion depth)\n  - Global/local root signature support\n\nShader Binding Table (DX12ShaderBindingTable.h/cpp):\n- CDX12ShaderBindingTable: Manages SBT GPU buffer\n- Proper alignment handling (32-byte records, 64-byte tables)\n- CDX12ShaderBindingTableBuilder: Builds SBT from shader records\n  - Ray generation, miss, and hit group record support\n  - Local root argument support per shader\n\nInterface updates:\n- ShaderRecord now uses exportName instead of raw identifier\n- CreateRayTracingPipelineState fully implemented\n- CreateShaderBindingTable fully implemented\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git commit -m \"$(cat <<''EOF''\nDocs: Move legacy optimization docs to HistoryDoc folder\n\nMove completed/obsolete documentation to docs/HistoryDoc/:\n- POINT_LIGHT_OPTIMIZATION.md\n- SHADER_REFACTORING.md\n- UNITY_VS_OURS_POINT_LIGHT.md\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git commit:*)"
+      "Bash(timeout:*)",
+      "Bash(echo:*)",
+      "Bash(cat:*)",
+      "Bash(cd:*)",
+      "Bash(dir:*)",
+      "Bash(find:*)",
+      "Bash(mv:*)",
+      "Bash(ls:*)",
+      "Bash(E:/forfun/source/code/build/Debug/forfun.exe:*)",
+      "Bash(forfun.exe:*)",
+      "WebSearch",
+      "WebFetch(domain:unity.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:morgan3d.github.io)",
+      "WebFetch(domain:developer.nvidia.com)",
+      "mcp__ide__executeCode",
+      "WebFetch(domain:www.activision.com)",
+      "WebFetch(domain:docs.anthropic.com)"
     ],
     "deny": [],
     "ask": []
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true
   }
 }
