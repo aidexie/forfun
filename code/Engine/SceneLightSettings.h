@@ -28,7 +28,14 @@ enum class EDiffuseGIMode : int
     X(MaterialID, "Material ID") \
     X(Velocity, "Velocity") \
     X(Depth, "Depth") \
-    X(SSAO, "SSAO")
+    X(SSAO, "SSAO") \
+    X(HiZ_Mip0, "Hi-Z Mip 0") \
+    X(HiZ_Mip1, "Hi-Z Mip 1") \
+    X(HiZ_Mip2, "Hi-Z Mip 2") \
+    X(HiZ_Mip3, "Hi-Z Mip 3") \
+    X(HiZ_Mip4, "Hi-Z Mip 4") \
+    X(SSR_Result, "SSR Result") \
+    X(SSR_Confidence, "SSR Confidence")
 
 enum class EGBufferDebugMode : int {
     #define X(name, str) name,

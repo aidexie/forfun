@@ -1,0 +1,167 @@
+#pragma once
+#include "RHI/RHIPointers.h"
+#include <DirectXMath.h>
+#include <cstdint>
+
+// Forward declarations
+namespace RHI {
+    class ICommandList;
+    class ITexture;
+}
+
+// ============================================
+// SSR Configuration Constants
+// ============================================
+namespace SSRConfig {
+    constexpr uint32_t THREAD_GROUP_SIZE = 8;   // 8x8 threads per group
+    constexpr uint32_t MAX_HIZ_MIP = 10;        // Maximum Hi-Z mip level to use
+    constexpr uint32_t DEFAULT_MAX_STEPS = 64;  // Default ray march steps
+    constexpr uint32_t DEFAULT_BINARY_STEPS = 8; // Binary search refinement steps
+}
+
+// ============================================
+// SSR Settings (exposed to editor)
+// ============================================
+struct SSSRSettings {
+    bool enabled = true;            // Enable/disable SSR
+    float maxDistance = 50.0f;      // Maximum ray distance (view-space)
+    float thickness = 0.5f;         // Surface thickness for hit detection
+    float stride = 1.0f;            // Initial step stride (pixels)
+    float strideZCutoff = 100.0f;   // View-Z at which stride scales
+    int maxSteps = 64;              // Maximum ray march steps
+    int binarySearchSteps = 8;      // Binary search refinement steps
+    float jitterOffset = 0.0f;      // Temporal jitter (0-1, animated)
+    float fadeStart = 0.8f;         // Edge fade start (0-1)
+    float fadeEnd = 1.0f;           // Edge fade end (0-1)
+    float roughnessFade = 0.5f;     // Roughness cutoff for SSR
+    bool debugVisualize = false;    // Show SSR debug mode
+};
+
+// ============================================
+// Constant buffer for SSR compute shader (b0)
+// ============================================
+struct alignas(16) CB_SSR {
+    DirectX::XMFLOAT4X4 proj;           // Projection matrix
+    DirectX::XMFLOAT4X4 invProj;        // Inverse projection matrix
+    DirectX::XMFLOAT4X4 view;           // View matrix (world to view)
+    DirectX::XMFLOAT4X4 invView;        // Inverse view matrix (view to world)
+    DirectX::XMFLOAT2 screenSize;       // Full resolution (width, height)
+    DirectX::XMFLOAT2 texelSize;        // 1.0 / screenSize
+    float maxDistance;                   // Maximum ray distance
+    float thickness;                     // Surface thickness for hit
+    float stride;                        // Ray march stride
+    float strideZCutoff;                 // View-Z stride scaling cutoff
+    int maxSteps;                        // Maximum ray march steps
+    int binarySearchSteps;               // Binary search refinement
+    float jitterOffset;                  // Temporal jitter
+    float fadeStart;                     // Edge fade start
+    float fadeEnd;                       // Edge fade end
+    float roughnessFade;                 // Roughness cutoff
+    float nearZ;                         // Camera near plane
+    float farZ;                          // Camera far plane
+    int hiZMipCount;                     // Number of Hi-Z mip levels
+    uint32_t useReversedZ;               // 0 = standard-Z, 1 = reversed-Z
+    float _pad[2];                       // Padding to 16-byte alignment
+};
+
+// ============================================
+// CSSRPass - Screen-Space Reflections
+// ============================================
+// Implements Hi-Z accelerated screen-space reflections.
+//
+// Reference: "Efficient GPU Screen-Space Ray Tracing"
+//            Morgan McGuire & Michael Mara (2014)
+//
+// Pipeline:
+//   1. For each pixel: compute reflection ray in view-space
+//   2. Hi-Z accelerated ray march through depth pyramid
+//   3. Binary search refinement for accurate hit
+//   4. Sample scene color at hit point
+//   5. Apply fade based on hit confidence, edge, and roughness
+//
+// Input:
+//   - Depth buffer (D32_FLOAT)
+//   - Normal buffer (G-Buffer RT1: Normal.xyz + Roughness)
+//   - Hi-Z pyramid (from CHiZPass)
+//   - Scene color (HDR buffer)
+//
+// Output:
+//   - SSR texture (R16G16B16A16_FLOAT) - reflection color + confidence
+// ============================================
+class CSSRPass {
+public:
+    CSSRPass() = default;
+    ~CSSRPass() = default;
+
+    // ============================================
+    // Lifecycle
+    // ============================================
+    bool Initialize();
+    void Shutdown();
+
+    // ============================================
+    // Rendering
+    // ============================================
+    // Render SSR pass
+    // Returns: SSR result texture (reflection color + confidence in alpha)
+    void Render(RHI::ICommandList* cmdList,
+                RHI::ITexture* depthBuffer,     // G-Buffer depth (full-res)
+                RHI::ITexture* normalBuffer,    // G-Buffer RT1 (Normal.xyz + Roughness)
+                RHI::ITexture* hiZTexture,      // Hi-Z pyramid from CHiZPass
+                RHI::ITexture* sceneColor,      // HDR scene color
+                uint32_t width, uint32_t height,
+                uint32_t hiZMipCount,
+                const DirectX::XMMATRIX& view,
+                const DirectX::XMMATRIX& proj,
+                float nearZ, float farZ);
+
+    // ============================================
+    // Output
+    // ============================================
+    // Get SSR result texture (returns black fallback if disabled)
+    RHI::ITexture* GetSSRTexture() const {
+        return (m_settings.enabled && m_ssrResult) ? m_ssrResult.get() : m_blackFallback.get();
+    }
+
+    // ============================================
+    // Settings
+    // ============================================
+    SSSRSettings& GetSettings() { return m_settings; }
+    const SSSRSettings& GetSettings() const { return m_settings; }
+
+private:
+    void createShaders();
+    void createTextures(uint32_t width, uint32_t height);
+    void createSamplers();
+    void createFallbackTexture();
+
+    // ============================================
+    // Compute Shader
+    // ============================================
+    RHI::ShaderPtr m_ssrCS;             // Main SSR compute shader
+
+    // ============================================
+    // Pipeline State
+    // ============================================
+    RHI::PipelineStatePtr m_ssrPSO;
+
+    // ============================================
+    // Textures
+    // ============================================
+    RHI::TexturePtr m_ssrResult;        // SSR reflection color + confidence
+    RHI::TexturePtr m_blackFallback;    // Black fallback when SSR disabled
+
+    // ============================================
+    // Samplers
+    // ============================================
+    RHI::SamplerPtr m_pointSampler;     // Point sampling for depth/Hi-Z
+    RHI::SamplerPtr m_linearSampler;    // Linear sampling for color
+
+    // ============================================
+    // State
+    // ============================================
+    SSSRSettings m_settings;
+    uint32_t m_width = 0;
+    uint32_t m_height = 0;
+    bool m_initialized = false;
+};

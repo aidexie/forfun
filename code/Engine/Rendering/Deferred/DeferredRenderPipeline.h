@@ -13,6 +13,8 @@
 #include "Engine/Rendering/DebugLinePass.h"
 #include "Engine/Rendering/GridPass.h"
 #include "Engine/Rendering/SSAOPass.h"
+#include "Engine/Rendering/HiZPass.h"
+#include "Engine/Rendering/SSRPass.h"
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIHelpers.h"
 #include <DirectXMath.h>
@@ -72,6 +74,8 @@ public:
     CDebugLinePass& GetDebugLinePass() override { return m_debugLinePass; }
     CClusteredLightingPass& GetClusteredLightingPass() override { return m_clusteredLighting; }
     CSSAOPass& GetSSAOPass() { return m_ssaoPass; }
+    CHiZPass& GetHiZPass() { return m_hiZPass; }
+    CSSRPass& GetSSRPass() { return m_ssrPass; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
 
 private:
@@ -87,6 +91,8 @@ private:
     CTransparentForwardPass m_transparentPass;
     CClusteredLightingPass m_clusteredLighting;
     CSSAOPass m_ssaoPass;
+    CHiZPass m_hiZPass;
+    CSSRPass m_ssrPass;
     CBloomPass m_bloomPass;
     CPostProcessPass m_postProcess;
     CDebugLinePass m_debugLinePass;

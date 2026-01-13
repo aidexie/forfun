@@ -42,6 +42,8 @@ static const char* kDebugVisualizationPS = R"(
     Texture2D gRT4 : register(t4);  // Velocity
     Texture2D gDepth : register(t5); // Depth
     Texture2D gSSAO : register(t6);  // Screen-Space Ambient Occlusion
+    Texture2D gHiZ : register(t7);   // Hi-Z Pyramid
+    Texture2D gSSR : register(t8);   // Screen-Space Reflections
 
     SamplerState gSamp : register(s0);
 
@@ -96,10 +98,30 @@ static const char* kDebugVisualizationPS = R"(
                 break;
             case 10: // Depth
                 color = float3(depth*10,depth*10,depth*10);  // Non-linear for better visibility
-                // color = pow(depth, 50.0).xxx;  // Non-linear for better visibility
                 break;
             case 11: // SSAO
                 color = ssao.xxx;
+                break;
+            case 12: // Hi-Z Mip 0
+                color = gHiZ.SampleLevel(gSamp, i.uv, 0).rrr * 10.0;
+                break;
+            case 13: // Hi-Z Mip 1
+                color = gHiZ.SampleLevel(gSamp, i.uv, 1).rrr * 10.0;
+                break;
+            case 14: // Hi-Z Mip 2
+                color = gHiZ.SampleLevel(gSamp, i.uv, 2).rrr * 10.0;
+                break;
+            case 15: // Hi-Z Mip 3
+                color = gHiZ.SampleLevel(gSamp, i.uv, 3).rrr * 10.0;
+                break;
+            case 16: // Hi-Z Mip 4
+                color = gHiZ.SampleLevel(gSamp, i.uv, 4).rrr * 10.0;
+                break;
+            case 17: // SSR Result
+                color = gSSR.Sample(gSamp, i.uv).rgb;
+                break;
+            case 18: // SSR Confidence
+                color = gSSR.Sample(gSamp, i.uv).aaa;
                 break;
             default:
                 color = rt2.rgb;  // Default to albedo
@@ -145,6 +167,8 @@ bool CDeferredRenderPipeline::Initialize()
 
     m_clusteredLighting.Initialize();
     m_ssaoPass.Initialize();
+    m_hiZPass.Initialize();
+    m_ssrPass.Initialize();
 
     m_bloomPass.Initialize();
     m_postProcess.Initialize();
@@ -167,6 +191,8 @@ void CDeferredRenderPipeline::Shutdown()
     m_transparentPass.Shutdown();
     m_clusteredLighting.Shutdown();
     m_ssaoPass.Shutdown();
+    m_hiZPass.Shutdown();
+    m_ssrPass.Shutdown();
     m_bloomPass.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
@@ -283,6 +309,16 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     m_viewProjPrev = XMMatrixMultiply(ctx.camera.GetViewMatrix(), ctx.camera.GetProjectionMatrix());
 
     // ============================================
+    // 3.5. Hi-Z Pass (Hierarchical-Z Depth Pyramid)
+    // ============================================
+    if (m_hiZPass.GetSettings().enabled) {
+        CScopedDebugEvent evt(cmdList, L"Hi-Z Build");
+        m_hiZPass.BuildPyramid(cmdList,
+                               m_gbuffer.GetDepthBuffer(),
+                               ctx.width, ctx.height);
+    }
+
+    // ============================================
     // 4. Shadow Pass (if enabled)
     // ============================================
     const CShadowPass::Output* shadowData = nullptr;
@@ -384,6 +420,24 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
+    // 6.7. SSR Pass (Screen-Space Reflections)
+    // ============================================
+    // Traces against HDR color buffer using Hi-Z acceleration
+    if (m_ssrPass.GetSettings().enabled && m_hiZPass.GetSettings().enabled) {
+        CScopedDebugEvent evt(cmdList, L"SSR Pass");
+        m_ssrPass.Render(cmdList,
+                         m_gbuffer.GetDepthBuffer(),
+                         m_gbuffer.GetNormalRoughness(),
+                         m_hiZPass.GetHiZTexture(),
+                         m_offHDR.get(),
+                         ctx.width, ctx.height,
+                         m_hiZPass.GetMipCount(),
+                         ctx.camera.GetViewMatrix(),
+                         ctx.camera.GetProjectionMatrix(),
+                         ctx.camera.nearZ, ctx.camera.farZ);
+    }
+
+    // ============================================
     // 7. Bloom Pass (HDR -> half-res bloom texture)
     // ============================================
     ITexture* bloomResult = nullptr;
@@ -472,6 +526,8 @@ void CDeferredRenderPipeline::renderDebugVisualization(uint32_t width, uint32_t 
     cmdList->SetShaderResource(EShaderStage::Pixel, 4, m_gbuffer.GetVelocity());
     cmdList->SetShaderResource(EShaderStage::Pixel, 5, m_gbuffer.GetDepthBuffer());
     cmdList->SetShaderResource(EShaderStage::Pixel, 6, m_ssaoPass.GetSSAOTexture());
+    cmdList->SetShaderResource(EShaderStage::Pixel, 7, m_hiZPass.GetHiZTexture());
+    cmdList->SetShaderResource(EShaderStage::Pixel, 8, m_ssrPass.GetSSRTexture());
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_debugSampler.get());
 
     // Set debug mode
