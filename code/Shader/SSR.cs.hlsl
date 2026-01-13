@@ -1,13 +1,14 @@
 // SSR.cs.hlsl
-// Screen-Space Reflections with Hi-Z accelerated ray marching
+// Screen-Space Reflections with multiple algorithm modes
 //
 // Reference: "Efficient GPU Screen-Space Ray Tracing"
 //            Morgan McGuire & Michael Mara (2014)
 //
-// Modes:
-//   0 - HiZ Trace: Single ray per pixel (fastest)
-//   1 - Stochastic: Multiple rays with GGX importance sampling
-//   2 - Temporal: Stochastic + temporal accumulation
+// Modes (ordered simple to complex):
+//   0 - SimpleLinear: Basic linear ray march (no Hi-Z, educational)
+//   1 - HiZ Trace: Single ray with Hi-Z acceleration (default)
+//   2 - Stochastic: Multiple rays with GGX importance sampling
+//   3 - Temporal: Stochastic + temporal accumulation
 //
 // Optimized for reversed-Z (near=1.0, far=0.0)
 
@@ -311,6 +312,84 @@ float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
 }
 
 // ============================================
+// Simple Linear Ray March (No Hi-Z)
+// ============================================
+// Simplest SSR: fixed stride linear march against depth buffer
+// Returns: hit UV in xy, hit depth in z, hit confidence in w
+float4 SimpleLinearTrace(float3 rayOrigin, float3 rayDir)
+{
+    // Transform ray to screen-space
+    float3 rayEnd = rayOrigin + rayDir * g_MaxDistance;
+    float3 ssStart = ViewToScreen(rayOrigin);
+    float3 ssEnd = ViewToScreen(rayEnd);
+
+    // Early out if ray is off-screen
+    if (!IsValidUV(ssEnd.xy) && !IsValidUV(ssStart.xy))
+        return float4(0, 0, 0, 0);
+
+    // Screen-space ray direction
+    float2 rayDirUV = ssEnd.xy - ssStart.xy;
+    float rayLength = length(rayDirUV * g_ScreenSize);
+    if (rayLength < 0.001)
+        return float4(0, 0, 0, 0);
+
+    // Fixed stride stepping
+    float2 rayDirPixels = normalize(rayDirUV * g_ScreenSize);
+    float2 rayStepUV = rayDirPixels * g_TexelSize * g_Stride;
+    float depthPerStep = (ssEnd.z - ssStart.z) / rayLength * g_Stride;
+
+    float2 currentUV = ssStart.xy;
+    float currentDepth = ssStart.z;
+    float thicknessThreshold = g_Thickness * 0.01;
+
+    bool hit = false;
+    float3 hitResult = float3(0, 0, 0);
+
+    // Simple linear march
+    [loop]
+    for (int i = 0; i < g_MaxSteps && !hit; ++i)
+    {
+        currentUV += rayStepUV;
+        currentDepth += depthPerStep;
+
+        if (!IsValidUV(currentUV))
+            break;
+
+        // Sample depth directly (no Hi-Z)
+        float sceneDepth = g_DepthBuffer.SampleLevel(g_PointSampler, currentUV, 0);
+
+        // Reversed-Z: behind when rayDepth <= sceneDepth
+        if (currentDepth <= sceneDepth)
+        {
+            if (abs(currentDepth - sceneDepth) < thicknessThreshold)
+            {
+                hitResult = float3(currentUV, currentDepth);
+                hit = true;
+            }
+            break; // Behind but not within thickness
+        }
+    }
+
+    // Compute confidence
+    float confidence = hit ? 1.0 : 0.0;
+
+    if (hit)
+    {
+        // Edge fade - smooth falloff at screen edges
+        float2 edgeFade = 1.0 - pow(abs(hitResult.xy * 2.0 - 1.0), 8.0);
+        confidence *= min(edgeFade.x, edgeFade.y);
+
+        // Distance fade
+        float3 hitView = ScreenToView(hitResult.xy, hitResult.z);
+        float hitDist = length(hitView - rayOrigin);
+        float distFade = 1.0 - saturate(hitDist / g_MaxDistance);
+        confidence *= distFade;
+    }
+
+    return float4(hitResult.xy, hitResult.z, confidence);
+}
+
+// ============================================
 // Stochastic SSR - Multiple rays with importance sampling
 // ============================================
 float4 StochasticSSR(float3 viewPos, float3 normalVS, float3 viewDir, float roughness, uint2 pixelCoord)
@@ -488,10 +567,38 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
 
     float4 result;
 
-    // Select SSR mode
+    // Select SSR mode (ordered simple to complex)
     if (g_SSRMode == 0)
     {
-        // HiZ Trace - single ray
+        // SimpleLinear - basic ray march without Hi-Z
+        float3 reflectDir = reflect(viewDir, normalVS);
+
+        // Only trace forward-facing reflections (towards camera)
+        if (reflectDir.z > 0.0)
+        {
+            g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
+            return;
+        }
+
+        float4 hitResult = SimpleLinearTrace(viewPos, reflectDir);
+
+        // Sample scene color at hit point
+        float3 reflectionColor = float3(0, 0, 0);
+        if (hitResult.w > 0.001)
+        {
+            reflectionColor = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
+        }
+
+        // Apply roughness fade (quadratic for smoother falloff)
+        float roughnessMask = 1.0 - saturate(roughness / g_RoughnessFade);
+        roughnessMask *= roughnessMask;
+        float confidence = hitResult.w * roughnessMask;
+
+        result = float4(reflectionColor, confidence);
+    }
+    else if (g_SSRMode == 1)
+    {
+        // HiZ Trace - single ray with Hi-Z acceleration
         float3 reflectDir = reflect(viewDir, normalVS);
 
         // Only trace forward-facing reflections (towards camera)
@@ -522,7 +629,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
 
         result = float4(reflectionColor, confidence);
     }
-    else if (g_SSRMode == 1)
+    else if (g_SSRMode == 2)
     {
         // Stochastic SSR
         result = StochasticSSR(viewPos, normalVS, viewDir, roughness, DTid.xy);

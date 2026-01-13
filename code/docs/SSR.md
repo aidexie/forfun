@@ -13,10 +13,10 @@ This document describes the Screen-Space Reflections system implementation.
 
 ## Overview
 
-The SSR system implements screen-space reflections using Hi-Z (Hierarchical-Z) accelerated ray marching. It provides three quality modes with varying performance/quality trade-offs.
+The SSR system implements screen-space reflections with multiple algorithm modes, ordered from simplest to most complex. It provides four modes with varying performance/quality trade-offs.
 
 **Key Features:**
-- Hi-Z accelerated ray marching for efficient depth intersection
+- Multiple ray marching algorithms (simple linear to Hi-Z accelerated)
 - GGX importance sampling for physically-based rough reflections
 - Temporal accumulation for noise reduction
 - Fresnel-weighted blending with IBL fallback
@@ -80,19 +80,33 @@ public:
 
 ## SSR Modes
 
-### Mode 0: HiZ Trace (Default)
+Modes are ordered from simplest to most complex (0 → 3).
 
-Single ray per pixel using perfect mirror reflection direction.
+### Mode 0: SimpleLinear
+
+Basic linear ray march without Hi-Z acceleration. Educational/debugging mode.
 
 **Characteristics:**
-- Fastest performance
+- Fixed stride stepping against full-res depth buffer
+- No Hi-Z pyramid required
+- Simplest algorithm, easiest to understand
+- Slower than Hi-Z modes (samples every step)
+
+**Use Case:** Learning, debugging, fallback when Hi-Z unavailable
+
+### Mode 1: HiZ Trace (Default)
+
+Single ray per pixel using Hi-Z accelerated ray marching.
+
+**Characteristics:**
+- Fast performance via hierarchical depth sampling
 - Best for smooth/mirror-like surfaces
 - May show aliasing on rough surfaces
 - No temporal noise
 
 **Use Case:** Real-time games, smooth reflective surfaces
 
-### Mode 1: Stochastic
+### Mode 2: Stochastic
 
 Multiple rays per pixel with GGX importance sampling.
 
@@ -108,7 +122,7 @@ Multiple rays per pixel with GGX importance sampling.
 
 **Use Case:** Cinematic rendering, rough metal/water
 
-### Mode 2: Temporal
+### Mode 3: Temporal
 
 Stochastic sampling + temporal history accumulation.
 
@@ -127,6 +141,25 @@ Stochastic sampling + temporal history accumulation.
 ---
 
 ## Algorithm Details
+
+### Simple Linear Ray Marching
+
+The SimpleLinear algorithm performs basic fixed-stride ray marching:
+
+```
+1. Transform ray to screen-space (start UV, end UV, depths)
+2. Calculate step size = normalize(rayDir) * texelSize * stride
+3. For each step (up to maxSteps):
+   a. Advance UV and depth by step size
+   b. Sample full-res depth buffer
+   c. If ray depth <= scene depth (reversed-Z):
+      - If within thickness threshold → HIT
+      - Else break (behind surface)
+4. Apply edge fade and distance fade to confidence
+```
+
+**Advantages:** Simple, no Hi-Z dependency, easy to debug
+**Disadvantages:** Slower (no acceleration), may miss thin features
 
 ### Hi-Z Ray Marching
 
@@ -278,6 +311,7 @@ finalColor = hdrColor + ssrContribution * (1.0 - metallic * 0.5 * blendWeight);
 
 | Mode | Quality | Approx. Cost |
 |------|---------|--------------|
+| SimpleLinear | High | ~1.0ms |
 | HiZ Trace | High | ~0.5ms |
 | Stochastic | High (4 rays) | ~1.5ms |
 | Temporal | High (2 rays) | ~1.0ms |
@@ -368,4 +402,4 @@ Potential enhancements for consideration:
 
 ---
 
-**Last Updated:** 2025-01-13
+**Last Updated:** 2025-01-14

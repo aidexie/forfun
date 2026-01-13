@@ -34,9 +34,10 @@ enum class ESSRQuality : int {
 // SSR Algorithm Mode
 // ============================================
 enum class ESSRMode : int {
-    HiZTrace = 0,       // Single ray Hi-Z tracing (default)
-    Stochastic = 1,     // Multiple rays with importance sampling
-    Temporal = 2        // Stochastic + temporal accumulation
+    SimpleLinear = 0,   // Simple linear ray march (no Hi-Z, educational)
+    HiZTrace = 1,       // Single ray Hi-Z tracing (default, fast)
+    Stochastic = 2,     // Multiple rays with importance sampling
+    Temporal = 3        // Stochastic + temporal accumulation (best quality)
 };
 
 // ============================================

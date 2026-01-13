@@ -25,8 +25,8 @@ cbuffer CB_HiZ : register(b0)
 // Source depth buffer (for CSCopyDepth)
 Texture2D<float> g_DepthBuffer : register(t0);
 
-// Source mip texture (for CSBuildMip)
-Texture2D<float> g_SrcMip : register(t0);
+// Source mip texture (for CSBuildMip) - read via UAV to avoid SRV/UAV state conflict
+RWTexture2D<float> g_SrcMipUAV : register(u1);
 
 // Destination mip (UAV)
 RWTexture2D<float> g_DstMip : register(u0);
@@ -58,6 +58,7 @@ void CSCopyDepth(uint3 DTid : SV_DispatchThreadID)
 // ============================================
 // For reversed-Z (near=1, far=0), MAX keeps the closest surface
 // This provides conservative depth bounds for ray marching
+// Uses UAV read to avoid SRV/UAV state conflict (texture stays in UAV state)
 [numthreads(8, 8, 1)]
 void CSBuildMip(uint3 DTid : SV_DispatchThreadID)
 {
@@ -68,14 +69,14 @@ void CSBuildMip(uint3 DTid : SV_DispatchThreadID)
     // Calculate source texel coordinates (2x2 region)
     uint2 srcBase = DTid.xy * 2;
 
-    // Load 4 texels from source mip
+    // Load 4 texels from source mip via UAV
     // Clamp to source bounds to handle edge cases
     uint2 srcMax = uint2(g_SrcMipSizeX - 1, g_SrcMipSizeY - 1);
 
-    float d00 = g_SrcMip.Load(int3(min(srcBase.x,     srcMax.x), min(srcBase.y,     srcMax.y), g_SrcMipLevel));
-    float d10 = g_SrcMip.Load(int3(min(srcBase.x + 1, srcMax.x), min(srcBase.y,     srcMax.y), g_SrcMipLevel));
-    float d01 = g_SrcMip.Load(int3(min(srcBase.x,     srcMax.x), min(srcBase.y + 1, srcMax.y), g_SrcMipLevel));
-    float d11 = g_SrcMip.Load(int3(min(srcBase.x + 1, srcMax.x), min(srcBase.y + 1, srcMax.y), g_SrcMipLevel));
+    float d00 = g_SrcMipUAV[uint2(min(srcBase.x,     srcMax.x), min(srcBase.y,     srcMax.y))];
+    float d10 = g_SrcMipUAV[uint2(min(srcBase.x + 1, srcMax.x), min(srcBase.y,     srcMax.y))];
+    float d01 = g_SrcMipUAV[uint2(min(srcBase.x,     srcMax.x), min(srcBase.y + 1, srcMax.y))];
+    float d11 = g_SrcMipUAV[uint2(min(srcBase.x + 1, srcMax.x), min(srcBase.y + 1, srcMax.y))];
 
     // MAX for reversed-Z: keeps the closest (largest depth value) surface
     // This is conservative for ray marching - if ray is in front of MAX depth,

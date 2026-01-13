@@ -390,23 +390,24 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
             ssrSettings.ApplyPreset(static_cast<ESSRQuality>(currentQuality));
         }
 
-        // Mode dropdown
-        static const char* modeNames[] = { "HiZ Trace", "Stochastic", "Temporal" };
+        // Mode dropdown (ordered simple to complex)
+        static const char* modeNames[] = { "Simple Linear", "HiZ Trace", "Stochastic", "Temporal" };
         int currentMode = static_cast<int>(ssrSettings.mode);
-        if (ImGui::Combo("Mode##SSR", &currentMode, modeNames, 3)) {
+        if (ImGui::Combo("Mode##SSR", &currentMode, modeNames, 4)) {
             ssrSettings.mode = static_cast<ESSRMode>(currentMode);
         }
 
         HelpTooltip(
-            "HiZ Trace: Single ray per pixel (fastest)\n"
-            "Stochastic: Multiple rays with GGX sampling (better quality)\n"
+            "Simple Linear: Basic ray march (educational/debug)\n"
+            "HiZ Trace: Single ray with Hi-Z acceleration (default)\n"
+            "Stochastic: Multiple rays with GGX sampling\n"
             "Temporal: Stochastic + history accumulation (best quality)");
 
         // Intensity slider (always visible)
         ImGui::SliderFloat("Intensity##SSR", &ssrSettings.intensity, 0.0f, 2.0f, "%.2f");
 
-        // Stochastic/Temporal settings
-        if (ssrSettings.mode != ESSRMode::HiZTrace) {
+        // Stochastic/Temporal settings (only for modes that use multiple rays)
+        if (ssrSettings.mode == ESSRMode::Stochastic || ssrSettings.mode == ESSRMode::Temporal) {
             if (ImGui::TreeNode("Stochastic Settings##SSR")) {
                 ImGui::SliderInt("Rays/Pixel##SSR", &ssrSettings.numRays, 1, 8);
                 ImGui::SliderFloat("BRDF Bias##SSR", &ssrSettings.brdfBias, 0.0f, 1.0f, "%.2f");

@@ -370,25 +370,27 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // 6. Deferred Lighting Pass
     // ============================================
     {
-        // Debug visualization mode or full lighting
         EGBufferDebugMode debugMode = CScene::Instance().GetLightSettings().gBufferDebugMode;
-        if (debugMode != EGBufferDebugMode::None) {
-            // Set HDR render target for debug vis
-            ITexture* hdrRT = m_offHDR.get();
-            cmdList->SetRenderTargets(1, &hdrRT, nullptr);
-            cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
-            cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
 
-            const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-            cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
+        // SSR debug modes require full lighting pipeline to have valid HDR data
+        bool isSSRDebug = (debugMode == EGBufferDebugMode::SSR_Result ||
+                          debugMode == EGBufferDebugMode::SSR_Confidence);
+        bool runLighting = (debugMode == EGBufferDebugMode::None || isSSRDebug);
 
-            renderDebugVisualization(ctx.width, ctx.height);
-        } else {
+        if (runLighting) {
             // Full deferred lighting
             m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
                                   m_offHDR.get(), ctx.width, ctx.height,
                                   &m_shadowPass, &m_clusteredLighting,
                                   ssaoTexture);
+        } else {
+            // Non-SSR debug modes: clear HDR to black
+            ITexture* hdrRT = m_offHDR.get();
+            cmdList->SetRenderTargets(1, &hdrRT, nullptr);
+            cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
+            cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
+            const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            cmdList->ClearRenderTarget(m_offHDR.get(), clearColor);
         }
     }
 
@@ -424,7 +426,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // Traces against HDR color buffer using Hi-Z acceleration
     if (m_ssrPass.GetSettings().enabled && m_hiZPass.GetSettings().enabled) {
-        CScopedDebugEvent evt(cmdList, L"SSR Pass");
+        //CScopedDebugEvent evt(cmdList, L"SSR Pass");
         m_ssrPass.Render(cmdList,
                          m_gbuffer.GetDepthBuffer(),
                          m_gbuffer.GetNormalRoughness(),
@@ -437,13 +439,27 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
                          ctx.camera.nearZ, ctx.camera.farZ);
 
         // Composite SSR results into HDR buffer
-        CScopedDebugEvent compEvt(cmdList, L"SSR Composite");
+        //CScopedDebugEvent compEvt(cmdList, L"SSR Composite");
         m_ssrPass.Composite(cmdList,
                             m_offHDR.get(),
                             m_gbuffer.GetWorldPosMetallic(),
                             m_gbuffer.GetNormalRoughness(),
                             ctx.width, ctx.height,
                             ctx.camera.position);
+    }
+
+    // ============================================
+    // 6.8. Debug Visualization (after SSR for valid SSR debug modes)
+    // ============================================
+    {
+        EGBufferDebugMode debugMode = CScene::Instance().GetLightSettings().gBufferDebugMode;
+        if (debugMode != EGBufferDebugMode::None) {
+            ITexture* hdrRT = m_offHDR.get();
+            cmdList->SetRenderTargets(1, &hdrRT, nullptr);
+            cmdList->SetViewport(0, 0, (float)ctx.width, (float)ctx.height);
+            cmdList->SetScissorRect(0, 0, ctx.width, ctx.height);
+            renderDebugVisualization(ctx.width, ctx.height);
+        }
     }
 
     // ============================================

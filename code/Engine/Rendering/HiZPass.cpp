@@ -203,6 +203,10 @@ void CHiZPass::BuildPyramid(ICommandList* cmdList,
         return;
     }
 
+    // Transition Hi-Z texture to UAV state for writing
+    // (It's in ShaderResource state from previous frame, or COMMON state on first use)
+    cmdList->Barrier(m_hiZTexture.get(), EResourceState::ShaderResource, EResourceState::UnorderedAccess);
+
     // Step 1: Copy depth buffer to mip 0
     {
         CScopedDebugEvent evt(cmdList, L"HiZ Copy Depth");
@@ -210,8 +214,11 @@ void CHiZPass::BuildPyramid(ICommandList* cmdList,
     }
 
     // Step 2: Build mip chain (mip 1 to mipCount-1)
+    // Each dispatch reads from previous mip and writes to current mip
+    // Need UAV barrier between dispatches to ensure writes are visible
     for (uint32_t mip = 1; mip < m_mipCount; ++mip) {
-        CScopedDebugEvent evt(cmdList, L"HiZ Build Mip");
+        // UAV barrier to ensure previous mip write is complete before reading
+        cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
         dispatchBuildMip(cmdList, mip);
     }
 
@@ -261,11 +268,11 @@ void CHiZPass::dispatchBuildMip(ICommandList* cmdList, uint32_t mipLevel) {
     // Set PSO
     cmdList->SetPipelineState(m_buildMipPSO.get());
 
-    // Bind previous mip as SRV (t0)
-    // Note: We bind the whole texture, shader uses srcMipLevel to sample correct mip
-    cmdList->SetShaderResource(EShaderStage::Compute, 0, m_hiZTexture.get());
+    // Bind previous mip as UAV for reading (u1)
+    // Using UAV read avoids SRV/UAV state conflict - texture stays in UAV state
+    cmdList->SetUnorderedAccessTextureMip(1, m_hiZTexture.get(), mipLevel - 1);
 
-    // Bind current mip as UAV (u0)
+    // Bind current mip as UAV for writing (u0)
     cmdList->SetUnorderedAccessTextureMip(0, m_hiZTexture.get(), mipLevel);
 
     // Set constant buffer
@@ -287,5 +294,5 @@ void CHiZPass::dispatchBuildMip(ICommandList* cmdList, uint32_t mipLevel) {
     cmdList->Dispatch(groupsX, groupsY, 1);
 
     // UAV barrier before next mip level reads this one
-    cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
+    //cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
 }
