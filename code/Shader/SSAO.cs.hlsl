@@ -146,15 +146,6 @@ bool IsSkyDepth(float depth) {
     return gUseReversedZ ? (depth <= 0.001) : (depth >= 0.999);
 }
 
-// Get closest depth from multiple samples
-// Standard-Z: min = closest, Reversed-Z: max = closest
-float GetClosestDepth(float d0, float d1, float d2, float d3) {
-    if (gUseReversedZ) {
-        return max(max(d0, d1), max(d2, d3));
-    }
-    return min(min(d0, d1), min(d2, d3));
-}
-
 // ============================================
 // GTAO Integral Functions
 // ============================================
@@ -210,7 +201,6 @@ float ComputeGTAO(float3 viewPos, float3 viewNormal, float2 uv, float2 noiseVec)
         float2 sliceDir;
         sliceDir.x = cosA * noiseVec.x - sinA * noiseVec.y;
         sliceDir.y = sinA * noiseVec.x + cosA * noiseVec.y;
-        // sliceDir = float2(0.0,1.0);
 
         // Convert to view-space direction on the tangent plane
         float3 tangent = normalize(float3(sliceDir.x, -sliceDir.y, 0.0));
@@ -523,53 +513,35 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
     float3 viewPos = ReconstructViewPos(uv, depth);
     float3 viewNormal = GetViewNormal(uv);
 
-    // ============================================
     // Debug Visualization Modes
-    // ============================================
-    if (gAlgorithm >= 100) 
-    {
+    if (gAlgorithm >= 100) {
         float debugValue = 0.0;
 
-        // if (gAlgorithm == SSAO_DEBUG_RAW_DEPTH) {
-        //     // Raw depth buffer value [0, 1]
-        //     // Near plane should be dark, far plane should be white
-        //     debugValue = depth;
-        // }
-        // else if (gAlgorithm == SSAO_DEBUG_LINEAR_DEPTH) {
-        //     // View-space Z (linear depth)
-        //     // Normalize to visible range (assume max 100 units)
-        //     debugValue = saturate(abs(viewPos.z) / 100.0);
-        // }
-        // else if (gAlgorithm == SSAO_DEBUG_VIEW_POS_Z) {
-        //     // View-space Z sign check
-        //     // If LEFT-HANDED: Z should be POSITIVE (into screen)
-        //     // If RIGHT-HANDED: Z should be NEGATIVE
-        //     // Output: positive Z = green tint, negative Z = red tint
-        //     // For grayscale: output normalized absolute Z
-        //     debugValue = viewPos.z > 0.0 ? saturate(viewPos.z / 50.0) : 0.0;
-        // }
-        // else if (gAlgorithm == SSAO_DEBUG_VIEW_NORMAL_Z) {
-        //     // View-space normal Z component
-        //     // Surfaces facing camera should have negative Z (toward camera)
-        //     // Output: facing camera = white, facing away = black
-        //     debugValue = saturate(-viewNormal.z);
-        // }
-        // else if (gAlgorithm == SSAO_DEBUG_SAMPLE_DIFF) 
-        {
-            // Test sample reconstruction accuracy
-            // Sample a nearby pixel and compare reconstructed positions
-            float2 offsetUV = uv + float2(gTexelSize.y * 5.0, 0.0);
-            // float2 offsetUV = uv;
-            if (offsetUV.x < 1.0) {
-                float sampleDepth = gDepth.SampleLevel(gPointSampler, offsetUV, 0).r;
-                if (sampleDepth < 1.0) {
-                    float3 samplePos = ReconstructViewPos(offsetUV, sampleDepth);
-                    // debugValue = saturate(samplePos.z / 50.0);
-                    // debugValue = sampleDepth*10;
-                    float3 diff = samplePos - viewPos;
-                    // // Show the XY distance (should be small for nearby pixels on same surface)
-                    debugValue = saturate(length(diff.xy) / gRadius);
+        switch (gAlgorithm) {
+            case SSAO_DEBUG_RAW_DEPTH:
+                debugValue = depth;
+                break;
+            case SSAO_DEBUG_LINEAR_DEPTH:
+                debugValue = saturate(abs(viewPos.z) / 100.0);
+                break;
+            case SSAO_DEBUG_VIEW_POS_Z:
+                debugValue = viewPos.z > 0.0 ? saturate(viewPos.z / 50.0) : 0.0;
+                break;
+            case SSAO_DEBUG_VIEW_NORMAL_Z:
+                debugValue = saturate(-viewNormal.z);
+                break;
+            case SSAO_DEBUG_SAMPLE_DIFF:
+            default: {
+                float2 offsetUV = uv + float2(gTexelSize.y * 5.0, 0.0);
+                if (offsetUV.x < 1.0) {
+                    float sampleDepth = gDepth.SampleLevel(gPointSampler, offsetUV, 0).r;
+                    if (sampleDepth < 1.0) {
+                        float3 samplePos = ReconstructViewPos(offsetUV, sampleDepth);
+                        float3 diff = samplePos - viewPos;
+                        debugValue = saturate(length(diff.xy) / gRadius);
+                    }
                 }
+                break;
             }
         }
 
@@ -577,141 +549,81 @@ void CSMain(uint3 dispatchThreadID : SV_DispatchThreadID) {
         return;
     }
 
-    // ============================================
-    // Normal SSAO Algorithm Selection
-    // ============================================
-
     // Sample noise for random rotation (tiles across screen)
     float2 noiseUV = uv * gNoiseScale;
     float2 noise = gNoise.SampleLevel(gPointSampler, noiseUV, 0).rg;
     float2 noiseVec = normalize(noise * 2.0 - 1.0);
 
-    // Select algorithm based on gAlgorithm
+    // Select algorithm
     float ao = 1.0;
-    if (gAlgorithm == SSAO_ALGORITHM_GTAO) {
-        ao = ComputeGTAO(viewPos, viewNormal, uv, noiseVec);
-    }
-    else if (gAlgorithm == SSAO_ALGORITHM_HBAO) {
-        ao = ComputeHBAO(viewPos, viewNormal, uv, noiseVec);
-    }
-    else if (gAlgorithm == SSAO_ALGORITHM_CRYTEK) {
-        ao = ComputeCrytekSSAO(viewPos, viewNormal, uv, noiseVec);
+    switch (gAlgorithm) {
+        case SSAO_ALGORITHM_GTAO:
+            ao = ComputeGTAO(viewPos, viewNormal, uv, noiseVec);
+            break;
+        case SSAO_ALGORITHM_HBAO:
+            ao = ComputeHBAO(viewPos, viewNormal, uv, noiseVec);
+            break;
+        case SSAO_ALGORITHM_CRYTEK:
+            ao = ComputeCrytekSSAO(viewPos, viewNormal, uv, noiseVec);
+            break;
     }
 
     gSSAOOutput[pixelCoord] = ao;
 }
 
 // ============================================
-// Bilateral Blur - Horizontal
+// Bilateral Blur (shared implementation)
 // ============================================
 
 static const float GAUSSIAN_WEIGHTS[5] = { 0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216 };
+
+// Compute bilateral blur contribution for a single sample
+void AccumulateBlurSample(float2 sampleUV, float centerDepth, inout float aoSum, inout float weightSum, int kernelIndex) {
+    float sampleDepth = gDepthInput.SampleLevel(gPointSampler, sampleUV, 0).r;
+    float sampleAO = gSSAOInput.SampleLevel(gPointSampler, sampleUV, 0).r;
+
+    float depthDiff = abs(centerDepth - sampleDepth);
+    float depthWeight = exp(-depthDiff * depthDiff / (gDepthSigma * gDepthSigma + 0.0001));
+
+    float weight = GAUSSIAN_WEIGHTS[kernelIndex] * depthWeight;
+    aoSum += sampleAO * weight;
+    weightSum += weight;
+}
+
+// Unified bilateral blur with direction parameter
+float BilateralBlur(float2 uv, float2 blurDir) {
+    float centerDepth = gDepthInput.SampleLevel(gPointSampler, uv, 0).r;
+    float centerAO = gSSAOInput.SampleLevel(gPointSampler, uv, 0).r;
+
+    // Skip sky (works for both standard-Z and reversed-Z)
+    if (centerDepth >= 0.999 || centerDepth <= 0.001) {
+        return 1.0;
+    }
+
+    float aoSum = centerAO * GAUSSIAN_WEIGHTS[0];
+    float weightSum = GAUSSIAN_WEIGHTS[0];
+
+    for (int i = 1; i <= gBlurRadius; i++) {
+        float2 offset = blurDir * float(i) * gBlurTexelSize;
+        AccumulateBlurSample(uv + offset, centerDepth, aoSum, weightSum, i);
+        AccumulateBlurSample(uv - offset, centerDepth, aoSum, weightSum, i);
+    }
+
+    return aoSum / max(weightSum, 0.0001);
+}
 
 [numthreads(8, 8, 1)]
 void CSBlurH(uint3 dispatchThreadID : SV_DispatchThreadID) {
     uint2 pixelCoord = dispatchThreadID.xy;
     float2 uv = (float2(pixelCoord) + 0.5) * gBlurTexelSize;
-
-    float centerDepth = gDepthInput.SampleLevel(gPointSampler, uv, 0).r;
-    float centerAO = gSSAOInput.SampleLevel(gPointSampler, uv, 0).r;
-
-    // Skip sky (works for both standard-Z and reversed-Z)
-    if (centerDepth >= 0.999 || centerDepth <= 0.001) {
-        gSSAOOutput[pixelCoord] = 1.0;
-        return;
-    }
-
-    float aoSum = centerAO * GAUSSIAN_WEIGHTS[0];
-    float weightSum = GAUSSIAN_WEIGHTS[0];
-
-    // Horizontal blur
-    for (int i = 1; i <= gBlurRadius; i++) {
-        // Positive direction
-        {
-            float2 sampleUV = uv + float2(float(i), 0.0) * gBlurTexelSize;
-            float sampleDepth = gDepthInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-            float sampleAO = gSSAOInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-
-            // Bilateral weight based on depth difference
-            float depthDiff = abs(centerDepth - sampleDepth);
-            float depthWeight = exp(-depthDiff * depthDiff / (gDepthSigma * gDepthSigma + 0.0001));
-
-            float weight = GAUSSIAN_WEIGHTS[i] * depthWeight;
-            aoSum += sampleAO * weight;
-            weightSum += weight;
-        }
-
-        // Negative direction
-        {
-            float2 sampleUV = uv - float2(float(i), 0.0) * gBlurTexelSize;
-            float sampleDepth = gDepthInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-            float sampleAO = gSSAOInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-
-            float depthDiff = abs(centerDepth - sampleDepth);
-            float depthWeight = exp(-depthDiff * depthDiff / (gDepthSigma * gDepthSigma + 0.0001));
-
-            float weight = GAUSSIAN_WEIGHTS[i] * depthWeight;
-            aoSum += sampleAO * weight;
-            weightSum += weight;
-        }
-    }
-
-    gSSAOOutput[pixelCoord] = aoSum / max(weightSum, 0.0001);
+    gSSAOOutput[pixelCoord] = BilateralBlur(uv, float2(1.0, 0.0));
 }
-
-// ============================================
-// Bilateral Blur - Vertical
-// ============================================
 
 [numthreads(8, 8, 1)]
 void CSBlurV(uint3 dispatchThreadID : SV_DispatchThreadID) {
     uint2 pixelCoord = dispatchThreadID.xy;
     float2 uv = (float2(pixelCoord) + 0.5) * gBlurTexelSize;
-
-    float centerDepth = gDepthInput.SampleLevel(gPointSampler, uv, 0).r;
-    float centerAO = gSSAOInput.SampleLevel(gPointSampler, uv, 0).r;
-
-    // Skip sky (works for both standard-Z and reversed-Z)
-    if (centerDepth >= 0.999 || centerDepth <= 0.001) {
-        gSSAOOutput[pixelCoord] = 1.0;
-        return;
-    }
-
-    float aoSum = centerAO * GAUSSIAN_WEIGHTS[0];
-    float weightSum = GAUSSIAN_WEIGHTS[0];
-
-    // Vertical blur
-    for (int i = 1; i <= gBlurRadius; i++) {
-        // Positive direction
-        {
-            float2 sampleUV = uv + float2(0.0, float(i)) * gBlurTexelSize;
-            float sampleDepth = gDepthInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-            float sampleAO = gSSAOInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-
-            float depthDiff = abs(centerDepth - sampleDepth);
-            float depthWeight = exp(-depthDiff * depthDiff / (gDepthSigma * gDepthSigma + 0.0001));
-
-            float weight = GAUSSIAN_WEIGHTS[i] * depthWeight;
-            aoSum += sampleAO * weight;
-            weightSum += weight;
-        }
-
-        // Negative direction
-        {
-            float2 sampleUV = uv - float2(0.0, float(i)) * gBlurTexelSize;
-            float sampleDepth = gDepthInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-            float sampleAO = gSSAOInput.SampleLevel(gPointSampler, sampleUV, 0).r;
-
-            float depthDiff = abs(centerDepth - sampleDepth);
-            float depthWeight = exp(-depthDiff * depthDiff / (gDepthSigma * gDepthSigma + 0.0001));
-
-            float weight = GAUSSIAN_WEIGHTS[i] * depthWeight;
-            aoSum += sampleAO * weight;
-            weightSum += weight;
-        }
-    }
-
-    gSSAOOutput[pixelCoord] = aoSum / max(weightSum, 0.0001);
+    gSSAOOutput[pixelCoord] = BilateralBlur(uv, float2(0.0, 1.0));
 }
 
 // ============================================
