@@ -435,6 +435,15 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
                          ctx.camera.GetViewMatrix(),
                          ctx.camera.GetProjectionMatrix(),
                          ctx.camera.nearZ, ctx.camera.farZ);
+
+        // Composite SSR results into HDR buffer
+        CScopedDebugEvent compEvt(cmdList, L"SSR Composite");
+        m_ssrPass.Composite(cmdList,
+                            m_offHDR.get(),
+                            m_gbuffer.GetWorldPosMetallic(),
+                            m_gbuffer.GetNormalRoughness(),
+                            ctx.width, ctx.height,
+                            ctx.camera.position);
     }
 
     // ============================================
@@ -552,9 +561,10 @@ void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
     m_offscreenWidth = w;
     m_offscreenHeight = h;
 
-    // HDR Render Target
+    // HDR Render Target (with UAV for SSR composite)
     {
         TextureDesc desc = TextureDesc::RenderTarget(w, h, ETextureFormat::R16G16B16A16_FLOAT);
+        desc.usage = desc.usage | ETextureUsage::UnorderedAccess;  // For SSR composite
         desc.debugName = "Deferred_HDR_RT";
         // Set optimized clear color (matches ClearRenderTarget calls)
         desc.clearColor[0] = 0.0f;

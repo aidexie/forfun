@@ -34,6 +34,7 @@ struct SSSRSettings {
     float fadeStart = 0.8f;         // Edge fade start (0-1)
     float fadeEnd = 1.0f;           // Edge fade end (0-1)
     float roughnessFade = 0.5f;     // Roughness cutoff for SSR
+    float intensity = 1.0f;         // SSR intensity multiplier
     bool debugVisualize = false;    // Show SSR debug mode
 };
 
@@ -62,6 +63,20 @@ struct alignas(16) CB_SSR {
     int hiZMipCount;                     // Number of Hi-Z mip levels
     uint32_t useReversedZ;               // 0 = standard-Z, 1 = reversed-Z
     float _pad[2];                       // Padding to 16-byte alignment
+};
+
+// ============================================
+// Constant buffer for SSR composite shader (b0)
+// ============================================
+struct alignas(16) CB_SSRComposite {
+    DirectX::XMFLOAT2 screenSize;        // Full resolution (width, height)
+    DirectX::XMFLOAT2 texelSize;         // 1.0 / screenSize
+    float ssrIntensity;                  // Overall SSR intensity multiplier
+    float iblFallbackWeight;             // IBL weight when SSR misses (0-1)
+    float roughnessFade;                 // Roughness cutoff for reflections
+    float _pad0;
+    DirectX::XMFLOAT3 camPosWS;          // Camera world position
+    float _pad1;
 };
 
 // ============================================
@@ -115,6 +130,15 @@ public:
                 const DirectX::XMMATRIX& proj,
                 float nearZ, float farZ);
 
+    // Composite SSR results into HDR buffer
+    // Blends SSR reflections with existing IBL based on confidence
+    void Composite(RHI::ICommandList* cmdList,
+                   RHI::ITexture* hdrBuffer,          // HDR input/output
+                   RHI::ITexture* worldPosMetallic,   // G-Buffer RT0
+                   RHI::ITexture* normalRoughness,    // G-Buffer RT1
+                   uint32_t width, uint32_t height,
+                   const DirectX::XMFLOAT3& camPosWS);
+
     // ============================================
     // Output
     // ============================================
@@ -131,19 +155,22 @@ public:
 
 private:
     void createShaders();
+    void createCompositeShader();
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
     void createFallbackTexture();
 
     // ============================================
-    // Compute Shader
+    // Compute Shaders
     // ============================================
     RHI::ShaderPtr m_ssrCS;             // Main SSR compute shader
+    RHI::ShaderPtr m_compositeCS;       // SSR composite compute shader
 
     // ============================================
-    // Pipeline State
+    // Pipeline States
     // ============================================
     RHI::PipelineStatePtr m_ssrPSO;
+    RHI::PipelineStatePtr m_compositePSO;
 
     // ============================================
     // Textures

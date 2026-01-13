@@ -22,6 +22,7 @@ bool CSSRPass::Initialize() {
     CFFLog::Info("[SSRPass] Initializing...");
 
     createShaders();
+    createCompositeShader();
     createSamplers();
     createFallbackTexture();
 
@@ -33,6 +34,8 @@ bool CSSRPass::Initialize() {
 void CSSRPass::Shutdown() {
     m_ssrCS.reset();
     m_ssrPSO.reset();
+    m_compositeCS.reset();
+    m_compositePSO.reset();
 
     m_ssrResult.reset();
     m_blackFallback.reset();
@@ -261,4 +264,106 @@ void CSSRPass::createFallbackTexture() {
     if (!m_blackFallback) {
         CFFLog::Warning("[SSRPass] Failed to create black fallback texture");
     }
+}
+
+void CSSRPass::createCompositeShader() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+#ifdef _DEBUG
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSRComposite.cs.hlsl";
+
+    // Compile SSR composite compute shader
+    SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSMain", "cs_5_0", nullptr, debugShaders);
+    if (!compiled.success) {
+        CFFLog::Error("[SSRPass] SSR composite shader compilation failed: %s", compiled.errorMessage.c_str());
+        return;
+    }
+
+    ShaderDesc shaderDesc;
+    shaderDesc.type = EShaderType::Compute;
+    shaderDesc.bytecode = compiled.bytecode.data();
+    shaderDesc.bytecodeSize = compiled.bytecode.size();
+    shaderDesc.debugName = "SSRComposite_CS";
+    m_compositeCS.reset(ctx->CreateShader(shaderDesc));
+
+    if (!m_compositeCS) {
+        CFFLog::Error("[SSRPass] Failed to create SSR composite shader");
+        return;
+    }
+
+    // Create PSO
+    ComputePipelineDesc psoDesc;
+    psoDesc.computeShader = m_compositeCS.get();
+    psoDesc.debugName = "SSRComposite_PSO";
+    m_compositePSO.reset(ctx->CreateComputePipelineState(psoDesc));
+
+    if (!m_compositePSO) {
+        CFFLog::Error("[SSRPass] Failed to create SSR composite PSO");
+        return;
+    }
+
+    CFFLog::Info("[SSRPass] Composite shader compiled successfully");
+}
+
+void CSSRPass::Composite(ICommandList* cmdList,
+                          ITexture* hdrBuffer,
+                          ITexture* worldPosMetallic,
+                          ITexture* normalRoughness,
+                          uint32_t width, uint32_t height,
+                          const XMFLOAT3& camPosWS) {
+    if (!m_initialized || !cmdList) return;
+
+    // Check if SSR is enabled and composite PSO exists
+    if (!m_settings.enabled || !m_compositePSO) {
+        return;
+    }
+
+    // Validate inputs
+    if (!hdrBuffer || !m_ssrResult || !worldPosMetallic || !normalRoughness) {
+        return;
+    }
+
+    // Transition HDR buffer to UAV state
+    cmdList->Barrier(hdrBuffer, EResourceState::ShaderResource, EResourceState::UnorderedAccess);
+
+    // Set PSO
+    cmdList->SetPipelineState(m_compositePSO.get());
+
+    // Bind resources
+    cmdList->SetShaderResource(EShaderStage::Compute, 0, hdrBuffer);  // Will be bound as UAV for output
+    cmdList->SetShaderResource(EShaderStage::Compute, 1, m_ssrResult.get());
+    cmdList->SetShaderResource(EShaderStage::Compute, 2, worldPosMetallic);
+    cmdList->SetShaderResource(EShaderStage::Compute, 3, normalRoughness);
+
+    cmdList->SetUnorderedAccessTexture(0, hdrBuffer);
+
+    cmdList->SetSampler(EShaderStage::Compute, 0, m_linearSampler.get());
+    cmdList->SetSampler(EShaderStage::Compute, 1, m_pointSampler.get());
+
+    // Fill constant buffer
+    CB_SSRComposite cb;
+    cb.screenSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
+    cb.texelSize = XMFLOAT2(1.0f / width, 1.0f / height);
+    cb.ssrIntensity = m_settings.intensity;
+    cb.iblFallbackWeight = 1.0f;  // Keep full IBL when SSR misses
+    cb.roughnessFade = m_settings.roughnessFade;
+    cb._pad0 = 0.0f;
+    cb.camPosWS = camPosWS;
+    cb._pad1 = 0.0f;
+
+    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
+
+    // Dispatch compute shader
+    uint32_t groupsX = (width + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
+    uint32_t groupsY = (height + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
+    cmdList->Dispatch(groupsX, groupsY, 1);
+
+    // Transition HDR buffer back to RTV/SRV state
+    cmdList->Barrier(hdrBuffer, EResourceState::UnorderedAccess, EResourceState::RenderTarget);
 }
