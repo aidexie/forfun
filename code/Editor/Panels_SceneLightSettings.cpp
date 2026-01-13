@@ -381,16 +381,41 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
     ImGui::Checkbox("Enable##SSR", &ssrSettings.enabled);
 
     if (ssrSettings.enabled) {
+        // Quality preset dropdown
+        static const char* qualityNames[] = { "Low", "Medium", "High", "Ultra", "Custom" };
+        int currentQuality = static_cast<int>(ssrSettings.quality);
+
         ImGui::PushItemWidth(150);
-        ImGui::SliderFloat("Max Distance##SSR", &ssrSettings.maxDistance, 10.0f, 200.0f, "%.1f");
-        ImGui::SliderFloat("Thickness##SSR", &ssrSettings.thickness, 0.01f, 2.0f, "%.2f");
-        ImGui::SliderFloat("Stride##SSR", &ssrSettings.stride, 0.5f, 4.0f, "%.1f");
-        ImGui::SliderInt("Max Steps##SSR", &ssrSettings.maxSteps, 16, 128);
-        ImGui::SliderInt("Binary Steps##SSR", &ssrSettings.binarySearchSteps, 0, 16);
-        ImGui::SliderFloat("Roughness Fade##SSR", &ssrSettings.roughnessFade, 0.1f, 1.0f, "%.2f");
+        if (ImGui::Combo("Quality##SSR", &currentQuality, qualityNames, 5)) {
+            ssrSettings.ApplyPreset(static_cast<ESSRQuality>(currentQuality));
+        }
+
+        // Intensity slider (always visible)
+        ImGui::SliderFloat("Intensity##SSR", &ssrSettings.intensity, 0.0f, 2.0f, "%.2f");
+
+        // Advanced settings (collapsible)
+        if (ImGui::TreeNode("Advanced Settings##SSR")) {
+            // Mark as custom when user changes advanced settings
+            if (ImGui::SliderFloat("Max Distance##SSR", &ssrSettings.maxDistance, 10.0f, 200.0f, "%.1f"))
+                ssrSettings.quality = ESSRQuality::Custom;
+            if (ImGui::SliderFloat("Thickness##SSR", &ssrSettings.thickness, 0.01f, 2.0f, "%.2f"))
+                ssrSettings.quality = ESSRQuality::Custom;
+            if (ImGui::SliderFloat("Stride##SSR", &ssrSettings.stride, 0.5f, 4.0f, "%.1f"))
+                ssrSettings.quality = ESSRQuality::Custom;
+            if (ImGui::SliderInt("Max Steps##SSR", &ssrSettings.maxSteps, 16, 128))
+                ssrSettings.quality = ESSRQuality::Custom;
+            if (ImGui::SliderInt("Binary Steps##SSR", &ssrSettings.binarySearchSteps, 0, 16))
+                ssrSettings.quality = ESSRQuality::Custom;
+            if (ImGui::SliderFloat("Roughness Fade##SSR", &ssrSettings.roughnessFade, 0.1f, 1.0f, "%.2f"))
+                ssrSettings.quality = ESSRQuality::Custom;
+
+            ImGui::TreePop();
+        }
         ImGui::PopItemWidth();
 
         HelpTooltip(
+            "Quality: Preset balancing quality vs performance\n"
+            "Intensity: SSR reflection brightness multiplier\n"
             "Max Distance: Maximum ray travel distance (view-space)\n"
             "Thickness: Surface thickness for hit detection\n"
             "Stride: Initial ray step size (pixels)\n"

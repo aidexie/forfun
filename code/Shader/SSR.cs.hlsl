@@ -5,7 +5,7 @@
 //            Morgan McGuire & Michael Mara (2014)
 //
 // Uses Hi-Z pyramid for efficient ray-depth intersection testing.
-// Reversed-Z aware (near=1.0, far=0.0)
+// Optimized for reversed-Z (near=1.0, far=0.0)
 
 // ============================================
 // Constant Buffer
@@ -31,7 +31,7 @@ cbuffer CB_SSR : register(b0)
     float g_NearZ;             // Camera near plane
     float g_FarZ;              // Camera far plane
     int g_HiZMipCount;         // Number of Hi-Z mip levels
-    uint g_UseReversedZ;       // 0 = standard-Z, 1 = reversed-Z
+    uint g_UseReversedZ;       // 0 = standard-Z, 1 = reversed-Z (always 1)
     float2 g_Pad;
 };
 
@@ -80,101 +80,71 @@ float SampleHiZ(float2 uv, int mipLevel)
     return g_HiZPyramid.SampleLevel(g_PointSampler, uv, mipLevel);
 }
 
-// Linear depth from reversed-Z buffer value
-float LinearizeDepth(float depth)
-{
-    if (g_UseReversedZ)
-    {
-        // Reversed-Z: near=1.0, far=0.0
-        // z = near * far / (far - depth * (far - near))
-        return g_NearZ * g_FarZ / (g_FarZ - depth * (g_FarZ - g_NearZ));
-    }
-    else
-    {
-        // Standard-Z: near=0.0, far=1.0
-        return g_NearZ * g_FarZ / (g_FarZ - depth * (g_FarZ - g_NearZ));
-    }
-}
-
-// Check if UV is within screen bounds
+// Check if UV is within screen bounds with small margin
 bool IsValidUV(float2 uv)
 {
-    return all(uv >= 0.0) && all(uv <= 1.0);
+    return all(uv >= 0.001) && all(uv <= 0.999);
 }
 
 // ============================================
 // Hi-Z Accelerated Ray March
 // ============================================
 // Returns: hit UV in xy, hit depth in z, hit confidence in w
+// Optimized for reversed-Z (larger depth = closer to camera)
 float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
 {
-    // Transform ray to screen-space
+    // Transform ray endpoints to screen-space
     float3 rayEnd = rayOrigin + rayDir * g_MaxDistance;
-
     float3 ssStart = ViewToScreen(rayOrigin);
     float3 ssEnd = ViewToScreen(rayEnd);
 
-    // Early out if ray points away from screen
+    // Early out if both endpoints are off-screen
     if (!IsValidUV(ssEnd.xy) && !IsValidUV(ssStart.xy))
         return float4(0, 0, 0, 0);
 
     // Ray in screen-space (UV coordinates)
-    float2 rayStartUV = ssStart.xy;
-    float2 rayEndUV = ssEnd.xy;
-    float2 rayDirUV = rayEndUV - rayStartUV;
+    float2 rayDirUV = ssEnd.xy - ssStart.xy;
 
     // Handle degenerate rays
     float rayLength = length(rayDirUV * g_ScreenSize);
     if (rayLength < 0.001)
         return float4(0, 0, 0, 0);
 
-    // Normalize ray direction in pixel space
+    // Precompute ray stepping parameters
     float2 rayDirPixels = normalize(rayDirUV * g_ScreenSize);
     float2 rayStepUV = rayDirPixels * g_TexelSize;
+    float depthPerPixel = (ssEnd.z - ssStart.z) / rayLength;
 
-    // Calculate depth gradient for ray
-    float depthStart = ssStart.z;
-    float depthEnd = ssEnd.z;
-    float depthDelta = depthEnd - depthStart;
-    float depthPerPixel = depthDelta / rayLength;
-
-    // Start marching
-    float2 currentUV = rayStartUV + rayStepUV * g_Stride * jitter;
-    float currentDepth = depthStart + depthPerPixel * g_Stride * jitter;
+    // Initialize ray state
     float stride = g_Stride;
+    float2 currentUV = ssStart.xy + rayStepUV * stride * jitter;
+    float currentDepth = ssStart.z + depthPerPixel * stride * jitter;
     int mipLevel = 0;
 
     float3 hitResult = float3(0, 0, 0);
     bool hit = false;
+    float thicknessThreshold = g_Thickness * 0.01;
 
+    // Main ray march loop
+    [loop]
     for (int i = 0; i < g_MaxSteps && !hit; ++i)
     {
+        // Bounds check
         if (!IsValidUV(currentUV))
             break;
 
         // Sample Hi-Z at current mip level
         float sceneDepth = SampleHiZ(currentUV, mipLevel);
 
-        // Thickness test (reversed-Z: ray depth > scene depth means behind surface)
-        float depthDiff;
-        if (g_UseReversedZ)
-        {
-            // Reversed-Z: larger depth = closer
-            // Hit if ray is behind or at surface (ray depth <= scene depth)
-            // and within thickness (ray depth >= scene depth - thickness_in_depth_space)
-            depthDiff = currentDepth - sceneDepth;
-        }
-        else
-        {
-            depthDiff = sceneDepth - currentDepth;
-        }
-
-        // Check intersection
-        bool behind = (g_UseReversedZ) ? (currentDepth <= sceneDepth) : (currentDepth >= sceneDepth);
-        bool withinThickness = abs(depthDiff) < g_Thickness * 0.01;
+        // Reversed-Z: ray is behind surface when rayDepth <= sceneDepth
+        // (larger depth values are closer to camera)
+        bool behind = currentDepth <= sceneDepth;
+        float depthDiff = currentDepth - sceneDepth;
 
         if (behind)
         {
+            bool withinThickness = abs(depthDiff) < thicknessThreshold;
+
             if (mipLevel == 0 && withinThickness)
             {
                 // Found hit at finest level
@@ -183,16 +153,16 @@ float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
             }
             else if (mipLevel > 0)
             {
-                // Refine at lower mip level
+                // Refine at lower mip level - step back and reduce stride
                 currentUV -= rayStepUV * stride;
                 currentDepth -= depthPerPixel * stride;
                 stride *= 0.5;
-                mipLevel = max(0, mipLevel - 1);
+                mipLevel--;
             }
             else
             {
-                // Behind but not within thickness - continue
-                stride *= 2.0;
+                // Behind but not within thickness - continue with larger stride
+                stride = min(stride * 2.0, 16.0);
                 mipLevel = min(mipLevel + 1, g_HiZMipCount - 1);
             }
         }
@@ -202,7 +172,7 @@ float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
             currentUV += rayStepUV * stride;
             currentDepth += depthPerPixel * stride;
 
-            // Increase stride and mip when safe
+            // Increase stride and mip when safe (after initial steps)
             if (i > 4)
             {
                 stride = min(stride * 1.5, 16.0);
@@ -211,30 +181,28 @@ float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
         }
     }
 
-    // Binary search refinement
-    if (hit)
+    // Binary search refinement for precise hit location
+    if (hit && g_BinarySearchSteps > 0)
     {
         float2 searchUV = hitResult.xy;
         float searchDepth = hitResult.z;
         float searchStride = stride * 0.5;
 
-        for (int b = 0; b < g_BinarySearchSteps; ++b)
+        [unroll]
+        for (int b = 0; b < 8; ++b)  // Unroll for common case
         {
+            if (b >= g_BinarySearchSteps) break;
+
             float sceneDepth = g_DepthBuffer.SampleLevel(g_PointSampler, searchUV, 0);
+            bool behind = searchDepth <= sceneDepth;
 
-            bool behind = (g_UseReversedZ) ? (searchDepth <= sceneDepth) : (searchDepth >= sceneDepth);
+            float2 step = rayStepUV * searchStride;
+            float depthStep = depthPerPixel * searchStride;
 
-            if (behind)
-            {
-                searchUV -= rayStepUV * searchStride;
-                searchDepth -= depthPerPixel * searchStride;
-            }
-            else
-            {
-                searchUV += rayStepUV * searchStride;
-                searchDepth += depthPerPixel * searchStride;
-            }
-
+            // Branchless update
+            float dir = behind ? -1.0 : 1.0;
+            searchUV += step * dir;
+            searchDepth += depthStep * dir;
             searchStride *= 0.5;
         }
 
@@ -247,7 +215,7 @@ float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
 
     if (hit)
     {
-        // Edge fade
+        // Edge fade - smooth falloff at screen edges
         float2 edgeFade = 1.0 - pow(abs(hitResult.xy * 2.0 - 1.0), 8.0);
         confidence *= min(edgeFade.x, edgeFade.y);
 
@@ -257,7 +225,7 @@ float4 HiZTrace(float3 rayOrigin, float3 rayDir, float jitter)
         float distFade = 1.0 - saturate(hitDist / g_MaxDistance);
         confidence *= distFade;
 
-        // Fade based on ray direction (grazing angles less reliable)
+        // Backface fade - reduce confidence for grazing hit angles
         float3 hitNormal = g_NormalBuffer.SampleLevel(g_PointSampler, hitResult.xy, 0).xyz * 2.0 - 1.0;
         float backfaceFade = saturate(dot(-rayDir, hitNormal) + 0.1);
         confidence *= backfaceFade;
@@ -280,27 +248,29 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
 
     float2 uv = (DTid.xy + 0.5) * g_TexelSize;
 
-    // Sample G-Buffer
-    float depth = g_DepthBuffer.SampleLevel(g_PointSampler, uv, 0);
+    // Sample G-Buffer (single fetch for normal + roughness)
     float4 normalRoughness = g_NormalBuffer.SampleLevel(g_PointSampler, uv, 0);
-
-    float3 normalWS = normalRoughness.xyz * 2.0 - 1.0;
     float roughness = normalRoughness.w;
 
-    // Early out for sky (depth at far plane)
-    bool isSky = (g_UseReversedZ) ? (depth < 0.0001) : (depth > 0.9999);
-    if (isSky)
-    {
-        g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
-        return;
-    }
-
-    // Early out for rough surfaces
+    // Early out for rough surfaces (most common rejection case)
     if (roughness > g_RoughnessFade)
     {
         g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
         return;
     }
+
+    // Sample depth
+    float depth = g_DepthBuffer.SampleLevel(g_PointSampler, uv, 0);
+
+    // Early out for sky (reversed-Z: far plane is 0)
+    if (depth < 0.0001)
+    {
+        g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    // Unpack normal
+    float3 normalWS = normalRoughness.xyz * 2.0 - 1.0;
 
     // Reconstruct view-space position
     float3 viewPos = ScreenToView(uv, depth);
@@ -312,8 +282,9 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
     float3 viewDir = normalize(viewPos);
     float3 reflectDir = reflect(viewDir, normalVS);
 
-    // Only trace forward-facing reflections
-    if (reflectDir.z > 0.0)  // Pointing away from camera
+    // Only trace forward-facing reflections (towards camera)
+    // In view-space, negative Z points towards camera
+    if (reflectDir.z > 0.0)
     {
         g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
         return;
@@ -332,8 +303,9 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
         reflectionColor = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
     }
 
-    // Apply roughness fade
+    // Apply roughness fade (quadratic for smoother falloff)
     float roughnessMask = 1.0 - saturate(roughness / g_RoughnessFade);
+    roughnessMask *= roughnessMask;
     float confidence = hitResult.w * roughnessMask;
 
     // Output: reflection color + confidence

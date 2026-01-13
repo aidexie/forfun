@@ -20,10 +20,22 @@ namespace SSRConfig {
 }
 
 // ============================================
+// SSR Quality Preset
+// ============================================
+enum class ESSRQuality : int {
+    Low = 0,        // Fast, 32 steps, 4 binary
+    Medium = 1,     // Balanced, 48 steps, 6 binary
+    High = 2,       // Quality, 64 steps, 8 binary
+    Ultra = 3,      // Maximum, 96 steps, 12 binary
+    Custom = 4      // User-defined settings
+};
+
+// ============================================
 // SSR Settings (exposed to editor)
 // ============================================
 struct SSSRSettings {
     bool enabled = true;            // Enable/disable SSR
+    ESSRQuality quality = ESSRQuality::High;  // Quality preset
     float maxDistance = 50.0f;      // Maximum ray distance (view-space)
     float thickness = 0.5f;         // Surface thickness for hit detection
     float stride = 1.0f;            // Initial step stride (pixels)
@@ -36,6 +48,36 @@ struct SSSRSettings {
     float roughnessFade = 0.5f;     // Roughness cutoff for SSR
     float intensity = 1.0f;         // SSR intensity multiplier
     bool debugVisualize = false;    // Show SSR debug mode
+
+    // Apply quality preset
+    void ApplyPreset(ESSRQuality preset) {
+        quality = preset;
+        switch (preset) {
+            case ESSRQuality::Low:
+                maxSteps = 32;
+                binarySearchSteps = 4;
+                stride = 2.0f;
+                break;
+            case ESSRQuality::Medium:
+                maxSteps = 48;
+                binarySearchSteps = 6;
+                stride = 1.5f;
+                break;
+            case ESSRQuality::High:
+                maxSteps = 64;
+                binarySearchSteps = 8;
+                stride = 1.0f;
+                break;
+            case ESSRQuality::Ultra:
+                maxSteps = 96;
+                binarySearchSteps = 12;
+                stride = 0.5f;
+                break;
+            case ESSRQuality::Custom:
+                // Keep current settings
+                break;
+        }
+    }
 };
 
 // ============================================
