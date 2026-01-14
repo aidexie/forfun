@@ -386,7 +386,7 @@ float4 SimpleLinearTrace(float3 rayOrigin, float3 rayDir)
         confidence *= distFade;
     }
 
-    return float4(hitResult.xy, hitResult.z, confidence);
+    return float4(hitResult.xyz, confidence);
 }
 
 // ============================================
@@ -554,7 +554,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
     }
 
     // Unpack normal
-    float3 normalWS = normalRoughness.xyz * 2.0 - 1.0;
+    float3 normalWS = normalRoughness.xyz;
 
     // Reconstruct view-space position
     float3 viewPos = ScreenToView(uv, depth);
@@ -574,9 +574,9 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
         float3 reflectDir = reflect(viewDir, normalVS);
 
         // Only trace forward-facing reflections (towards camera)
-        if (reflectDir.z > 0.0)
+        if (reflectDir.z < 0.0)
         {
-            g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
+            g_SSROutput[DTid.xy] = float4(0.0, 0, 0, 0);
             return;
         }
 
@@ -603,7 +603,7 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
 
         // Only trace forward-facing reflections (towards camera)
         // In view-space, negative Z points towards camera
-        if (reflectDir.z > 0.0)
+        if (reflectDir.z < 0.0)
         {
             g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
             return;
