@@ -194,6 +194,7 @@ DXGI_FORMAT ToDXGIFormat(ETextureFormat format) {
     switch (format) {
         case ETextureFormat::Unknown:               return DXGI_FORMAT_UNKNOWN;
         case ETextureFormat::R8_UNORM:              return DXGI_FORMAT_R8_UNORM;
+        case ETextureFormat::R8G8_UNORM:            return DXGI_FORMAT_R8G8_UNORM;
         case ETextureFormat::R8G8B8A8_UNORM:        return DXGI_FORMAT_R8G8B8A8_UNORM;
         case ETextureFormat::R8G8B8A8_UNORM_SRGB:   return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
         case ETextureFormat::R8G8B8A8_TYPELESS:     return DXGI_FORMAT_R8G8B8A8_TYPELESS;
@@ -229,6 +230,7 @@ ETextureFormat FromDXGIFormat(DXGI_FORMAT format) {
     switch (format) {
         case DXGI_FORMAT_UNKNOWN:               return ETextureFormat::Unknown;
         case DXGI_FORMAT_R8_UNORM:              return ETextureFormat::R8_UNORM;
+        case DXGI_FORMAT_R8G8_UNORM:            return ETextureFormat::R8G8_UNORM;
         case DXGI_FORMAT_R8G8B8A8_UNORM:        return ETextureFormat::R8G8B8A8_UNORM;
         case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:   return ETextureFormat::R8G8B8A8_UNORM_SRGB;
         case DXGI_FORMAT_R8G8B8A8_TYPELESS:     return ETextureFormat::R8G8B8A8_TYPELESS;

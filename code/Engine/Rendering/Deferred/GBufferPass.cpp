@@ -246,7 +246,8 @@ void CGBufferPass::Render(
 
     // Update frame constants
     XMMATRIX view = camera.GetViewMatrix();
-    XMMATRIX proj = camera.GetProjectionMatrix();
+    // Use jittered projection for TAA (returns normal projection if TAA disabled)
+    XMMATRIX proj = camera.GetJitteredProjectionMatrix(width, height);
 
     CB_GBufferFrame frameData;
     frameData.view = XMMatrixTranspose(view);

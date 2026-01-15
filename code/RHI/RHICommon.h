@@ -115,6 +115,7 @@ enum class ETextureFormat {
     Unknown,
     // Color formats
     R8_UNORM,
+    R8G8_UNORM,
     R8G8B8A8_UNORM,
     R8G8B8A8_UNORM_SRGB,
     R8G8B8A8_TYPELESS,      // For creating views with different formats
@@ -149,6 +150,7 @@ enum class ETextureFormat {
 inline uint32_t GetBytesPerPixel(ETextureFormat format) {
     switch (format) {
         case ETextureFormat::R8_UNORM:              return 1;
+        case ETextureFormat::R8G8_UNORM:            return 2;
         case ETextureFormat::R8G8B8A8_UNORM:
         case ETextureFormat::R8G8B8A8_UNORM_SRGB:
         case ETextureFormat::R8G8B8A8_TYPELESS:

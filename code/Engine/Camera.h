@@ -54,6 +54,30 @@ public:
     void MoveRight(float distance);
     void MoveUp(float distance);
 
+    // ============================================
+    // TAA Jitter Support
+    // ============================================
+
+    // Get projection matrix with sub-pixel jitter applied (for TAA)
+    DirectX::XMMATRIX GetJitteredProjectionMatrix(uint32_t screenWidth, uint32_t screenHeight) const;
+
+    // Get current jitter offset in pixels (centered at 0)
+    DirectX::XMFLOAT2 GetJitterOffset() const;
+
+    // Advance to next jitter sample (call once per frame)
+    void AdvanceJitter();
+
+    // Enable/disable TAA jitter
+    void SetTAAEnabled(bool enabled);
+    bool IsTAAEnabled() const { return m_taaEnabled; }
+
+    // Set number of jitter samples (4, 8, or 16)
+    void SetJitterSampleCount(uint32_t count);
+    uint32_t GetJitterSampleCount() const { return m_jitterSampleCount; }
+
+    // Get current frame index (for shader)
+    uint32_t GetJitterFrameIndex() const { return m_jitterFrameIndex; }
+
 private:
     // ============================================
     // 内部表示：只用 Quaternion
@@ -63,4 +87,14 @@ private:
     // 缓存的 yaw/pitch（用于增量旋转 Rotate()）
     float m_yaw = 0.0f;
     float m_pitch = 0.0f;
+
+    // ============================================
+    // TAA Jitter State
+    // ============================================
+    bool m_taaEnabled = false;
+    uint32_t m_jitterFrameIndex = 0;
+    uint32_t m_jitterSampleCount = 8;  // Default: 8 samples (Halton 2,3)
+
+    // Halton sequence generator
+    static float HaltonSequence(uint32_t index, uint32_t base);
 };

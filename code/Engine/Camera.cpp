@@ -193,3 +193,83 @@ void CCamera::MoveRight(float distance) {
 void CCamera::MoveUp(float distance) {
     position.y += distance;  // 世界空间 Y 轴
 }
+
+// ============================================
+// TAA Jitter Support
+// ============================================
+
+// Halton sequence for low-discrepancy sampling
+// Returns values in [0, 1)
+float CCamera::HaltonSequence(uint32_t index, uint32_t base) {
+    float result = 0.0f;
+    float f = 1.0f;
+    uint32_t i = index;
+    while (i > 0) {
+        f /= static_cast<float>(base);
+        result += f * static_cast<float>(i % base);
+        i /= base;
+    }
+    return result;
+}
+
+XMFLOAT2 CCamera::GetJitterOffset() const {
+    if (!m_taaEnabled) {
+        return XMFLOAT2(0.0f, 0.0f);
+    }
+
+    // Use 1-indexed for better distribution (avoid 0,0 at start)
+    uint32_t index = (m_jitterFrameIndex % m_jitterSampleCount) + 1;
+
+    // Halton(2,3) sequence, centered at 0 (range: -0.5 to 0.5)
+    return XMFLOAT2(
+        HaltonSequence(index, 2) - 0.5f,
+        HaltonSequence(index, 3) - 0.5f
+    );
+}
+
+XMMATRIX CCamera::GetJitteredProjectionMatrix(uint32_t screenWidth, uint32_t screenHeight) const {
+    XMMATRIX proj = GetProjectionMatrix();
+
+    if (!m_taaEnabled || screenWidth == 0 || screenHeight == 0) {
+        return proj;
+    }
+
+    XMFLOAT2 jitter = GetJitterOffset();
+
+    // Convert pixel offset to NDC offset
+    // NDC range is [-1, 1], so 2.0 / width gives the size of one pixel in NDC
+    float jitterX = (2.0f * jitter.x) / static_cast<float>(screenWidth);
+    float jitterY = (2.0f * jitter.y) / static_cast<float>(screenHeight);
+
+    // Apply jitter to projection matrix
+    // For row-major matrix, modify elements [2][0] and [2][1]
+    // This shifts the entire frustum by sub-pixel amount
+    XMFLOAT4X4 projF;
+    XMStoreFloat4x4(&projF, proj);
+    projF._31 += jitterX;
+    projF._32 += jitterY;
+
+    return XMLoadFloat4x4(&projF);
+}
+
+void CCamera::AdvanceJitter() {
+    m_jitterFrameIndex++;
+}
+
+void CCamera::SetTAAEnabled(bool enabled) {
+    m_taaEnabled = enabled;
+    if (!enabled) {
+        m_jitterFrameIndex = 0;
+    }
+}
+
+void CCamera::SetJitterSampleCount(uint32_t count) {
+    // Only allow 4, 8, or 16 samples
+    if (count <= 4) {
+        m_jitterSampleCount = 4;
+    } else if (count <= 8) {
+        m_jitterSampleCount = 8;
+    } else {
+        m_jitterSampleCount = 16;
+    }
+}

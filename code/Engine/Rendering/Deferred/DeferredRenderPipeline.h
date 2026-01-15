@@ -17,6 +17,8 @@
 #include "Engine/Rendering/HiZPass.h"
 #include "Engine/Rendering/SSRPass.h"
 #include "Engine/Rendering/AutoExposurePass.h"
+#include "Engine/Rendering/TAAPass.h"
+#include "Engine/Rendering/AntiAliasingPass.h"
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIHelpers.h"
 #include <DirectXMath.h>
@@ -80,6 +82,8 @@ public:
     CSSRPass& GetSSRPass() { return m_ssrPass; }
     CAutoExposurePass& GetAutoExposurePass() { return m_autoExposurePass; }
     CMotionBlurPass& GetMotionBlurPass() { return m_motionBlurPass; }
+    CTAAPass& GetTAAPass() { return m_taaPass; }
+    CAntiAliasingPass& GetAAPass() { return m_aaPass; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
 
 private:
@@ -98,6 +102,8 @@ private:
     CHiZPass m_hiZPass;
     CSSRPass m_ssrPass;
     CAutoExposurePass m_autoExposurePass;
+    CTAAPass m_taaPass;
+    CAntiAliasingPass m_aaPass;
     CBloomPass m_bloomPass;
     CMotionBlurPass m_motionBlurPass;
     CPostProcessPass m_postProcess;
@@ -111,6 +117,7 @@ private:
     // ============================================
     RHI::TexturePtr m_offHDR;       // HDR intermediate (R16G16B16A16_FLOAT)
     RHI::TexturePtr m_offLDR;       // LDR final output (R8G8B8A8_TYPELESS)
+    RHI::TexturePtr m_offLDR_PreAA; // LDR before AA (for AA input/output swap)
     unsigned int m_offscreenWidth = 0;
     unsigned int m_offscreenHeight = 0;
 
@@ -118,6 +125,7 @@ private:
     // Frame State
     // ============================================
     DirectX::XMMATRIX m_viewProjPrev = DirectX::XMMatrixIdentity();  // Previous frame VP matrix
+    DirectX::XMFLOAT2 m_prevJitterOffset = {0.0f, 0.0f};             // Previous frame jitter offset (for TAA)
 
     // G-Buffer debug visualization resources
     RHI::ShaderPtr m_debugVS;

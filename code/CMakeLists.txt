@@ -246,6 +246,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestHiZ.cpp
     ${CODE_PATH}/Tests/TestSSR.cpp
     ${CODE_PATH}/Tests/TestMotionBlur.cpp
+    ${CODE_PATH}/Tests/TestTAA.cpp
 )
 
 add_executable(forfun WIN32
@@ -388,6 +389,12 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/HiZPass.cpp
     ${CODE_PATH}/Engine/Rendering/SSRPass.h
     ${CODE_PATH}/Engine/Rendering/SSRPass.cpp
+    ${CODE_PATH}/Engine/Rendering/TAAPass.h
+    ${CODE_PATH}/Engine/Rendering/TAAPass.cpp
+    ${CODE_PATH}/Engine/Rendering/AntiAliasingPass.h
+    ${CODE_PATH}/Engine/Rendering/AntiAliasingPass.cpp
+    ${CODE_PATH}/Engine/Rendering/SMAALookupTextures.h
+    ${CODE_PATH}/Engine/Rendering/SMAALookupTextures.cpp
     ${CODE_PATH}/Engine/Rendering/AutoExposurePass.h
     ${CODE_PATH}/Engine/Rendering/AutoExposurePass.cpp
     ${CODE_PATH}/Engine/Rendering/GridPass.cpp
@@ -428,6 +435,11 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/DebugLine.ps.hlsl
     ${CODE_PATH}/Shader/Grid.vs.hlsl
     ${CODE_PATH}/Shader/Grid.ps.hlsl
+    ${CODE_PATH}/Shader/Fullscreen.vs.hlsl
+    ${CODE_PATH}/Shader/FXAA.ps.hlsl
+    ${CODE_PATH}/Shader/SMAAEdgeDetection.ps.hlsl
+    ${CODE_PATH}/Shader/SMAABlendingWeight.ps.hlsl
+    ${CODE_PATH}/Shader/SMAANeighborhoodBlend.ps.hlsl
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})
@@ -445,6 +457,7 @@ if (MSVC)
         ${CODE_PATH}/Shader/EquirectToCubemap.vs.hlsl
         ${CODE_PATH}/Shader/DebugLine.vs.hlsl
         ${CODE_PATH}/Shader/Grid.vs.hlsl
+        ${CODE_PATH}/Shader/Fullscreen.vs.hlsl
         PROPERTIES
         VS_SHADER_TYPE Vertex
         VS_SHADER_MODEL 5.0
@@ -472,6 +485,10 @@ if (MSVC)
         ${CODE_PATH}/Shader/EquirectToCubemap.ps.hlsl
         ${CODE_PATH}/Shader/DebugLine.ps.hlsl
         ${CODE_PATH}/Shader/Grid.ps.hlsl
+        ${CODE_PATH}/Shader/FXAA.ps.hlsl
+        ${CODE_PATH}/Shader/SMAAEdgeDetection.ps.hlsl
+        ${CODE_PATH}/Shader/SMAABlendingWeight.ps.hlsl
+        ${CODE_PATH}/Shader/SMAANeighborhoodBlend.ps.hlsl
         PROPERTIES
         VS_SHADER_TYPE Pixel
         VS_SHADER_MODEL 5.0

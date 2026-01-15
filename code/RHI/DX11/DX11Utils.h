@@ -61,6 +61,7 @@ inline const char* CPUAccessToString(ECPUAccess access) {
 inline DXGI_FORMAT ToDXGIFormat(ETextureFormat format) {
     switch (format) {
         case ETextureFormat::R8_UNORM: return DXGI_FORMAT_R8_UNORM;
+        case ETextureFormat::R8G8_UNORM: return DXGI_FORMAT_R8G8_UNORM;
         case ETextureFormat::R8G8B8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
         case ETextureFormat::R8G8B8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
         case ETextureFormat::R8G8B8A8_TYPELESS: return DXGI_FORMAT_R8G8B8A8_TYPELESS;

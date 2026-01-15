@@ -190,7 +190,8 @@ void CDepthPrePass::Render(
 
     // Update frame constants (ViewProj matrix)
     XMMATRIX view = camera.GetViewMatrix();
-    XMMATRIX proj = camera.GetProjectionMatrix();
+    // Use jittered projection for TAA (returns normal projection if TAA disabled)
+    XMMATRIX proj = camera.GetJitteredProjectionMatrix(width, height);
     XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 
     CB_DepthFrame frameData;

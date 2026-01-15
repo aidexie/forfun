@@ -38,6 +38,8 @@ struct FShowFlags
     bool SSR = false;               // 是否启用 SSR（Screen-Space Reflections）
     bool HiZ = false;               // 是否启用 Hi-Z（SSR 依赖）
     bool MotionBlur = false;        // 是否启用 Motion Blur（运动模糊）
+    bool TAA = false;               // 是否启用 TAA（Temporal Anti-Aliasing）
+    bool AntiAliasing = false;      // 是否启用 Anti-Aliasing（FXAA/SMAA）
 
     // ============================================
     // Editor Tools (Only in Editor)
@@ -81,6 +83,8 @@ struct FShowFlags
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
         flags.MotionBlur = false;       // ❌ 默认关闭
+        flags.TAA = false;              // ❌ 默认关闭
+        flags.AntiAliasing = false;     // ❌ 默认关闭
         flags.Grid = true;              // ✅ 编辑器网格
         flags.DebugLines = true;        // ✅ 调试线框
         flags.Gizmos = false;           // TODO: 未来实现
@@ -107,6 +111,8 @@ struct FShowFlags
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
         flags.MotionBlur = false;       // ❌ 默认关闭
+        flags.TAA = false;              // ❌ 默认关闭
+        flags.AntiAliasing = false;     // ❌ 默认关闭
         // ❌ 无编辑器工具
         flags.Grid = false;
         flags.DebugLines = false;
@@ -134,6 +140,8 @@ struct FShowFlags
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
         flags.MotionBlur = false;       // ❌ 默认关闭
+        flags.TAA = false;              // ❌ 默认关闭
+        flags.AntiAliasing = false;     // ❌ 默认关闭
         flags.Grid = false;
         flags.DebugLines = false;
         return flags;
@@ -158,6 +166,8 @@ struct FShowFlags
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
         flags.MotionBlur = false;       // ❌ 默认关闭
+        flags.TAA = false;              // ❌ 默认关闭
+        flags.AntiAliasing = false;     // ❌ 默认关闭
         // ❌ 无编辑器工具
         flags.Grid = false;
         flags.DebugLines = false;
@@ -185,6 +195,8 @@ struct FShowFlags
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
         flags.MotionBlur = false;       // ❌ 默认关闭
+        flags.TAA = false;              // ❌ 默认关闭
+        flags.AntiAliasing = false;     // ❌ 默认关闭
         flags.Wireframe = true;         // ✅ 线框模式
         flags.Grid = true;
         return flags;

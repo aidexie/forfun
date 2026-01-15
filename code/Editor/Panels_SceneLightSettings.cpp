@@ -8,6 +8,7 @@
 #include "Engine/Rendering/SSAOPass.h"
 #include "Engine/Rendering/SSRPass.h"
 #include "Engine/Rendering/HiZPass.h"
+#include "Engine/Rendering/TAAPass.h"
 #include "Engine/Rendering/Deferred/DeferredRenderPipeline.h"
 #include "Engine/Rendering/VolumetricLightmap.h"
 #include "Engine/Rendering/Lightmap/LightmapBaker.h"
@@ -561,6 +562,95 @@ static void DrawMotionBlurSection(CSceneLightSettings& settings) {
     ImGui::Spacing();
 }
 
+static void DrawTAASection(CDeferredRenderPipeline* deferred_pipeline) {
+    SectionHeader("Post-Processing: TAA (Temporal Anti-Aliasing)");
+
+    auto& settings = deferred_pipeline->GetTAAPass().GetSettings();
+    auto& show_flags = CEditorContext::Instance().GetShowFlags();
+
+    ImGui::Checkbox("Enable##TAA", &show_flags.TAA);
+
+    if (show_flags.TAA) {
+        ImGui::Spacing();
+
+        static const char* kAlgorithmNames[] = {
+            "Off",
+            "1: Basic (Simple Blend)",
+            "2: Neighborhood Clamp",
+            "3: Variance Clip (YCoCg)",
+            "4: + Catmull-Rom",
+            "5: + Motion Rejection",
+            "6: Production (Full)"
+        };
+        int algorithm = static_cast<int>(settings.algorithm);
+
+        ImGui::PushItemWidth(200);
+        if (ImGui::Combo("Algorithm##TAA", &algorithm, kAlgorithmNames, IM_ARRAYSIZE(kAlgorithmNames))) {
+            settings.algorithm = static_cast<ETAAAlgorithm>(algorithm);
+            if (settings.algorithm == ETAAAlgorithm::Off) {
+                deferred_pipeline->GetTAAPass().InvalidateHistory();
+            }
+            CFFLog::Info("[TAA] Algorithm changed to: %s", kAlgorithmNames[algorithm]);
+        }
+
+        HelpTooltip(
+            "Off: No TAA (passthrough)\n"
+            "Basic: Simple history blend (ghosting)\n"
+            "Neighborhood Clamp: Min/max AABB clamping\n"
+            "Variance Clip: Statistical clipping in YCoCg\n"
+            "Catmull-Rom: Sharper history sampling\n"
+            "Motion Rejection: Handles disocclusion\n"
+            "Production: Full quality with sharpening");
+
+        ImGui::SliderFloat("History Blend##TAA", &settings.history_blend, 0.8f, 0.99f, "%.2f");
+        HelpTooltip("Higher = smoother but more ghosting\nRecommended: 0.9-0.95");
+
+        int jitter_samples = static_cast<int>(settings.jitter_samples);
+        if (ImGui::SliderInt("Jitter Samples##TAA", &jitter_samples, 4, 16)) {
+            settings.jitter_samples = static_cast<uint32_t>(jitter_samples);
+        }
+        HelpTooltip("Number of sub-pixel jitter positions (Halton sequence)\n8 is standard, 16 for higher quality");
+
+        if (settings.algorithm >= ETAAAlgorithm::VarianceClip) {
+            ImGui::Spacing();
+            ImGui::Text("Variance Clipping:");
+            ImGui::SliderFloat("Clip Gamma##TAA", &settings.variance_clip_gamma, 0.5f, 2.0f, "%.2f");
+            HelpTooltip("Variance multiplier for AABB size\nLower = tighter clipping, Higher = looser clipping");
+        }
+
+        if (settings.algorithm >= ETAAAlgorithm::MotionRejection) {
+            ImGui::Spacing();
+            ImGui::Text("Motion Rejection:");
+            ImGui::SliderFloat("Velocity Scale##TAA", &settings.velocity_rejection_scale, 0.0f, 0.5f, "%.2f");
+            ImGui::SliderFloat("Depth Scale##TAA", &settings.depth_rejection_scale, 0.0f, 200.0f, "%.0f");
+            HelpTooltip("Velocity Scale: Reduce history weight for fast-moving pixels\n"
+                        "Depth Scale: Detect disocclusion via depth discontinuity");
+        }
+
+        if (settings.algorithm == ETAAAlgorithm::Production) {
+            ImGui::Spacing();
+            ImGui::Text("Sharpening:");
+            ImGui::Checkbox("Enable Sharpening##TAA", &settings.sharpening_enabled);
+            if (settings.sharpening_enabled) {
+                ImGui::SliderFloat("Strength##TAA", &settings.sharpening_strength, 0.0f, 0.5f, "%.2f");
+                HelpTooltip("Unsharp mask strength to counteract TAA blur\nRecommended: 0.1-0.25");
+            }
+        }
+
+        ImGui::PopItemWidth();
+
+        if (ImGui::TreeNode("Debug##TAA")) {
+            if (ImGui::Button("Invalidate History##TAA")) {
+                deferred_pipeline->GetTAAPass().InvalidateHistory();
+                CFFLog::Info("[TAA] History invalidated");
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    DoubleSpacing();
+}
+
 static void DrawAutoExposureSection(CSceneLightSettings& settings) {
     SectionHeader("Post-Processing: Auto Exposure");
 
@@ -731,6 +821,65 @@ static void DrawColorGradingSection(CSceneLightSettings& settings) {
 }
 
 // ============================================
+// Anti-Aliasing Section
+// ============================================
+static void DrawAntiAliasingSection(CSceneLightSettings& settings) {
+    SectionHeader("Post-Processing: Anti-Aliasing");
+
+    auto& aa = settings.antiAliasing;
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
+
+    ImGui::Checkbox("Enable##AntiAliasing", &showFlags.AntiAliasing);
+
+    if (showFlags.AntiAliasing) {
+        ImGui::Spacing();
+
+        // Mode dropdown
+        const char* modeNames[] = { "Off", "FXAA", "SMAA" };
+        int currentMode = static_cast<int>(aa.mode);
+
+        ImGui::PushItemWidth(150);
+        if (ImGui::Combo("Mode##AA", &currentMode, modeNames, 3)) {
+            aa.mode = static_cast<EAntiAliasingMode>(currentMode);
+            CFFLog::Info("[AntiAliasing] Mode changed to: %s", modeNames[currentMode]);
+        }
+        ImGui::PopItemWidth();
+
+        // FXAA-specific settings
+        if (aa.mode == EAntiAliasingMode::FXAA) {
+            ImGui::Spacing();
+            ImGui::Text("FXAA Settings:");
+            ImGui::PushItemWidth(150);
+
+            ImGui::SliderFloat("Subpixel Quality##FXAA", &aa.fxaaSubpixelQuality, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Edge Threshold##FXAA", &aa.fxaaEdgeThreshold, 0.063f, 0.333f, "%.3f");
+            ImGui::SliderFloat("Edge Threshold Min##FXAA", &aa.fxaaEdgeThresholdMin, 0.0312f, 0.125f, "%.4f");
+
+            ImGui::PopItemWidth();
+
+            HelpTooltip(
+                "Subpixel Quality: 0.0 (sharp) to 1.0 (soft blur)\n"
+                "Edge Threshold: Edge detection sensitivity\n"
+                "Edge Threshold Min: Minimum threshold for dark areas");
+        }
+
+        // SMAA info
+        if (aa.mode == EAntiAliasingMode::SMAA) {
+            ImGui::Spacing();
+            ImGui::TextDisabled("SMAA: 3-pass morphological AA");
+            ImGui::TextDisabled("Higher quality, ~1.5ms @ 1080p");
+        }
+
+        HelpTooltip(
+            "Off: No anti-aliasing\n"
+            "FXAA: Fast approximate AA (~0.5ms, slight blur)\n"
+            "SMAA: Morphological AA (~1.5ms, sharper edges)");
+    }
+
+    ImGui::Spacing();
+}
+
+// ============================================
 // Main Panel Function
 // ============================================
 
@@ -762,12 +911,14 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
     if (deferredPipeline) {
         DrawSSAOSection(deferredPipeline);
         DrawSSRSection(deferredPipeline);
+        DrawTAASection(deferredPipeline);
     }
 
     DrawBloomSection(settings);
     DrawMotionBlurSection(settings);
     DrawAutoExposureSection(settings);
     DrawColorGradingSection(settings);
+    DrawAntiAliasingSection(settings);
 
     // Apply button
     if (ImGui::Button("Apply Settings")) {

@@ -170,6 +170,8 @@ bool CDeferredRenderPipeline::Initialize()
     m_hiZPass.Initialize();
     m_ssrPass.Initialize();
     m_autoExposurePass.Initialize();
+    m_taaPass.Initialize();
+    m_aaPass.Initialize();
 
     m_bloomPass.Initialize();
     m_motionBlurPass.Initialize();
@@ -196,6 +198,8 @@ void CDeferredRenderPipeline::Shutdown()
     m_hiZPass.Shutdown();
     m_ssrPass.Shutdown();
     m_autoExposurePass.Shutdown();
+    m_taaPass.Shutdown();
+    m_aaPass.Shutdown();
     m_bloomPass.Shutdown();
     m_motionBlurPass.Shutdown();
     m_postProcess.Shutdown();
@@ -296,6 +300,14 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     m_gbuffer.Resize(ctx.width, ctx.height);
 
     // ============================================
+    // 1.5. Enable/disable camera jitter for TAA
+    // ============================================
+    // Note: We need to cast away const because camera jitter state needs to be updated
+    CCamera& camera = const_cast<CCamera&>(ctx.camera);
+    camera.SetTAAEnabled(ctx.showFlags.TAA);
+    camera.SetJitterSampleCount(m_taaPass.GetSettings().jitter_samples);
+
+    // ============================================
     // 2. Depth Pre-Pass
     // ============================================
     {
@@ -309,8 +321,8 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
         m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev, ctx.width, ctx.height);
     }
 
-    // Store current VP matrix for next frame's velocity calculation
-    m_viewProjPrev = XMMatrixMultiply(ctx.camera.GetViewMatrix(), ctx.camera.GetProjectionMatrix());
+    // Advance jitter for next frame (if TAA enabled)
+    camera.AdvanceJitter();
 
     // ============================================
     // 3.5. Hi-Z Pass (Hierarchical-Z Depth Pyramid)
@@ -467,13 +479,50 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
+    // 6.9. TAA Pass (Temporal Anti-Aliasing)
+    // ============================================
+    // TAA runs in HDR space, after SSR and before Auto Exposure
+    ITexture* hdrAfterTAA = m_offHDR.get();
+    if (ctx.showFlags.TAA) {
+        CScopedDebugEvent evt(cmdList, L"TAA Pass");
+
+        // Get current jitter offset
+        XMFLOAT2 currentJitter = ctx.camera.GetJitterOffset();
+
+        // Get current view-projection matrix (with jitter if TAA enabled)
+        XMMATRIX viewProj = XMMatrixMultiply(ctx.camera.GetViewMatrix(),
+                                              ctx.camera.GetJitteredProjectionMatrix(ctx.width, ctx.height));
+
+        m_taaPass.Render(cmdList,
+                         m_offHDR.get(),
+                         m_gbuffer.GetVelocity(),
+                         m_gbuffer.GetDepthBuffer(),
+                         ctx.width, ctx.height,
+                         viewProj,
+                         m_viewProjPrev,
+                         currentJitter,
+                         m_prevJitterOffset);
+
+        // Use TAA output for subsequent passes
+        hdrAfterTAA = m_taaPass.GetOutput();
+
+        // Store jitter for next frame
+        m_prevJitterOffset = currentJitter;
+    }
+
+    // Store current VP matrix for next frame's velocity calculation
+    // Must be updated AFTER TAA uses m_viewProjPrev, not before
+    m_viewProjPrev = XMMatrixMultiply(ctx.camera.GetViewMatrix(),
+                                       ctx.camera.GetJitteredProjectionMatrix(ctx.width, ctx.height));
+
+    // ============================================
     // 7. Auto Exposure (HDR luminance analysis)
     // ============================================
     RHI::IBuffer* exposureBuffer = nullptr;
     if (ctx.showFlags.AutoExposure) {
         const auto& aeSettings = ctx.scene.GetLightSettings().autoExposure;
         CScopedDebugEvent evt(cmdList, L"Auto Exposure");
-        m_autoExposurePass.Render(cmdList, m_offHDR.get(), ctx.width, ctx.height,
+        m_autoExposurePass.Render(cmdList, hdrAfterTAA, ctx.width, ctx.height,
                                   ctx.deltaTime, aeSettings);
         exposureBuffer = m_autoExposurePass.GetExposureBuffer();
     }
@@ -481,12 +530,12 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 8. Motion Blur Pass (HDR -> motion-blurred HDR)
     // ============================================
-    ITexture* hdrAfterMotionBlur = m_offHDR.get();
+    ITexture* hdrAfterMotionBlur = hdrAfterTAA;
     if (ctx.showFlags.MotionBlur) {
         const auto& mbSettings = ctx.scene.GetLightSettings().motionBlur;
         CScopedDebugEvent evt(cmdList, L"Motion Blur");
         hdrAfterMotionBlur = m_motionBlurPass.Render(
-            m_offHDR.get(), m_gbuffer.GetVelocity(),
+            hdrAfterTAA, m_gbuffer.GetVelocity(),
             ctx.width, ctx.height, mbSettings);
     }
 
@@ -504,19 +553,33 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 10. Post-Processing (HDR -> LDR)
     // ============================================
+    // Determine if AA is enabled to decide output target
+    const auto& aaSettings = ctx.scene.GetLightSettings().antiAliasing;
+    bool aaEnabled = ctx.showFlags.AntiAliasing && m_aaPass.IsEnabled(aaSettings);
+    ITexture* postProcessOutput = aaEnabled ? m_offLDR_PreAA.get() : m_offLDR.get();
+
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
         float bloomIntensity = (ctx.showFlags.Bloom && bloomResult) ? bloomSettings.intensity : 0.0f;
-        m_postProcess.Render(hdrAfterMotionBlur, bloomResult, m_offLDR.get(),
+        m_postProcess.Render(hdrAfterMotionBlur, bloomResult, postProcessOutput,
                              ctx.width, ctx.height, 1.0f, exposureBuffer, bloomIntensity,
                              &ctx.scene.GetLightSettings().colorGrading,
                              ctx.showFlags.ColorGrading);
     } else {
-        ITexture* ldrRT = m_offLDR.get();
+        ITexture* ldrRT = postProcessOutput;
         cmdList->SetRenderTargets(1, &ldrRT, nullptr);
         const float ldrClearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        cmdList->ClearRenderTarget(m_offLDR.get(), ldrClearColor);
+        cmdList->ClearRenderTarget(postProcessOutput, ldrClearColor);
+    }
+
+    // ============================================
+    // 10.5. Anti-Aliasing (FXAA/SMAA)
+    // ============================================
+    if (aaEnabled) {
+        CScopedDebugEvent evt(cmdList, L"Anti-Aliasing");
+        m_aaPass.Render(m_offLDR_PreAA.get(), m_offLDR.get(),
+                        ctx.width, ctx.height, aaSettings);
     }
 
     // ============================================
@@ -636,5 +699,16 @@ void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
         desc.clearColor[2] = 0.0f;
         desc.clearColor[3] = 1.0f;
         m_offLDR.reset(rhiCtx->CreateTexture(desc, nullptr));
+    }
+
+    // LDR Pre-AA Render Target (for AA input/output swap)
+    {
+        TextureDesc desc = TextureDesc::LDRRenderTarget(w, h);
+        desc.debugName = "Deferred_LDR_PreAA_RT";
+        desc.clearColor[0] = 0.0f;
+        desc.clearColor[1] = 0.0f;
+        desc.clearColor[2] = 0.0f;
+        desc.clearColor[3] = 1.0f;
+        m_offLDR_PreAA.reset(rhiCtx->CreateTexture(desc, nullptr));
     }
 }
