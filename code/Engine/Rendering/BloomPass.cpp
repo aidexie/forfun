@@ -237,10 +237,6 @@ RHI::ITexture* CBloomPass::Render(ITexture* hdrInput,
         return m_blackTexture.get();
     }
 
-    if (!settings.enabled) {
-        return m_blackTexture.get();
-    }
-
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
 

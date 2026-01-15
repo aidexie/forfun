@@ -130,8 +130,8 @@ public:
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
             if (deferredPipeline) {
+                ctx.showFlags.SSAO = true;
                 auto& ssaoSettings = deferredPipeline->GetSSAOPass().GetSettings();
-                ssaoSettings.enabled = true;
                 ssaoSettings.algorithm = ESSAOAlgorithm::Debug_RawDepth;
                 ssaoSettings.radius = 0.5f;
                 ssaoSettings.intensity = 1.5f;

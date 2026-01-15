@@ -113,11 +113,14 @@ public:
         ctx.OnFrame(3, [&ctx]() {
             CFFLog::Info("[TestSSR:Frame3] Enabling SSR and Hi-Z");
 
+            // Enable SSR and Hi-Z via showFlags
+            ctx.showFlags.HiZ = true;
+            ctx.showFlags.SSR = true;
+
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
             if (deferredPipeline) {
-                deferredPipeline->GetHiZPass().GetSettings().enabled = true;
-                deferredPipeline->GetSSRPass().GetSettings().enabled = true;
+                // Configure SSR quality settings
                 deferredPipeline->GetSSRPass().GetSettings().maxDistance = 500.0f;
                 deferredPipeline->GetSSRPass().GetSettings().maxSteps = 64;
             }
@@ -173,13 +176,13 @@ public:
                 RHI::ITexture* hiZTexture = hiZPass.GetHiZTexture();
 
                 CFFLog::Info("[TestSSR:Frame40] SSR enabled: %s, Hi-Z enabled: %s",
-                    ssrPass.GetSettings().enabled ? "yes" : "no",
-                    hiZPass.GetSettings().enabled ? "yes" : "no");
+                    ctx.showFlags.SSR ? "yes" : "no",
+                    ctx.showFlags.HiZ ? "yes" : "no");
 
                 ctx.Assert(ssrTexture != nullptr, "SSR texture should be created");
                 ctx.Assert(hiZTexture != nullptr, "Hi-Z texture should be created (SSR dependency)");
-                ctx.Assert(ssrPass.GetSettings().enabled, "SSR should be enabled");
-                ctx.Assert(hiZPass.GetSettings().enabled, "Hi-Z should be enabled");
+                ctx.Assert(ctx.showFlags.SSR, "SSR should be enabled");
+                ctx.Assert(ctx.showFlags.HiZ, "Hi-Z should be enabled");
             } else {
                 ctx.Assert(false, "Expected DeferredRenderPipeline");
             }

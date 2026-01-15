@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <DirectXMath.h>
+#include "Engine/Rendering/ShowFlags.h"
 
 // Forward declarations
 class CScene;
@@ -54,6 +55,7 @@ public:
     const char* testName = nullptr;  // Test name for detailed logging
     CRenderPipeline* pipeline = nullptr;  // Access to rendering for screenshots
     std::vector<std::string> failures;  // Collected failures
+    FShowFlags showFlags = FShowFlags::Editor();  // Rendering feature flags (tests can modify)
 
     // Register a callback for a specific frame
     void OnFrame(int frameNumber, std::function<void()> callback) {

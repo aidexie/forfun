@@ -19,7 +19,6 @@ namespace HiZConfig {
 // Hi-Z Settings (exposed to editor)
 // ============================================
 struct SHiZSettings {
-    bool enabled = true;           // Enable Hi-Z pyramid generation
     bool debugVisualize = false;   // Show specific mip in debug view
     int debugMipLevel = 0;         // Which mip to visualize (0 = full res)
 };

@@ -84,7 +84,7 @@ public:
             CFFLog::Info("[TestBloom:Frame5] Configuring bloom settings");
 
             auto& settings = CScene::Instance().GetLightSettings();
-            settings.bloom.enabled = true;
+            ctx.showFlags.Bloom = true;
             settings.bloom.threshold = 1.0f;
             settings.bloom.intensity = 1.5f;
             settings.bloom.scatter = 0.7f;
@@ -105,8 +105,7 @@ public:
         ctx.OnFrame(25, [&ctx]() {
             CFFLog::Info("[TestBloom:Frame25] Disabling bloom for comparison");
 
-            auto& settings = CScene::Instance().GetLightSettings();
-            settings.bloom.enabled = false;
+            ctx.showFlags.Bloom = false;
         });
 
         // Frame 30: Capture screenshot without bloom
@@ -122,7 +121,7 @@ public:
             CFFLog::Info("[TestBloom:Frame35] Testing high intensity bloom");
 
             auto& settings = CScene::Instance().GetLightSettings();
-            settings.bloom.enabled = true;
+            ctx.showFlags.Bloom = true;
             settings.bloom.threshold = 0.5f;  // Lower threshold = more bloom
             settings.bloom.intensity = 2.5f;  // Higher intensity
             settings.bloom.scatter = 0.9f;    // More diffuse

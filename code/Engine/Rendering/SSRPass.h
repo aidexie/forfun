@@ -44,7 +44,6 @@ enum class ESSRMode : int {
 // SSR Settings (exposed to editor)
 // ============================================
 struct SSSRSettings {
-    bool enabled = true;            // Enable/disable SSR
     ESSRQuality quality = ESSRQuality::High;  // Quality preset
     ESSRMode mode = ESSRMode::HiZTrace;       // Algorithm mode
     float maxDistance = 50.0f;      // Maximum ray distance (view-space)
@@ -217,9 +216,9 @@ public:
     // ============================================
     // Output
     // ============================================
-    // Get SSR result texture (returns black fallback if disabled)
+    // Get SSR result texture (returns black fallback if not initialized)
     RHI::ITexture* GetSSRTexture() const {
-        return (m_settings.enabled && m_ssrResult) ? m_ssrResult.get() : m_blackFallback.get();
+        return m_ssrResult ? m_ssrResult.get() : m_blackFallback.get();
     }
 
     // ============================================

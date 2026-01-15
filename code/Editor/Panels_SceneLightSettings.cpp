@@ -1,4 +1,5 @@
 #include "Panels.h"
+#include "EditorContext.h"
 #include "imgui.h"
 #include "Engine/Scene.h"
 #include "Engine/SceneLightSettings.h"
@@ -336,10 +337,11 @@ static void DrawSSAOSection(CDeferredRenderPipeline* deferredPipeline) {
     SectionHeader("Screen-Space Ambient Occlusion (SSAO)");
 
     auto& ssaoSettings = deferredPipeline->GetSSAOPass().GetSettings();
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
 
-    ImGui::Checkbox("Enable##SSAO", &ssaoSettings.enabled);
+    ImGui::Checkbox("Enable##SSAO", &showFlags.SSAO);
 
-    if (ssaoSettings.enabled) {
+    if (showFlags.SSAO) {
         ImGui::PushItemWidth(150);
         ImGui::SliderFloat("Radius##SSAO", &ssaoSettings.radius, 0.1f, 2.0f, "%.2f");
         ImGui::SliderFloat("Intensity##SSAO", &ssaoSettings.intensity, 0.0f, 13.0f, "%.2f");
@@ -367,20 +369,20 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
     SectionHeader("Screen-Space Reflections (SSR)");
 
     auto& ssrSettings = deferredPipeline->GetSSRPass().GetSettings();
-    auto& hiZSettings = deferredPipeline->GetHiZPass().GetSettings();
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
 
     // SSR requires Hi-Z
-    if (!hiZSettings.enabled) {
+    if (!showFlags.HiZ) {
         ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "SSR requires Hi-Z to be enabled");
         if (ImGui::Button("Enable Hi-Z##SSR")) {
-            hiZSettings.enabled = true;
+            showFlags.HiZ = true;
         }
         return;
     }
 
-    ImGui::Checkbox("Enable##SSR", &ssrSettings.enabled);
+    ImGui::Checkbox("Enable##SSR", &showFlags.SSR);
 
-    if (ssrSettings.enabled) {
+    if (showFlags.SSR) {
         // Quality preset dropdown
         static const char* qualityNames[] = { "Low", "Medium", "High", "Ultra", "Custom" };
         int currentQuality = static_cast<int>(ssrSettings.quality);
@@ -491,9 +493,11 @@ static void DrawBloomSection(CSceneLightSettings& settings) {
     SectionHeader("Post-Processing: Bloom");
 
     auto& bloom = settings.bloom;
-    ImGui::Checkbox("Enable##Bloom", &bloom.enabled);
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
 
-    if (bloom.enabled) {
+    ImGui::Checkbox("Enable##Bloom", &showFlags.Bloom);
+
+    if (showFlags.Bloom) {
         ImGui::PushItemWidth(150);
         ImGui::SliderFloat("Threshold##Bloom", &bloom.threshold, 0.0f, 5.0f, "%.2f");
         ImGui::SliderFloat("Intensity##Bloom", &bloom.intensity, 0.0f, 3.0f, "%.2f");

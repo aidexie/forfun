@@ -311,7 +311,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 3.5. Hi-Z Pass (Hierarchical-Z Depth Pyramid)
     // ============================================
-    if (m_hiZPass.GetSettings().enabled) {
+    if (ctx.showFlags.HiZ) {
         CScopedDebugEvent evt(cmdList, L"Hi-Z Build");
         m_hiZPass.BuildPyramid(cmdList,
                                m_gbuffer.GetDepthBuffer(),
@@ -353,7 +353,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 5.5. SSAO Pass (Screen-Space Ambient Occlusion)
     // ============================================
-    if (m_ssaoPass.GetSettings().enabled) {
+    if (ctx.showFlags.SSAO) {
         CScopedDebugEvent evt(cmdList, L"SSAO Pass");
         m_ssaoPass.Render(cmdList,
                           m_gbuffer.GetDepthBuffer(),
@@ -425,7 +425,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // 6.7. SSR Pass (Screen-Space Reflections)
     // ============================================
     // Traces against HDR color buffer using Hi-Z acceleration
-    if (m_ssrPass.GetSettings().enabled && m_hiZPass.GetSettings().enabled) {
+    if (ctx.showFlags.SSR && ctx.showFlags.HiZ) {
         CScopedDebugEvent evt(cmdList, L"SSR Pass");
         m_ssrPass.Render(cmdList,
                          m_gbuffer.GetDepthBuffer(),
@@ -466,13 +466,11 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // 7. Bloom Pass (HDR -> half-res bloom texture)
     // ============================================
     ITexture* bloomResult = nullptr;
-    if (ctx.showFlags.PostProcessing) {
+    if (ctx.showFlags.Bloom) {
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
-        if (bloomSettings.enabled) {
-            CScopedDebugEvent evt(cmdList, L"Bloom");
-            bloomResult = m_bloomPass.Render(
-                m_offHDR.get(), ctx.width, ctx.height, bloomSettings);
-        }
+        CScopedDebugEvent evt(cmdList, L"Bloom");
+        bloomResult = m_bloomPass.Render(
+            m_offHDR.get(), ctx.width, ctx.height, bloomSettings);
     }
 
     // ============================================
@@ -481,7 +479,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
-        float bloomIntensity = (bloomSettings.enabled && bloomResult) ? bloomSettings.intensity : 0.0f;
+        float bloomIntensity = (ctx.showFlags.Bloom && bloomResult) ? bloomSettings.intensity : 0.0f;
         m_postProcess.Render(m_offHDR.get(), bloomResult, m_offLDR.get(),
                              ctx.width, ctx.height, 1.0f, bloomIntensity);
     } else {

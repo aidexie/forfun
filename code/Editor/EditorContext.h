@@ -1,5 +1,6 @@
 #pragma once
 #include "../Engine/Camera.h"
+#include "../Engine/Rendering/ShowFlags.h"
 
 // CEditorContext - 编辑器状态管理（单例）
 // 职责：管理编辑器交互状态（相机控制、Gizmo 模式、Grid 显示等）
@@ -23,6 +24,10 @@ public:
     float GetMouseSensitivity() const { return m_mouseSensitivity; }
     float GetMoveSpeed() const { return m_moveSpeed; }
 
+    // === ShowFlags 控制 ===
+    FShowFlags& GetShowFlags() { return m_showFlags; }
+    const FShowFlags& GetShowFlags() const { return m_showFlags; }
+
 private:
     CEditorContext() = default;  // 单例：私有构造函数
     CEditorContext(const CEditorContext&) = delete;
@@ -32,6 +37,9 @@ private:
     bool m_rmbLook = false;  // 右键按下状态
     float m_mouseSensitivity = 0.0022f;
     float m_moveSpeed = 5.0f;
+
+    // === 渲染控制 ===
+    FShowFlags m_showFlags = FShowFlags::Editor();
 
     // Phase 5 可扩展：
     // enum class GizmoMode { Translate, Rotate, Scale };

@@ -74,11 +74,6 @@ void CSSRPass::Render(ICommandList* cmdList,
                        float nearZ, float farZ) {
     if (!m_initialized || !cmdList) return;
 
-    // Check if SSR is enabled
-    if (!m_settings.enabled) {
-        return;
-    }
-
     // Validate inputs
     if (!depthBuffer || !normalBuffer || !hiZTexture || !sceneColor) {
         CFFLog::Warning("[SSRPass] Missing required input textures");
@@ -359,8 +354,8 @@ void CSSRPass::Composite(ICommandList* cmdList,
                           const XMFLOAT3& camPosWS) {
     if (!m_initialized || !cmdList) return;
 
-    // Check if SSR is enabled and composite PSO exists
-    if (!m_settings.enabled || !m_compositePSO) {
+    // Check if composite PSO exists
+    if (!m_compositePSO) {
         return;
     }
 

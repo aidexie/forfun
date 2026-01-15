@@ -188,11 +188,6 @@ void CHiZPass::BuildPyramid(ICommandList* cmdList,
                              uint32_t width, uint32_t height) {
     if (!m_initialized || !cmdList || !depthBuffer) return;
 
-    // Check if Hi-Z is enabled
-    if (!m_settings.enabled) {
-        return;
-    }
-
     // Ensure textures are properly sized
     if (width != m_width || height != m_height) {
         createTextures(width, height);

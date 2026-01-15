@@ -46,7 +46,6 @@ struct SSSAOSettings {
     int numSlices = 10;              // Number of direction slices (2-4)
     int numSteps = 20;               // Steps per direction (4-8)
     int blurRadius = 2;             // Bilateral blur radius (1-4)
-    bool enabled = true;            // Enable/disable SSAO
 };
 
 // Constant buffer for SSAO compute shader (b0)
@@ -136,9 +135,9 @@ public:
     // ============================================
     // Output
     // ============================================
-    // Get final SSAO texture for lighting pass (returns white texture if disabled/uninitialized)
+    // Get final SSAO texture for lighting pass (returns white texture if not initialized)
     RHI::ITexture* GetSSAOTexture() const {
-        return (m_settings.enabled && m_ssaoFinal) ? m_ssaoFinal.get() : m_whiteFallback.get();
+        return m_ssaoFinal ? m_ssaoFinal.get() : m_whiteFallback.get();
     }
 
     // ============================================

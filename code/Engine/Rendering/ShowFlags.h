@@ -139,6 +139,10 @@ struct FShowFlags
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
         flags.PostProcessing = false;   // ❌ 输出 HDR，不做 Tone Mapping
+        flags.Bloom = false;            // ❌ 默认关闭
+        flags.SSAO = false;             // ❌ 默认关闭
+        flags.SSR = false;              // ❌ 默认关闭
+        flags.HiZ = false;              // ❌ 默认关闭
         // ❌ 无编辑器工具
         flags.Grid = false;
         flags.DebugLines = false;
@@ -159,6 +163,10 @@ struct FShowFlags
         flags.OpaqueObjects = true;
         flags.TransparentObjects = false;
         flags.PostProcessing = false;
+        flags.Bloom = false;            // ❌ 默认关闭
+        flags.SSAO = false;             // ❌ 默认关闭
+        flags.SSR = false;              // ❌ 默认关闭
+        flags.HiZ = false;              // ❌ 默认关闭
         flags.Wireframe = true;         // ✅ 线框模式
         flags.Grid = true;
         return flags;

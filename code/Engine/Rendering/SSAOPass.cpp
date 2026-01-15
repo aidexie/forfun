@@ -138,7 +138,7 @@ void CSSAOPass::Render(ICommandList* cmdList,
                         const XMMATRIX& view,
                         const XMMATRIX& proj,
                         float nearZ, float farZ) {
-    if (!m_initialized || !cmdList || !m_settings.enabled) return;
+    if (!m_initialized || !cmdList) return;
 
     // Ensure textures are properly sized
     if (width != m_fullWidth || height != m_fullHeight) {
