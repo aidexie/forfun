@@ -1,4 +1,5 @@
 ﻿#include "Panels.h"
+#include "EditorContext.h"
 #include "imgui.h"
 #include "ImGuizmo.h"
 #include "Camera.h"
@@ -129,6 +130,34 @@ void Panels::DrawViewport(CScene& scene, CCamera& editorCam,  // ✅ 改用 CCam
     bool gridEnabled = CGridPass::Instance().IsEnabled();
     if (ImGui::Checkbox("Show Grid", &gridEnabled)) {
         CGridPass::Instance().SetEnabled(gridEnabled);
+    }
+
+    ImGui::SameLine();
+    ImGui::Separator();
+    ImGui::SameLine();
+
+    // Camera move speed
+    float moveSpeed = CEditorContext::Instance().GetMoveSpeed();
+    ImGui::PushItemWidth(80);
+    if (ImGui::DragFloat("##MoveSpeed", &moveSpeed, 0.1f, 0.5f, 50.0f, "%.1f")) {
+        CEditorContext::Instance().SetMoveSpeed(moveSpeed);
+    }
+    ImGui::PopItemWidth();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Camera move speed (m/s)");
+    }
+
+    ImGui::SameLine();
+
+    // Camera rotation sensitivity
+    float sensitivity = CEditorContext::Instance().GetMouseSensitivity() * 1000.0f;  // Display as 0-10 range
+    ImGui::PushItemWidth(80);
+    if (ImGui::DragFloat("##RotSpeed", &sensitivity, 0.1f, 0.5f, 10.0f, "%.1f")) {
+        CEditorContext::Instance().SetMouseSensitivity(sensitivity / 1000.0f);
+    }
+    ImGui::PopItemWidth();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Camera rotation sensitivity");
     }
 
     ImGui::Separator();
