@@ -406,6 +406,10 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
         // Intensity slider (always visible)
         ImGui::SliderFloat("Intensity##SSR", &ssrSettings.intensity, 0.0f, 2.0f, "%.2f");
 
+        // Resolution scale slider
+        ImGui::SliderFloat("Resolution Scale##SSR", &ssrSettings.resolutionScale, 0.25f, 1.0f, "%.2f");
+        HelpTooltip("Render SSR at lower resolution for better performance.\n1.0 = Full resolution\n0.5 = Half resolution\n0.25 = Quarter resolution");
+
         // Stochastic/Temporal settings (only for modes that use multiple rays)
         if (ssrSettings.mode == ESSRMode::Stochastic || ssrSettings.mode == ESSRMode::Temporal) {
             if (ImGui::TreeNode("Stochastic Settings##SSR")) {

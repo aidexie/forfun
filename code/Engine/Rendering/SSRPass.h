@@ -68,6 +68,9 @@ struct SSSRSettings {
     float temporalBlend = 0.9f;     // History blend factor (0=current only, 1=history only)
     float motionThreshold = 0.01f;  // Motion rejection threshold
 
+    // Resolution settings
+    float resolutionScale = 1.0f;   // SSR render target scale (0.5 = half-res, 1.0 = full-res)
+
     // Apply quality preset
     void ApplyPreset(ESSRQuality preset) {
         quality = preset;
@@ -265,6 +268,7 @@ private:
     SSSRSettings m_settings;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    float m_currentScale = 1.0f;        // Current resolution scale (for detecting changes)
     bool m_initialized = false;
     uint32_t m_frameIndex = 0;
     DirectX::XMMATRIX m_prevViewProj = DirectX::XMMatrixIdentity();

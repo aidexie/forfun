@@ -426,7 +426,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // Traces against HDR color buffer using Hi-Z acceleration
     if (m_ssrPass.GetSettings().enabled && m_hiZPass.GetSettings().enabled) {
-        //CScopedDebugEvent evt(cmdList, L"SSR Pass");
+        CScopedDebugEvent evt(cmdList, L"SSR Pass");
         m_ssrPass.Render(cmdList,
                          m_gbuffer.GetDepthBuffer(),
                          m_gbuffer.GetNormalRoughness(),
@@ -439,7 +439,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
                          ctx.camera.nearZ, ctx.camera.farZ);
 
         // Composite SSR results into HDR buffer
-        //CScopedDebugEvent compEvt(cmdList, L"SSR Composite");
+        CScopedDebugEvent compEvt(cmdList, L"SSR Composite");
         m_ssrPass.Composite(cmdList,
                             m_offHDR.get(),
                             m_gbuffer.GetWorldPosMetallic(),

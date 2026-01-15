@@ -50,6 +50,7 @@ void CSSRPass::Shutdown() {
 
     m_width = 0;
     m_height = 0;
+    m_currentScale = 1.0f;
     m_initialized = false;
     m_frameIndex = 0;
     m_prevViewProj = XMMatrixIdentity();
@@ -84,8 +85,10 @@ void CSSRPass::Render(ICommandList* cmdList,
         return;
     }
 
-    // Ensure textures are properly sized
-    if (width != m_width || height != m_height) {
+    // Ensure textures are properly sized (check both resolution and scale changes)
+    float scale = std::clamp(m_settings.resolutionScale, 0.25f, 1.0f);
+    if (width != m_width || height != m_height || scale != m_currentScale) {
+        m_currentScale = scale;
         createTextures(width, height);
     }
 
@@ -124,8 +127,13 @@ void CSSRPass::Render(ICommandList* cmdList,
     XMStoreFloat4x4(&cb.view, XMMatrixTranspose(view));
     XMStoreFloat4x4(&cb.invView, XMMatrixTranspose(invView));
     XMStoreFloat4x4(&cb.prevViewProj, XMMatrixTranspose(m_prevViewProj));
-    cb.screenSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
-    cb.texelSize = XMFLOAT2(1.0f / width, 1.0f / height);
+
+    // Calculate scaled resolution for SSR (use scale from earlier check)
+    uint32_t scaledWidth = std::max(1u, static_cast<uint32_t>(width * m_currentScale));
+    uint32_t scaledHeight = std::max(1u, static_cast<uint32_t>(height * m_currentScale));
+
+    cb.screenSize = XMFLOAT2(static_cast<float>(scaledWidth), static_cast<float>(scaledHeight));
+    cb.texelSize = XMFLOAT2(1.0f / scaledWidth, 1.0f / scaledHeight);
     cb.maxDistance = m_settings.maxDistance;
     cb.thickness = m_settings.thickness;
     cb.stride = m_settings.stride;
@@ -153,9 +161,9 @@ void CSSRPass::Render(ICommandList* cmdList,
 
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
 
-    // Dispatch compute shader
-    uint32_t groupsX = (width + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
-    uint32_t groupsY = (height + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
+    // Dispatch compute shader at scaled resolution
+    uint32_t groupsX = (scaledWidth + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
+    uint32_t groupsY = (scaledHeight + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
     cmdList->Dispatch(groupsX, groupsY, 1);
 
     // Transition SSR result back to SRV state
@@ -220,11 +228,16 @@ void CSSRPass::createTextures(uint32_t width, uint32_t height) {
     m_width = width;
     m_height = height;
 
+    // Apply resolution scale
+    float scale = std::clamp(m_settings.resolutionScale, 0.25f, 1.0f);
+    uint32_t scaledWidth = std::max(1u, static_cast<uint32_t>(width * scale));
+    uint32_t scaledHeight = std::max(1u, static_cast<uint32_t>(height * scale));
+
     // Create SSR result texture
     // R16G16B16A16_FLOAT: rgb = reflection color, a = confidence
     TextureDesc desc;
-    desc.width = width;
-    desc.height = height;
+    desc.width = scaledWidth;
+    desc.height = scaledHeight;
     desc.format = ETextureFormat::R16G16B16A16_FLOAT;
     desc.mipLevels = 1;
     desc.usage = ETextureUsage::ShaderResource | ETextureUsage::UnorderedAccess;
@@ -246,7 +259,7 @@ void CSSRPass::createTextures(uint32_t width, uint32_t height) {
         CFFLog::Warning("[SSRPass] Failed to create SSR history texture (temporal disabled)");
     }
 
-    CFFLog::Info("[SSRPass] Created SSR textures: %ux%u", width, height);
+    CFFLog::Info("[SSRPass] Created SSR textures: %ux%u (scale: %.2f)", scaledWidth, scaledHeight, scale);
 }
 
 void CSSRPass::createSamplers() {

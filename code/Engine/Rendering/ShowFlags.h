@@ -31,6 +31,10 @@ struct FShowFlags
 
     // Post-Processing
     bool PostProcessing = true;     // 是否应用后处理（Tone Mapping + Gamma Correction）
+    bool Bloom = false;             // 是否启用 Bloom 效果
+    bool SSAO = false;              // 是否启用 SSAO（Screen-Space Ambient Occlusion）
+    bool SSR = false;               // 是否启用 SSR（Screen-Space Reflections）
+    bool HiZ = false;               // 是否启用 Hi-Z（SSR 依赖）
 
     // ============================================
     // Editor Tools (Only in Editor)
@@ -67,6 +71,10 @@ struct FShowFlags
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
         flags.PostProcessing = true;
+        flags.Bloom = false;            // ❌ 默认关闭
+        flags.SSAO = false;             // ❌ 默认关闭
+        flags.SSR = false;              // ❌ 默认关闭
+        flags.HiZ = false;              // ❌ 默认关闭
         flags.Grid = true;              // ✅ 编辑器网格
         flags.DebugLines = true;        // ✅ 调试线框
         flags.Gizmos = false;           // TODO: 未来实现
@@ -86,6 +94,10 @@ struct FShowFlags
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
         flags.PostProcessing = true;
+        flags.Bloom = false;            // ❌ 默认关闭
+        flags.SSAO = false;             // ❌ 默认关闭
+        flags.SSR = false;              // ❌ 默认关闭
+        flags.HiZ = false;              // ❌ 默认关闭
         // ❌ 无编辑器工具
         flags.Grid = false;
         flags.DebugLines = false;
@@ -106,6 +118,10 @@ struct FShowFlags
         flags.OpaqueObjects = true;
         flags.TransparentObjects = true;
         flags.PostProcessing = false;   // ❌ 预览不需要后处理
+        flags.Bloom = false;            // ❌ 默认关闭
+        flags.SSAO = false;             // ❌ 默认关闭
+        flags.SSR = false;              // ❌ 默认关闭
+        flags.HiZ = false;              // ❌ 默认关闭
         flags.Grid = false;
         flags.DebugLines = false;
         return flags;

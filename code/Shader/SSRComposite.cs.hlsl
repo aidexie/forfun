@@ -58,7 +58,8 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
 
     // Sample inputs - read HDR via UAV to avoid SRV/UAV state conflict
     float4 hdrColor = g_HDRBuffer[DTid.xy];
-    float4 ssrData = g_SSRResult.SampleLevel(g_PointSampler, uv, 0);
+    // Use linear sampler for SSR to support resolution scaling (bilinear upsample)
+    float4 ssrData = g_SSRResult.SampleLevel(g_LinearSampler, uv, 0);
     float4 rt0 = g_WorldPosMetallic.SampleLevel(g_PointSampler, uv, 0);
     float4 rt1 = g_NormalRoughness.SampleLevel(g_PointSampler, uv, 0);
 

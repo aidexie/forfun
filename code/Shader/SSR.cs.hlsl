@@ -446,7 +446,7 @@ float4 StochasticSSR(float3 viewPos, float3 normalVS, float3 viewDir, float roug
         }
 
         // Skip rays pointing away from camera
-        if (reflectDir.z > 0.0)
+        if (reflectDir.z < 0.0)
             continue;
 
         // Jitter for temporal stability

@@ -87,6 +87,15 @@ public:
                 boxMesh->path = "mesh/cube.obj";
                 boxMesh->materialPath = matPaths[i];
             }
+            {
+                auto* box = scene.GetWorld().Create("ColorBox_Wall");
+                auto* boxT = box->AddComponent<STransform>();
+                boxT->position = XMFLOAT3(0.0f, 0.0f, 12.0f);
+                boxT->scale = XMFLOAT3(15.8f, 15.8f, 0.8f);
+                auto* boxMesh = box->AddComponent<SMeshRenderer>();
+                boxMesh->path = "mesh/cube.obj";
+                boxMesh->materialPath = matPaths[3];
+            }
 
             // Tall box in background (to test reflection at distance)
             auto* tallBox = scene.GetWorld().Create("TallBox");
@@ -109,7 +118,7 @@ public:
             if (deferredPipeline) {
                 deferredPipeline->GetHiZPass().GetSettings().enabled = true;
                 deferredPipeline->GetSSRPass().GetSettings().enabled = true;
-                deferredPipeline->GetSSRPass().GetSettings().maxDistance = 100.0f;
+                deferredPipeline->GetSSRPass().GetSettings().maxDistance = 500.0f;
                 deferredPipeline->GetSSRPass().GetSettings().maxSteps = 64;
             }
         });
@@ -181,7 +190,7 @@ public:
             CFFLog::Info("[TestSSR:Frame45] Test complete");
 
             // Reset debug mode
-            CScene::Instance().GetLightSettings().gBufferDebugMode = EGBufferDebugMode::None;
+            CScene::Instance().GetLightSettings().gBufferDebugMode = EGBufferDebugMode::SSR_Result;
 
             if (ctx.failures.empty()) {
                 CFFLog::Info("TEST PASSED: SSR rendering correctly");

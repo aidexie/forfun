@@ -149,39 +149,61 @@ The SimpleLinear algorithm performs basic fixed-stride ray marching:
 ```
 1. Transform ray to screen-space (start UV, end UV, depths)
 2. Calculate step size = normalize(rayDir) * texelSize * stride
-3. For each step (up to maxSteps):
+3. Early-out if reflectDir.z < 0 (ray points behind camera in LH coords)
+4. For each step (up to maxSteps):
    a. Advance UV and depth by step size
    b. Sample full-res depth buffer
    c. If ray depth <= scene depth (reversed-Z):
       - If within thickness threshold → HIT
-      - Else break (behind surface)
-4. Apply edge fade and distance fade to confidence
+      - Else continue (passed through thin geometry)
+5. Apply edge fade and distance fade to confidence
 ```
+
+**Left-Handed Coordinate System:**
+- +Z points into the scene (forward)
+- -Z points behind the camera
+- Skip rays with `reflectDir.z < 0` (cannot hit screen pixels)
 
 **Advantages:** Simple, no Hi-Z dependency, easy to debug
 **Disadvantages:** Slower (no acceleration), may miss thin features
 
 ### Hi-Z Ray Marching
 
-The Hi-Z algorithm uses a depth pyramid to accelerate ray-scene intersection:
+The Hi-Z algorithm uses cell-based traversal for efficient ray-scene intersection:
 
 ```
-1. Transform ray to screen-space
-2. Start at mip level 0, stride = initial stride
-3. For each step:
+1. Transform ray to screen-space (ssPos = UV + depth)
+2. Normalize ray direction per-pixel: ssDir = ssRay / rayLengthPixels
+3. Start at mip level 0, track consecutive "in front" steps
+4. For each step:
    a. Sample Hi-Z at current mip level
-   b. If ray is behind depth:
+   b. If ray is behind depth (reversed-Z: rayDepth <= sceneDepth):
       - If at mip 0 and within thickness → HIT
-      - Else step back, decrease mip, halve stride
+      - If at mip 0 but too thick → continue (passed through)
+      - If at coarse mip → decrease mip level (refine)
    c. If ray is in front:
-      - Advance ray by stride
-      - Increase stride and mip after initial steps
-4. Binary search refinement for precise hit location
+      - Calculate cell boundaries at current mip
+      - Step to nearest cell boundary (exact distance)
+      - After 3 safe steps, increase mip level (accelerate)
+5. Apply edge fade, distance fade, and back-face fade to confidence
 ```
+
+**Cell-Based Stepping:**
+- At each mip level, cells are `2^mip` pixels wide
+- Ray advances exactly to cell boundary (no fixed stride patterns)
+- Eliminates stripe artifacts from adaptive stride scaling
+
+**Conservative Mip Increase:**
+- Only increase mip after 3 consecutive "in front" steps
+- Prevents oscillation between mip levels during refinement
 
 **Reversed-Z Handling:**
 - Near plane = 1.0, Far plane = 0.0
 - Ray is "behind" surface when `rayDepth <= sceneDepth`
+
+**Back-Face Rejection:**
+- Confidence is reduced when hitting back-facing surfaces
+- Uses `dot(-rayDir, hitNormal)` to detect back faces
 
 ### GGX Importance Sampling
 
@@ -402,4 +424,4 @@ Potential enhancements for consideration:
 
 ---
 
-**Last Updated:** 2025-01-14
+**Last Updated:** 2026-01-14
