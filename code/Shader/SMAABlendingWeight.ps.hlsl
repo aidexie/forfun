@@ -1,50 +1,24 @@
-// ============================================
-// SMAABlendingWeight.ps.hlsl - SMAA Blending Weight Calculation
-// ============================================
-// Second pass of SMAA: Calculates blending weights using pattern matching.
+// SMAA Blending Weight Calculation - Calculates blending weights using pattern matching.
 // Uses pre-computed AreaTex and SearchTex lookup tables.
-//
-// Reference:
-//   "SMAA: Enhanced Subpixel Morphological Antialiasing"
-//   Jorge Jimenez et al. (2012)
-//   http://www.iryoku.com/smaa/
-//
-// Entry Point: main
-// ============================================
+// Reference: "SMAA: Enhanced Subpixel Morphological Antialiasing" (Jimenez et al., 2012)
 
-// ============================================
-// SMAA Configuration
-// ============================================
 #define SMAA_MAX_SEARCH_STEPS 16
-#define SMAA_MAX_SEARCH_STEPS_DIAG 8
-#define SMAA_CORNER_ROUNDING 25
 #define SMAA_AREATEX_MAX_DISTANCE 16
 #define SMAA_AREATEX_PIXEL_SIZE (1.0 / float2(160.0, 560.0))
 #define SMAA_AREATEX_SUBTEX_SIZE (1.0 / 7.0)
 #define SMAA_SEARCHTEX_SIZE float2(66.0, 33.0)
 #define SMAA_SEARCHTEX_PACKED_SIZE float2(64.0, 16.0)
 
-// ============================================
-// Constant Buffer
-// ============================================
 cbuffer CB_SMAABlend : register(b0) {
     float4 gRTMetrics;  // (1/width, 1/height, width, height)
 };
 
-// ============================================
-// Textures and Samplers
-// ============================================
-Texture2D<float2> gEdgesTex : register(t0);    // Edge detection output
-Texture2D<float4> gAreaTex : register(t1);     // Pre-computed area texture
-Texture2D<float> gSearchTex : register(t2);    // Pre-computed search texture
+Texture2D<float2> gEdgesTex : register(t0);
+Texture2D<float4> gAreaTex : register(t1);
+Texture2D<float> gSearchTex : register(t2);
 SamplerState gLinearSampler : register(s0);
 SamplerState gPointSampler : register(s1);
 
-// ============================================
-// Helper Functions
-// ============================================
-
-// Decode search texture value
 float SearchLength(float2 e, float offset) {
     // Scale and bias for search texture lookup
     float2 scale = SMAA_SEARCHTEX_SIZE * float2(0.5, -1.0);
@@ -59,7 +33,6 @@ float SearchLength(float2 e, float offset) {
     return gSearchTex.SampleLevel(gLinearSampler, e * scale + bias, 0);
 }
 
-// Search for edge end (horizontal)
 float SearchXLeft(float2 uv, float end) {
     float2 e = float2(0.0, 1.0);
 
@@ -90,7 +63,6 @@ float SearchXRight(float2 uv, float end) {
     return -gRTMetrics.x * offset + uv.x;
 }
 
-// Search for edge end (vertical)
 float SearchYUp(float2 uv, float end) {
     float2 e = float2(1.0, 0.0);
 
@@ -121,21 +93,13 @@ float SearchYDown(float2 uv, float end) {
     return -gRTMetrics.y * offset + uv.y;
 }
 
-// Sample area texture for blending weights
 float2 Area(float2 dist, float e1, float e2, float offset) {
-    // Remap to area texture coordinates
     float2 texcoord = SMAA_AREATEX_MAX_DISTANCE * round(4.0 * float2(e1, e2)) + dist;
-
-    // Apply subpixel offset
     texcoord = SMAA_AREATEX_PIXEL_SIZE * (texcoord + 0.5);
     texcoord.y = SMAA_AREATEX_SUBTEX_SIZE * offset + texcoord.y;
-
     return gAreaTex.SampleLevel(gLinearSampler, texcoord, 0).rg;
 }
 
-// ============================================
-// Blending Weight Calculation
-// ============================================
 struct PSInput {
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;

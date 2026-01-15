@@ -11,32 +11,33 @@
 
 using namespace RHI;
 
-// ============================================
-// Fullscreen Vertex Structure
-// ============================================
+namespace {
+
+#if defined(_DEBUG)
+constexpr bool kDebugShaders = true;
+#else
+constexpr bool kDebugShaders = false;
+#endif
+
 struct FullscreenVertex {
-    float x, y;   // Position (NDC space)
-    float u, v;   // UV
+    float x, y;
+    float u, v;
 };
 
-// ============================================
-// Constant Buffers
-// ============================================
 struct alignas(16) CB_FXAA {
-    DirectX::XMFLOAT2 rcpFrame;         // 1.0 / resolution
-    float subpixelQuality;              // Subpixel AA quality (0-1)
-    float edgeThreshold;                // Edge detection threshold
-    float edgeThresholdMin;             // Minimum edge threshold
+    DirectX::XMFLOAT2 rcpFrame;
+    float subpixelQuality;
+    float edgeThreshold;
+    float edgeThresholdMin;
     float _pad[3];
 };
 
 struct alignas(16) CB_SMAA {
-    DirectX::XMFLOAT4 rtMetrics;        // (1/width, 1/height, width, height)
+    DirectX::XMFLOAT4 rtMetrics;  // (1/width, 1/height, width, height)
 };
 
-// ============================================
-// Lifecycle
-// ============================================
+} // anonymous namespace
+
 bool CAntiAliasingPass::Initialize() {
     if (m_initialized) return true;
 
@@ -82,9 +83,6 @@ void CAntiAliasingPass::Shutdown() {
     CFFLog::Info("[AntiAliasing] Shutdown");
 }
 
-// ============================================
-// Rendering
-// ============================================
 void CAntiAliasingPass::Render(ITexture* inputTexture,
                                ITexture* outputTexture,
                                uint32_t width, uint32_t height,
@@ -112,9 +110,6 @@ bool CAntiAliasingPass::IsEnabled(const SAntiAliasingSettings& settings) const {
     return settings.mode != EAntiAliasingMode::Off;
 }
 
-// ============================================
-// FXAA Implementation
-// ============================================
 void CAntiAliasingPass::renderFXAA(ICommandList* cmdList,
                                    ITexture* input, ITexture* output,
                                    uint32_t width, uint32_t height,
@@ -159,9 +154,6 @@ void CAntiAliasingPass::renderFXAA(ICommandList* cmdList,
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 }
 
-// ============================================
-// SMAA Implementation
-// ============================================
 void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
                                    ITexture* input, ITexture* output,
                                    uint32_t width, uint32_t height,
@@ -178,9 +170,7 @@ void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
     CB_SMAA cb;
     cb.rtMetrics = { 1.0f / width, 1.0f / height, static_cast<float>(width), static_cast<float>(height) };
 
-    // ============================================
     // Pass 1: Edge Detection
-    // ============================================
     {
         CScopedDebugEvent evt1(cmdList, L"SMAA Edge Detection");
 
@@ -208,9 +198,7 @@ void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
         cmdList->SetRenderTargets(0, nullptr, nullptr);
     }
 
-    // ============================================
     // Pass 2: Blending Weight Calculation
-    // ============================================
     {
         CScopedDebugEvent evt2(cmdList, L"SMAA Blend Weight");
 
@@ -240,9 +228,7 @@ void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
         cmdList->SetRenderTargets(0, nullptr, nullptr);
     }
 
-    // ============================================
     // Pass 3: Neighborhood Blending
-    // ============================================
     {
         CScopedDebugEvent evt3(cmdList, L"SMAA Neighborhood Blend");
 
@@ -268,9 +254,6 @@ void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
     }
 }
 
-// ============================================
-// Resource Creation
-// ============================================
 void CAntiAliasingPass::createSharedResources() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
@@ -306,14 +289,7 @@ void CAntiAliasingPass::createSharedResources() {
 
     // Compile shared vertex shader
     std::string vsPath = FFPath::GetSourceDir() + "/Shader/Fullscreen.vs.hlsl";
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    SCompiledShader vsCompiled = CompileShaderFromFile(vsPath, "main", "vs_5_0", nullptr, debugShaders);
+    SCompiledShader vsCompiled = CompileShaderFromFile(vsPath, "main", "vs_5_0", nullptr, kDebugShaders);
     if (!vsCompiled.success) {
         CFFLog::Error("[AntiAliasing] Failed to compile Fullscreen.vs.hlsl: %s", vsCompiled.errorMessage.c_str());
         return;
@@ -330,16 +306,8 @@ void CAntiAliasingPass::createFXAAResources() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx || !m_fullscreenVS) return;
 
-    // Compile FXAA pixel shader
     std::string psPath = FFPath::GetSourceDir() + "/Shader/FXAA.ps.hlsl";
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    SCompiledShader psCompiled = CompileShaderFromFile(psPath, "main", "ps_5_0", nullptr, debugShaders);
+    SCompiledShader psCompiled = CompileShaderFromFile(psPath, "main", "ps_5_0", nullptr, kDebugShaders);
     if (!psCompiled.success) {
         CFFLog::Error("[AntiAliasing] Failed to compile FXAA.ps.hlsl: %s", psCompiled.errorMessage.c_str());
         return;
@@ -386,20 +354,10 @@ void CAntiAliasingPass::createSMAAResources() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx || !m_fullscreenVS) return;
 
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
     std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
 
-    // ============================================
     // Compile SMAA shaders
-    // ============================================
-
-    // Edge Detection
-    SCompiledShader edgeCompiled = CompileShaderFromFile(shaderDir + "SMAAEdgeDetection.ps.hlsl", "main", "ps_5_0", nullptr, debugShaders);
+    SCompiledShader edgeCompiled = CompileShaderFromFile(shaderDir + "SMAAEdgeDetection.ps.hlsl", "main", "ps_5_0", nullptr, kDebugShaders);
     if (!edgeCompiled.success) {
         CFFLog::Error("[AntiAliasing] Failed to compile SMAAEdgeDetection.ps.hlsl: %s", edgeCompiled.errorMessage.c_str());
         return;
@@ -411,8 +369,7 @@ void CAntiAliasingPass::createSMAAResources() {
     edgeDesc.bytecodeSize = edgeCompiled.bytecode.size();
     m_smaaEdgePS.reset(ctx->CreateShader(edgeDesc));
 
-    // Blending Weight
-    SCompiledShader blendCompiled = CompileShaderFromFile(shaderDir + "SMAABlendingWeight.ps.hlsl", "main", "ps_5_0", nullptr, debugShaders);
+    SCompiledShader blendCompiled = CompileShaderFromFile(shaderDir + "SMAABlendingWeight.ps.hlsl", "main", "ps_5_0", nullptr, kDebugShaders);
     if (!blendCompiled.success) {
         CFFLog::Error("[AntiAliasing] Failed to compile SMAABlendingWeight.ps.hlsl: %s", blendCompiled.errorMessage.c_str());
         return;
@@ -424,8 +381,7 @@ void CAntiAliasingPass::createSMAAResources() {
     blendDesc.bytecodeSize = blendCompiled.bytecode.size();
     m_smaaBlendPS.reset(ctx->CreateShader(blendDesc));
 
-    // Neighborhood Blending
-    SCompiledShader neighborCompiled = CompileShaderFromFile(shaderDir + "SMAANeighborhoodBlend.ps.hlsl", "main", "ps_5_0", nullptr, debugShaders);
+    SCompiledShader neighborCompiled = CompileShaderFromFile(shaderDir + "SMAANeighborhoodBlend.ps.hlsl", "main", "ps_5_0", nullptr, kDebugShaders);
     if (!neighborCompiled.success) {
         CFFLog::Error("[AntiAliasing] Failed to compile SMAANeighborhoodBlend.ps.hlsl: %s", neighborCompiled.errorMessage.c_str());
         return;
@@ -437,11 +393,7 @@ void CAntiAliasingPass::createSMAAResources() {
     neighborDesc.bytecodeSize = neighborCompiled.bytecode.size();
     m_smaaNeighborPS.reset(ctx->CreateShader(neighborDesc));
 
-    // ============================================
-    // Create SMAA PSOs
-    // ============================================
-
-    // Base PSO description (shared settings)
+    // Create SMAA PSOs - base description shared across all passes
     PipelineStateDesc basePsoDesc;
     basePsoDesc.vertexShader = m_fullscreenVS.get();
     basePsoDesc.inputLayout = {
@@ -478,11 +430,7 @@ void CAntiAliasingPass::createSMAAResources() {
     neighborPsoDesc.debugName = "SMAA_NeighborBlend_PSO";
     m_smaaNeighborPSO.reset(ctx->CreatePipelineState(neighborPsoDesc));
 
-    // ============================================
-    // Create SMAA Lookup Textures
-    // ============================================
-
-    // Area Texture (160x560 RG8)
+    // Create SMAA lookup textures
     TextureDesc areaTexDesc;
     areaTexDesc.width = SMAALookupTextures::AREATEX_WIDTH;
     areaTexDesc.height = SMAALookupTextures::AREATEX_HEIGHT;
@@ -493,7 +441,6 @@ void CAntiAliasingPass::createSMAAResources() {
     const uint8_t* areaData = SMAALookupTextures::GetAreaTexData();
     m_smaaAreaTex.reset(ctx->CreateTexture(areaTexDesc, areaData));
 
-    // Search Texture (64x16 R8)
     TextureDesc searchTexDesc;
     searchTexDesc.width = SMAALookupTextures::SEARCHTEX_WIDTH;
     searchTexDesc.height = SMAALookupTextures::SEARCHTEX_HEIGHT;

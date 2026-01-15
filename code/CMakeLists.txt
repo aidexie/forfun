@@ -247,6 +247,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestSSR.cpp
     ${CODE_PATH}/Tests/TestMotionBlur.cpp
     ${CODE_PATH}/Tests/TestTAA.cpp
+    ${CODE_PATH}/Tests/TestAntiAliasing.cpp
 )
 
 add_executable(forfun WIN32

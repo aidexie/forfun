@@ -1,56 +1,29 @@
-// ============================================
-// SMAAEdgeDetection.ps.hlsl - SMAA Edge Detection Pass
-// ============================================
-// First pass of SMAA: Detects edges using luma-based comparison.
-// Outputs a 2-channel texture (RG8) marking horizontal and vertical edges.
-//
-// Reference:
-//   "SMAA: Enhanced Subpixel Morphological Antialiasing"
-//   Jorge Jimenez et al. (2012)
-//   http://www.iryoku.com/smaa/
-//
-// Entry Point: main
-// ============================================
+// SMAA Edge Detection Pass - Detects edges using luma-based comparison.
+// Outputs RG8 texture marking horizontal and vertical edges.
+// Reference: "SMAA: Enhanced Subpixel Morphological Antialiasing" (Jimenez et al., 2012)
 
-// ============================================
-// SMAA Configuration
-// ============================================
 #define SMAA_THRESHOLD 0.1
 #define SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR 2.0
 
-// ============================================
-// Constant Buffer
-// ============================================
 cbuffer CB_SMAAEdge : register(b0) {
     float4 gRTMetrics;  // (1/width, 1/height, width, height)
 };
 
-// ============================================
-// Textures and Samplers
-// ============================================
 Texture2D<float4> gInputTexture : register(t0);
 SamplerState gLinearSampler : register(s0);
 SamplerState gPointSampler : register(s1);
 
-// ============================================
-// Helper Functions
-// ============================================
-
-// Convert RGB to perceptual luminance
 float RGBToLuma(float3 rgb) {
     return dot(rgb, float3(0.2126, 0.7152, 0.0722));
 }
 
-// ============================================
-// Edge Detection
-// ============================================
 struct PSInput {
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;
 };
 
 struct PSOutput {
-    float2 edges : SV_Target0;  // RG8: (horizontal edge, vertical edge)
+    float2 edges : SV_Target0;
 };
 
 PSOutput main(PSInput input) {

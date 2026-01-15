@@ -1,23 +1,7 @@
-// ============================================
-// FXAA.ps.hlsl - Fast Approximate Anti-Aliasing 3.11
-// ============================================
-// NVIDIA FXAA 3.11 implementation for post-process anti-aliasing.
-// Single-pass algorithm that detects edges via local contrast and
-// applies directional blur along detected edges.
-//
-// Performance: ~0.3-0.5ms @ 1080p
-// Quality: Good for most cases, slight blur on text/fine details
-//
-// Reference:
-//   "FXAA" Timothy Lottes (NVIDIA, 2009)
-//   http://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf
-//
-// Entry Point: main
-// ============================================
+// FXAA 3.11 - Fast Approximate Anti-Aliasing
+// Single-pass algorithm detecting edges via local contrast and applying directional blur.
+// Reference: Timothy Lottes (NVIDIA, 2009)
 
-// ============================================
-// Constant Buffer
-// ============================================
 cbuffer CB_FXAA : register(b0) {
     float2 gRcpFrame;           // 1.0 / resolution
     float gSubpixelQuality;     // Subpixel AA quality (0.0 = off, 1.0 = max blur)
@@ -26,30 +10,17 @@ cbuffer CB_FXAA : register(b0) {
     float3 _pad;
 };
 
-// ============================================
-// Textures and Samplers
-// ============================================
 Texture2D<float4> gInputTexture : register(t0);
 SamplerState gLinearSampler : register(s0);
 
-// ============================================
-// Helper Functions
-// ============================================
-
-// Convert RGB to perceptual luminance
 float RGBToLuma(float3 rgb) {
-    // Using perceived luminance weights
     return dot(rgb, float3(0.299, 0.587, 0.114));
 }
 
-// Sample texture with offset (in pixels)
 float4 SampleOffset(float2 uv, float2 offset) {
     return gInputTexture.SampleLevel(gLinearSampler, uv + offset * gRcpFrame, 0);
 }
 
-// ============================================
-// FXAA Algorithm
-// ============================================
 struct PSInput {
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;
@@ -97,7 +68,6 @@ float4 main(PSInput input) : SV_Target {
     float lumaNS = lumaN + lumaS;
     float lumaWE = lumaW + lumaE;
     float lumaNWSW = lumaNW + lumaSW;
-    float lumaNENE = lumaNE + lumaNE;
     float lumaNWSE = lumaNW + lumaSE;
     float lumaNESW = lumaNE + lumaSW;
 

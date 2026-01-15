@@ -1,35 +1,15 @@
-// ============================================
-// SMAANeighborhoodBlend.ps.hlsl - SMAA Neighborhood Blending Pass
-// ============================================
-// Third and final pass of SMAA: Blends pixels with neighbors using
-// the calculated blending weights from pass 2.
-//
-// Reference:
-//   "SMAA: Enhanced Subpixel Morphological Antialiasing"
-//   Jorge Jimenez et al. (2012)
-//   http://www.iryoku.com/smaa/
-//
-// Entry Point: main
-// ============================================
+// SMAA Neighborhood Blending Pass - Blends pixels with neighbors using calculated weights.
+// Reference: "SMAA: Enhanced Subpixel Morphological Antialiasing" (Jimenez et al., 2012)
 
-// ============================================
-// Constant Buffer
-// ============================================
 cbuffer CB_SMAANeighbor : register(b0) {
     float4 gRTMetrics;  // (1/width, 1/height, width, height)
 };
 
-// ============================================
-// Textures and Samplers
-// ============================================
-Texture2D<float4> gInputTexture : register(t0);   // Original LDR input
-Texture2D<float4> gBlendTex : register(t1);       // Blending weights from pass 2
+Texture2D<float4> gInputTexture : register(t0);
+Texture2D<float4> gBlendTex : register(t1);
 SamplerState gLinearSampler : register(s0);
 SamplerState gPointSampler : register(s1);
 
-// ============================================
-// Neighborhood Blending
-// ============================================
 struct PSInput {
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;
