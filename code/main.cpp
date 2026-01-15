@@ -577,9 +577,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             // Render through pipeline
             {
                 RHI::CScopedDebugEvent evtScene(cmdList, L"Render Pipeline");
-                FShowFlags flags = activeTest ? testContext.showFlags : CEditorContext::Instance().GetShowFlags();
                 CRenderPipeline::RenderContext renderCtx{
-                    editorCamera, CScene::Instance(), vpW, vpH, dt, flags
+                    editorCamera, CScene::Instance(), vpW, vpH, dt, CEditorContext::Instance().GetShowFlags()
                 };
                 g_pipeline->Render(renderCtx);
             }

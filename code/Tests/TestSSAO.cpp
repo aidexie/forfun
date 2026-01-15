@@ -2,6 +2,7 @@
 #include "Core/Testing/TestRegistry.h"
 #include "Core/Testing/Screenshot.h"
 #include "Core/FFLog.h"
+#include "Editor/EditorContext.h"
 #include "Engine/Scene.h"
 #include "Engine/SceneLightSettings.h"
 #include "Engine/Components/Transform.h"
@@ -130,7 +131,7 @@ public:
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
             if (deferredPipeline) {
-                ctx.showFlags.SSAO = true;
+                CEditorContext::Instance().GetShowFlags().SSAO = true;
                 auto& ssaoSettings = deferredPipeline->GetSSAOPass().GetSettings();
                 ssaoSettings.algorithm = ESSAOAlgorithm::Debug_RawDepth;
                 ssaoSettings.radius = 0.5f;

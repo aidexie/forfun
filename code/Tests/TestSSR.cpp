@@ -2,6 +2,7 @@
 #include "Core/Testing/TestRegistry.h"
 #include "Core/Testing/Screenshot.h"
 #include "Core/FFLog.h"
+#include "Editor/EditorContext.h"
 #include "Engine/Scene.h"
 #include "Engine/SceneLightSettings.h"
 #include "Engine/Components/Transform.h"
@@ -114,8 +115,9 @@ public:
             CFFLog::Info("[TestSSR:Frame3] Enabling SSR and Hi-Z");
 
             // Enable SSR and Hi-Z via showFlags
-            ctx.showFlags.HiZ = true;
-            ctx.showFlags.SSR = true;
+            auto& showFlags = CEditorContext::Instance().GetShowFlags();
+            showFlags.HiZ = true;
+            showFlags.SSR = true;
 
             CDeferredRenderPipeline* deferredPipeline =
                 dynamic_cast<CDeferredRenderPipeline*>(ctx.pipeline);
@@ -171,18 +173,19 @@ public:
             if (deferredPipeline) {
                 auto& ssrPass = deferredPipeline->GetSSRPass();
                 auto& hiZPass = deferredPipeline->GetHiZPass();
+                auto& showFlags = CEditorContext::Instance().GetShowFlags();
 
                 RHI::ITexture* ssrTexture = ssrPass.GetSSRTexture();
                 RHI::ITexture* hiZTexture = hiZPass.GetHiZTexture();
 
                 CFFLog::Info("[TestSSR:Frame40] SSR enabled: %s, Hi-Z enabled: %s",
-                    ctx.showFlags.SSR ? "yes" : "no",
-                    ctx.showFlags.HiZ ? "yes" : "no");
+                    showFlags.SSR ? "yes" : "no",
+                    showFlags.HiZ ? "yes" : "no");
 
                 ctx.Assert(ssrTexture != nullptr, "SSR texture should be created");
                 ctx.Assert(hiZTexture != nullptr, "Hi-Z texture should be created (SSR dependency)");
-                ctx.Assert(ctx.showFlags.SSR, "SSR should be enabled");
-                ctx.Assert(ctx.showFlags.HiZ, "Hi-Z should be enabled");
+                ctx.Assert(showFlags.SSR, "SSR should be enabled");
+                ctx.Assert(showFlags.HiZ, "Hi-Z should be enabled");
             } else {
                 ctx.Assert(false, "Expected DeferredRenderPipeline");
             }

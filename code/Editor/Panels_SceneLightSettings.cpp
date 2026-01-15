@@ -130,116 +130,118 @@ static void DrawVolumetricLightmapSection(CSceneLightSettings& settings) {
         volumetricLightmap.SetEnabled(vlConfig.enabled);
     }
 
-    ImGui::Spacing();
+    if (vlConfig.enabled) {
+        ImGui::Spacing();
 
-    // Volume bounds
-    ImGui::Text("Volume Bounds:");
-    ImGui::PushItemWidth(200);
-    ImGui::DragFloat3("Min##VLMin", &vlConfig.volumeMin.x, 1.0f, -1000.0f, 1000.0f, "%.1f");
-    ImGui::DragFloat3("Max##VLMax", &vlConfig.volumeMax.x, 1.0f, -1000.0f, 1000.0f, "%.1f");
-    ImGui::PopItemWidth();
+        // Volume bounds
+        ImGui::Text("Volume Bounds:");
+        ImGui::PushItemWidth(200);
+        ImGui::DragFloat3("Min##VLMin", &vlConfig.volumeMin.x, 1.0f, -1000.0f, 1000.0f, "%.1f");
+        ImGui::DragFloat3("Max##VLMax", &vlConfig.volumeMax.x, 1.0f, -1000.0f, 1000.0f, "%.1f");
+        ImGui::PopItemWidth();
 
-    // Min brick size
-    ImGui::PushItemWidth(150);
-    ImGui::DragFloat("Min Brick Size (m)##VL", &vlConfig.minBrickWorldSize, 0.1f, 0.5f, 20.0f, "%.1f");
-    ImGui::PopItemWidth();
+        // Min brick size
+        ImGui::PushItemWidth(150);
+        ImGui::DragFloat("Min Brick Size (m)##VL", &vlConfig.minBrickWorldSize, 0.1f, 0.5f, 20.0f, "%.1f");
+        ImGui::PopItemWidth();
 
-    HelpTooltip(
-        "Minimum size of the finest bricks.\n"
-        "Smaller = more precision, more memory.\n"
-        "Recommended: 1.0 - 4.0 meters.");
-
-    ImGui::Spacing();
-
-    // Show derived params if initialized
-    if (volumetricLightmap.IsInitialized()) {
-        const auto& derived = volumetricLightmap.GetDerivedParams();
-        ImGui::TextDisabled("Derived: MaxLevel=%d, IndirectionRes=%d^3",
-                           derived.maxLevel, derived.indirectionResolution);
-        if (volumetricLightmap.HasBakedData()) {
-            ImGui::TextDisabled("Bricks: %d, AtlasSize: %d^3",
-                               derived.actualBrickCount, derived.brickAtlasSize);
-        }
-    }
-
-    ImGui::Spacing();
-    ImGui::Separator();
-
-    // Bake settings
-    ImGui::Text("Bake Settings:");
-
-    const char* backends[] = { "CPU (Path Trace)", "GPU (DXR Ray Tracing)" };
-    int currentBackend = static_cast<int>(s_bakeConfig.backend);
-
-    ImGui::PushItemWidth(200);
-    if (ImGui::Combo("Backend##VLBake", &currentBackend, backends, IM_ARRAYSIZE(backends))) {
-        s_bakeConfig.backend = static_cast<ELightmapBakeBackend>(currentBackend);
-    }
-    ImGui::PopItemWidth();
-
-    bool dxrAvailable = volumetricLightmap.IsDXRBakingAvailable();
-    if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR && !dxrAvailable) {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "(DXR not available - will fallback to CPU)");
-    }
-
-    ImGui::Spacing();
-
-    // Backend-specific settings
-    ImGui::PushItemWidth(150);
-    if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) {
-        ImGui::Text("GPU Settings:");
-        ImGui::SliderInt("Samples/Pass##GPU", &s_bakeConfig.gpuSamplesPerVoxel, 64, 512);
-        ImGui::SliderInt("Accumulation Passes##GPU", &s_bakeConfig.gpuAccumulationPasses, 1, 64);
-        ImGui::SliderInt("Max Bounces##GPU", &s_bakeConfig.gpuMaxBounces, 1, 8);
-        ImGui::SliderFloat("Sky Intensity##GPU", &s_bakeConfig.gpuSkyIntensity, 0.0f, 5.0f, "%.2f");
-
-        int totalSamples = s_bakeConfig.gpuSamplesPerVoxel * s_bakeConfig.gpuAccumulationPasses;
-        ImGui::TextDisabled("Total samples/voxel: %d", totalSamples);
-    } else {
-        ImGui::Text("CPU Settings:");
-        ImGui::SliderInt("Samples/Voxel##CPU", &s_bakeConfig.cpuSamplesPerVoxel, 64, 16384);
-        ImGui::SliderInt("Max Bounces##CPU", &s_bakeConfig.cpuMaxBounces, 1, 8);
-    }
-    ImGui::PopItemWidth();
-
-    ImGui::Spacing();
-
-    // Bake buttons
-    if (s_isBaking || s_pendingGPUBake) {
-        ImGui::BeginDisabled();
-        const char* statusText = s_pendingGPUBake ? "Bake pending (next frame)..." : "Baking...";
-        ImGui::Button(statusText, ImVec2(250, 30));
-        ImGui::EndDisabled();
-    } else {
-        if (ImGui::Button("Build & Bake Volumetric Lightmap", ImVec2(250, 30))) {
-            s_pendingBakeVLConfig.volumeMin = vlConfig.volumeMin;
-            s_pendingBakeVLConfig.volumeMax = vlConfig.volumeMax;
-            s_pendingBakeVLConfig.minBrickWorldSize = vlConfig.minBrickWorldSize;
-            s_pendingGPUBake = true;
-            CFFLog::Info("[VolumetricLightmap] bake requested - will execute at start of next frame");
-        }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("Clear##VL")) {
-        CScene::Instance().GetVolumetricLightmap().Shutdown();
-        vlConfig.enabled = false;
-        CFFLog::Info("[VolumetricLightmap] Cleared.");
-    }
-
-    ImGui::Spacing();
-
-    // Debug visualization
-    if (volumetricLightmap.HasBakedData()) {
-        bool debugDraw = volumetricLightmap.IsDebugDrawEnabled();
-        if (ImGui::Checkbox("Show Octree Debug##VL", &debugDraw)) {
-            volumetricLightmap.SetDebugDrawEnabled(debugDraw);
-        }
         HelpTooltip(
-            "Visualize the octree brick structure.\n"
-            "Colors indicate subdivision levels:\n"
-            "Red=0, Orange=1, Yellow=2, Green=3, etc.");
+            "Minimum size of the finest bricks.\n"
+            "Smaller = more precision, more memory.\n"
+            "Recommended: 1.0 - 4.0 meters.");
+
+        ImGui::Spacing();
+
+        // Show derived params if initialized
+        if (volumetricLightmap.IsInitialized()) {
+            const auto& derived = volumetricLightmap.GetDerivedParams();
+            ImGui::TextDisabled("Derived: MaxLevel=%d, IndirectionRes=%d^3",
+                               derived.maxLevel, derived.indirectionResolution);
+            if (volumetricLightmap.HasBakedData()) {
+                ImGui::TextDisabled("Bricks: %d, AtlasSize: %d^3",
+                                   derived.actualBrickCount, derived.brickAtlasSize);
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // Bake settings
+        ImGui::Text("Bake Settings:");
+
+        const char* backends[] = { "CPU (Path Trace)", "GPU (DXR Ray Tracing)" };
+        int currentBackend = static_cast<int>(s_bakeConfig.backend);
+
+        ImGui::PushItemWidth(200);
+        if (ImGui::Combo("Backend##VLBake", &currentBackend, backends, IM_ARRAYSIZE(backends))) {
+            s_bakeConfig.backend = static_cast<ELightmapBakeBackend>(currentBackend);
+        }
+        ImGui::PopItemWidth();
+
+        bool dxrAvailable = volumetricLightmap.IsDXRBakingAvailable();
+        if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR && !dxrAvailable) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1, 0.5f, 0, 1), "(DXR not available - will fallback to CPU)");
+        }
+
+        ImGui::Spacing();
+
+        // Backend-specific settings
+        ImGui::PushItemWidth(150);
+        if (s_bakeConfig.backend == ELightmapBakeBackend::GPU_DXR) {
+            ImGui::Text("GPU Settings:");
+            ImGui::SliderInt("Samples/Pass##GPU", &s_bakeConfig.gpuSamplesPerVoxel, 64, 512);
+            ImGui::SliderInt("Accumulation Passes##GPU", &s_bakeConfig.gpuAccumulationPasses, 1, 64);
+            ImGui::SliderInt("Max Bounces##GPU", &s_bakeConfig.gpuMaxBounces, 1, 8);
+            ImGui::SliderFloat("Sky Intensity##GPU", &s_bakeConfig.gpuSkyIntensity, 0.0f, 5.0f, "%.2f");
+
+            int totalSamples = s_bakeConfig.gpuSamplesPerVoxel * s_bakeConfig.gpuAccumulationPasses;
+            ImGui::TextDisabled("Total samples/voxel: %d", totalSamples);
+        } else {
+            ImGui::Text("CPU Settings:");
+            ImGui::SliderInt("Samples/Voxel##CPU", &s_bakeConfig.cpuSamplesPerVoxel, 64, 16384);
+            ImGui::SliderInt("Max Bounces##CPU", &s_bakeConfig.cpuMaxBounces, 1, 8);
+        }
+        ImGui::PopItemWidth();
+
+        ImGui::Spacing();
+
+        // Bake buttons
+        if (s_isBaking || s_pendingGPUBake) {
+            ImGui::BeginDisabled();
+            const char* statusText = s_pendingGPUBake ? "Bake pending (next frame)..." : "Baking...";
+            ImGui::Button(statusText, ImVec2(250, 30));
+            ImGui::EndDisabled();
+        } else {
+            if (ImGui::Button("Build & Bake Volumetric Lightmap", ImVec2(250, 30))) {
+                s_pendingBakeVLConfig.volumeMin = vlConfig.volumeMin;
+                s_pendingBakeVLConfig.volumeMax = vlConfig.volumeMax;
+                s_pendingBakeVLConfig.minBrickWorldSize = vlConfig.minBrickWorldSize;
+                s_pendingGPUBake = true;
+                CFFLog::Info("[VolumetricLightmap] bake requested - will execute at start of next frame");
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Clear##VL")) {
+            CScene::Instance().GetVolumetricLightmap().Shutdown();
+            vlConfig.enabled = false;
+            CFFLog::Info("[VolumetricLightmap] Cleared.");
+        }
+
+        ImGui::Spacing();
+
+        // Debug visualization
+        if (volumetricLightmap.HasBakedData()) {
+            bool debugDraw = volumetricLightmap.IsDebugDrawEnabled();
+            if (ImGui::Checkbox("Show Octree Debug##VL", &debugDraw)) {
+                volumetricLightmap.SetDebugDrawEnabled(debugDraw);
+            }
+            HelpTooltip(
+                "Visualize the octree brick structure.\n"
+                "Colors indicate subdivision levels:\n"
+                "Red=0, Orange=1, Yellow=2, Green=3, etc.");
+        }
     }
 
     DoubleSpacing();
@@ -248,64 +250,72 @@ static void DrawVolumetricLightmapSection(CSceneLightSettings& settings) {
 static void DrawLightmap2DSection() {
     SectionHeader("2D Lightmap (UV2-based)");
 
-    // Atlas settings
-    ImGui::Text("Atlas Settings:");
-    ImGui::PushItemWidth(150);
-    ImGui::SliderInt("Resolution##LM2D", &s_lightmap2DConfig.atlasConfig.resolution, 256, 4096);
-    ImGui::SliderInt("Texels/Unit##LM2D", &s_lightmap2DConfig.atlasConfig.texelsPerUnit, 4, 64);
-    ImGui::SliderInt("Padding##LM2D", &s_lightmap2DConfig.atlasConfig.padding, 1, 8);
-    ImGui::PopItemWidth();
+    static bool s_expanded = false;
+    ImGui::Checkbox("Show Settings##LM2D", &s_expanded);
 
-    ImGui::Spacing();
+    if (s_expanded) {
+        ImGui::Spacing();
 
-    // Bake settings
-    ImGui::Text("Bake Settings:");
-    ImGui::PushItemWidth(150);
-    ImGui::SliderInt("Samples/Texel##LM2D", &s_lightmap2DConfig.bakeConfig.samplesPerTexel, 16, 512);
-    ImGui::SliderInt("Max Bounces##LM2D", &s_lightmap2DConfig.bakeConfig.maxBounces, 1, 8);
-    ImGui::SliderFloat("Sky Intensity##LM2D", &s_lightmap2DConfig.bakeConfig.skyIntensity, 0.0f, 5.0f, "%.2f");
-    ImGui::Checkbox("Enable OIDN Denoiser##LM2D", &s_lightmap2DConfig.bakeConfig.enableDenoiser);
-    ImGui::PopItemWidth();
+        // Atlas settings
+        ImGui::Text("Atlas Settings:");
+        ImGui::PushItemWidth(150);
+        ImGui::SliderInt("Resolution##LM2D", &s_lightmap2DConfig.atlasConfig.resolution, 256, 4096);
+        ImGui::SliderInt("Texels/Unit##LM2D", &s_lightmap2DConfig.atlasConfig.texelsPerUnit, 4, 64);
+        ImGui::SliderInt("Padding##LM2D", &s_lightmap2DConfig.atlasConfig.padding, 1, 8);
+        ImGui::PopItemWidth();
 
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Intel Open Image Denoise - AI-based denoising\nfor cleaner lightmaps with fewer samples.");
-    }
+        ImGui::Spacing();
 
-    ImGui::Spacing();
+        // Bake settings
+        ImGui::Text("Bake Settings:");
+        ImGui::PushItemWidth(150);
+        ImGui::SliderInt("Samples/Texel##LM2D", &s_lightmap2DConfig.bakeConfig.samplesPerTexel, 16, 512);
+        ImGui::SliderInt("Max Bounces##LM2D", &s_lightmap2DConfig.bakeConfig.maxBounces, 1, 8);
+        ImGui::SliderFloat("Sky Intensity##LM2D", &s_lightmap2DConfig.bakeConfig.skyIntensity, 0.0f, 5.0f, "%.2f");
+        ImGui::Checkbox("Enable OIDN Denoiser##LM2D", &s_lightmap2DConfig.bakeConfig.enableDenoiser);
+        ImGui::PopItemWidth();
 
-    // Bake button
-    if (s_is2DLightmapBaking || s_pending2DLightmapBake) {
-        ImGui::BeginDisabled();
-        const char* statusText = s_pending2DLightmapBake ? "Bake pending (next frame)..." : "Baking 2D Lightmap...";
-        ImGui::Button(statusText, ImVec2(200, 30));
-        ImGui::EndDisabled();
-    } else {
-        if (ImGui::Button("Bake 2D Lightmap", ImVec2(200, 30))) {
-            s_pending2DLightmapBake = true;
-            CFFLog::Info("[Lightmap2D] Bake requested - will execute at start of next frame");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Intel Open Image Denoise - AI-based denoising\nfor cleaner lightmaps with fewer samples.");
         }
-    }
 
-    // Reload button
-    auto& lightmap2D = CScene::Instance().GetLightmap2D();
-    if (lightmap2D.IsLoaded()) {
-        ImGui::SameLine();
-        if (ImGui::Button("Reload##LM2D")) {
-            if (lightmap2D.ReloadLightmap()) {
-                CFFLog::Info("[Lightmap2D] Reloaded successfully");
+        ImGui::Spacing();
+
+        // Bake button
+        if (s_is2DLightmapBaking || s_pending2DLightmapBake) {
+            ImGui::BeginDisabled();
+            const char* statusText = s_pending2DLightmapBake ? "Bake pending (next frame)..." : "Baking 2D Lightmap...";
+            ImGui::Button(statusText, ImVec2(200, 30));
+            ImGui::EndDisabled();
+        } else {
+            if (ImGui::Button("Bake 2D Lightmap", ImVec2(200, 30))) {
+                s_pending2DLightmapBake = true;
+                CFFLog::Info("[Lightmap2D] Bake requested - will execute at start of next frame");
             }
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Reload lightmap from disk:\n%s", lightmap2D.GetLoadedPath().c_str());
+
+        // Reload button
+        auto& lightmap2D = CScene::Instance().GetLightmap2D();
+        if (lightmap2D.IsLoaded()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Reload##LM2D")) {
+                if (lightmap2D.ReloadLightmap()) {
+                    CFFLog::Info("[Lightmap2D] Reloaded successfully");
+                }
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Reload lightmap from disk:\n%s", lightmap2D.GetLoadedPath().c_str());
+            }
         }
+
+        HelpTooltip(
+            "Bakes diffuse GI into a 2D texture atlas.\n"
+            "Requires UV2 coordinates on meshes.\n"
+            "Uses GPU DXR path tracing for irradiance calculation.");
     }
 
-    HelpTooltip(
-        "Bakes diffuse GI into a 2D texture atlas.\n"
-        "Requires UV2 coordinates on meshes.\n"
-        "Uses GPU DXR path tracing for irradiance calculation.");
-
-    // Show loaded status
+    // Show loaded status (always visible)
+    auto& lightmap2D = CScene::Instance().GetLightmap2D();
     if (lightmap2D.IsLoaded()) {
         ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "Loaded: %s", lightmap2D.GetLoadedPath().c_str());
         ImGui::TextDisabled("Infos: %d entries", lightmap2D.GetLightmapInfoCount());
@@ -527,6 +537,12 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
 
     auto& settings = CScene::Instance().GetLightSettings();
 
+    // G-Buffer debug at top for quick access
+    CDeferredRenderPipeline* deferredPipeline = dynamic_cast<CDeferredRenderPipeline*>(pipeline);
+    if (deferredPipeline) {
+        DrawGBufferDebugSection(settings);
+    }
+
     DrawEnvironmentSection(settings);
     DrawDiffuseGISection(settings);
     DrawVolumetricLightmapSection(settings);
@@ -536,11 +552,9 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
         DrawClusteredLightingDebugSection(pipeline);
     }
 
-    CDeferredRenderPipeline* deferredPipeline = dynamic_cast<CDeferredRenderPipeline*>(pipeline);
     if (deferredPipeline) {
         DrawSSAOSection(deferredPipeline);
         DrawSSRSection(deferredPipeline);
-        DrawGBufferDebugSection(settings);
     }
 
     DrawBloomSection(settings);
