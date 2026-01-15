@@ -61,6 +61,8 @@ static const char* kMotionBlurPS = R"(
         int gSampleCount;
         float gMaxBlurPixels;
         float _pad;
+        float2 gTexelSize;
+        float2 _pad2;
     };
 
     Texture2D gHDRInput : register(t0);
@@ -76,60 +78,47 @@ static const char* kMotionBlurPS = R"(
     float4 main(PSIn input) : SV_Target {
         // Sample velocity (UV-space motion vector)
         float2 velocity = gVelocityBuffer.SampleLevel(gPointSampler, input.uv, 0).rg;
-
-        // Scale velocity by intensity
         velocity *= gIntensity;
 
-        // Early out if velocity is negligible (before clamping)
+        // Early out if velocity is negligible
         float velocityMag = length(velocity);
         if (velocityMag < 0.0001) {
             return gHDRInput.SampleLevel(gLinearSampler, input.uv, 0);
         }
 
-        // Clamp velocity magnitude to max blur radius
-        // Convert max blur pixels to UV space (approximate, assumes square aspect)
-        float2 texSize;
-        gHDRInput.GetDimensions(texSize.x, texSize.y);
-        float2 maxBlurUV = gMaxBlurPixels / texSize;
-
-        if (velocityMag > length(maxBlurUV)) {
-            velocity = normalize(velocity) * length(maxBlurUV);
+        // Clamp velocity to max blur radius (in UV space)
+        float2 maxBlurUV = gMaxBlurPixels * gTexelSize;
+        float maxBlurMag = length(maxBlurUV);
+        if (velocityMag > maxBlurMag) {
+            velocity = velocity * (maxBlurMag / velocityMag);
         }
 
-        // Accumulate samples along velocity direction
+        // Accumulate samples along velocity direction with tent filter
         float3 color = float3(0.0, 0.0, 0.0);
         float totalWeight = 0.0;
+        float invSampleCountMinusOne = 1.0 / (float)(gSampleCount - 1);
 
         for (int i = 0; i < gSampleCount; ++i) {
             // Sample from -0.5 to +0.5 along velocity
-            float t = (float)i / (float)(gSampleCount - 1) - 0.5;
-            float2 offset = velocity * t;
-            float2 sampleUV = input.uv + offset;
+            float t = (float)i * invSampleCountMinusOne - 0.5;
+            float2 sampleUV = saturate(input.uv + velocity * t);
 
-            // Clamp UV to valid range
-            sampleUV = saturate(sampleUV);
-
-            // Sample HDR color (use SampleLevel to avoid gradient issues in loop)
             float3 sampleColor = gHDRInput.SampleLevel(gLinearSampler, sampleUV, 0).rgb;
 
-            // Weight by distance from center (tent filter)
+            // Tent filter weight (1.0 at center, 0.0 at edges)
             float weight = 1.0 - abs(t * 2.0);
-
             color += sampleColor * weight;
             totalWeight += weight;
         }
 
-        // Normalize
-        color /= totalWeight;
-
-        return float4(color, 1.0);
+        return float4(color / totalWeight, 1.0);
     }
 )";
 
 } // anonymous namespace
 
 // ============================================
-// Implementation
+// Lifecycle
 // ============================================
 
 bool CMotionBlurPass::Initialize() {
@@ -182,6 +171,10 @@ void CMotionBlurPass::Shutdown() {
     m_initialized = false;
 }
 
+// ============================================
+// Rendering
+// ============================================
+
 ITexture* CMotionBlurPass::Render(ITexture* hdrInput,
                                    ITexture* velocityBuffer,
                                    uint32_t width, uint32_t height,
@@ -213,14 +206,18 @@ ITexture* CMotionBlurPass::Render(ITexture* hdrInput,
     // Set pipeline state
     cmdList->SetPipelineState(m_pso.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(MotionBlurVertex), 0);
+    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(SMotionBlurVertex), 0);
 
     // Set constant buffer
-    CB_MotionBlur cb;
+    SCBMotionBlur cb;
     cb.intensity = settings.intensity;
     cb.sampleCount = std::max(settings.sampleCount, 2);  // Minimum 2 to avoid div-by-zero
     cb.maxBlurPixels = settings.maxBlurPixels;
     cb._pad = 0.0f;
+    cb.texelSizeX = 1.0f / static_cast<float>(width);
+    cb.texelSizeY = 1.0f / static_cast<float>(height);
+    cb._pad2[0] = 0.0f;
+    cb._pad2[1] = 0.0f;
 
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
 
@@ -238,6 +235,10 @@ ITexture* CMotionBlurPass::Render(ITexture* hdrInput,
 
     return m_outputHDR.get();
 }
+
+// ============================================
+// Internal Methods
+// ============================================
 
 void CMotionBlurPass::ensureOutputTexture(uint32_t width, uint32_t height) {
     if (width == m_cachedWidth && height == m_cachedHeight && m_outputHDR) {
@@ -261,7 +262,7 @@ void CMotionBlurPass::createFullscreenQuad() {
     // Fullscreen quad vertices (triangle strip)
     // NDC: (-1,-1) bottom-left, (1,1) top-right
     // UV: (0,0) top-left, (1,1) bottom-right (DirectX convention)
-    MotionBlurVertex vertices[] = {
+    SMotionBlurVertex vertices[] = {
         { -1.0f,  1.0f, 0.0f, 0.0f },  // Top-left
         {  1.0f,  1.0f, 1.0f, 0.0f },  // Top-right
         { -1.0f, -1.0f, 0.0f, 1.0f },  // Bottom-left
