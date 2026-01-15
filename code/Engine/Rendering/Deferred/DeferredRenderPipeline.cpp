@@ -481,7 +481,9 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
         float bloomIntensity = (ctx.showFlags.Bloom && bloomResult) ? bloomSettings.intensity : 0.0f;
         m_postProcess.Render(m_offHDR.get(), bloomResult, m_offLDR.get(),
-                             ctx.width, ctx.height, 1.0f, bloomIntensity);
+                             ctx.width, ctx.height, 1.0f, bloomIntensity,
+                             &ctx.scene.GetLightSettings().colorGrading,
+                             ctx.showFlags.ColorGrading);
     } else {
         ITexture* ldrRT = m_offLDR.get();
         cmdList->SetRenderTargets(1, &ldrRT, nullptr);

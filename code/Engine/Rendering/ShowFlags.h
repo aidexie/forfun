@@ -32,6 +32,7 @@ struct FShowFlags
     // Post-Processing
     bool PostProcessing = true;     // 是否应用后处理（Tone Mapping + Gamma Correction）
     bool Bloom = false;             // 是否启用 Bloom 效果
+    bool ColorGrading = false;      // 是否启用 Color Grading（色彩校正）
     bool SSAO = false;              // 是否启用 SSAO（Screen-Space Ambient Occlusion）
     bool SSR = false;               // 是否启用 SSR（Screen-Space Reflections）
     bool HiZ = false;               // 是否启用 Hi-Z（SSR 依赖）
@@ -72,6 +73,7 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = true;
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
@@ -95,6 +97,7 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = true;
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
@@ -119,6 +122,7 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = false;   // ❌ 预览不需要后处理
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
@@ -140,6 +144,7 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = false;   // ❌ 输出 HDR，不做 Tone Mapping
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
@@ -164,6 +169,7 @@ struct FShowFlags
         flags.TransparentObjects = false;
         flags.PostProcessing = false;
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭

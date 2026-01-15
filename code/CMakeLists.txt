@@ -102,6 +102,8 @@ set(CORE_SRC
     ${CODE_PATH}/Core/Loader/GltfLoader.h
     ${CODE_PATH}/Core/Loader/HdrLoader.cpp
     ${CODE_PATH}/Core/Loader/HdrLoader.h
+    ${CODE_PATH}/Core/Loader/LUTLoader.cpp
+    ${CODE_PATH}/Core/Loader/LUTLoader.h
     ${CODE_PATH}/Core/Loader/KTXLoader.cpp
     ${CODE_PATH}/Core/Loader/KTXLoader.h
     ${CODE_PATH}/Core/Loader/ObjLoader.cpp
@@ -238,6 +240,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestMaterialTypes.cpp
     ${CODE_PATH}/Tests/TestDeferredPerf.cpp
     ${CODE_PATH}/Tests/TestBloom.cpp
+    ${CODE_PATH}/Tests/TestColorGrading.cpp
     ${CODE_PATH}/Tests/TestSSAO.cpp
     ${CODE_PATH}/Tests/TestHiZ.cpp
     ${CODE_PATH}/Tests/TestSSR.cpp

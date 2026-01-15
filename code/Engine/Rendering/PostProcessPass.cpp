@@ -5,6 +5,8 @@
 #include "RHI/ICommandList.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/Loader/LUTLoader.h"
+#include "Engine/SceneLightSettings.h"
 #include <cstring>
 
 using namespace RHI;
@@ -14,11 +16,28 @@ struct FullscreenVertex {
     float u, v;       // UV
 };
 
+// Constant buffer for post-processing (must be 16-byte aligned)
 struct CB_PostProcess {
     float exposure;
     float bloomIntensity;
-    float _pad[2];
+    float _pad0[2];
+
+    // Color Grading parameters
+    DirectX::XMFLOAT3 lift;
+    float saturation;
+
+    DirectX::XMFLOAT3 gamma;
+    float contrast;
+
+    DirectX::XMFLOAT3 gain;
+    float temperature;
+
+    float lutContribution;
+    int colorGradingEnabled;
+    float _pad1[2];
 };
+
+static constexpr int kLUTSize = 32;  // 32x32x32 LUT
 
 bool CPostProcessPass::Initialize() {
     if (m_initialized) return true;
@@ -26,6 +45,7 @@ bool CPostProcessPass::Initialize() {
     createFullscreenQuad();
     createShaders();
     createPipelineState();
+    createNeutralLUT();
 
     // Create sampler
     SamplerDesc samplerDesc;
@@ -37,7 +57,7 @@ bool CPostProcessPass::Initialize() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     m_sampler.reset(ctx->CreateSampler(samplerDesc));
 
-    // Create constant buffer (CPU writable for updating exposure)
+    // Create constant buffer
     BufferDesc cbDesc;
     cbDesc.size = sizeof(CB_PostProcess);
     cbDesc.usage = EBufferUsage::Constant;
@@ -55,6 +75,9 @@ void CPostProcessPass::Shutdown() {
     m_vertexBuffer.reset();
     m_constantBuffer.reset();
     m_sampler.reset();
+    m_neutralLUT.reset();
+    m_customLUT.reset();
+    m_cachedLUTPath.clear();
     m_initialized = false;
 }
 
@@ -63,7 +86,9 @@ void CPostProcessPass::Render(ITexture* hdrInput,
                               ITexture* ldrOutput,
                               uint32_t width, uint32_t height,
                               float exposure,
-                              float bloomIntensity) {
+                              float bloomIntensity,
+                              const SColorGradingSettings* colorGrading,
+                              bool colorGradingEnabled) {
     if (!m_initialized || !hdrInput || !ldrOutput || !m_pso) return;
 
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -73,11 +98,37 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     // Otherwise D3D11 will null out the SRV to avoid RTV/SRV hazard
     cmdList->UnbindRenderTargets();
 
-    // Update constant buffer with exposure and bloom intensity
+    // Handle LUT loading if color grading is enabled with custom LUT
+    if (colorGradingEnabled && colorGrading &&
+        colorGrading->preset == EColorGradingPreset::Custom &&
+        !colorGrading->lutPath.empty() &&
+        colorGrading->lutPath != m_cachedLUTPath) {
+        loadLUT(colorGrading->lutPath);
+    }
+
+    // Update constant buffer
     CB_PostProcess cb;
     cb.exposure = exposure;
     cb.bloomIntensity = bloomTexture ? bloomIntensity : 0.0f;
-    cb._pad[0] = cb._pad[1] = 0.0f;
+    cb._pad0[0] = cb._pad0[1] = 0.0f;
+
+    // Color grading parameters
+    if (colorGradingEnabled && colorGrading) {
+        cb.lift = colorGrading->lift;
+        cb.saturation = colorGrading->saturation;
+        cb.gamma = colorGrading->gamma;
+        cb.contrast = colorGrading->contrast;
+        cb.gain = colorGrading->gain;
+        cb.temperature = colorGrading->temperature;
+        cb.lutContribution = (colorGrading->preset == EColorGradingPreset::Custom && m_customLUT) ? 1.0f : 0.0f;
+        cb.colorGradingEnabled = 1;
+    } else {
+        cb.lift = cb.gamma = cb.gain = {0.0f, 0.0f, 0.0f};
+        cb.saturation = cb.contrast = cb.temperature = 0.0f;
+        cb.lutContribution = 0.0f;
+        cb.colorGradingEnabled = 0;
+    }
+    cb._pad1[0] = cb._pad1[1] = 0.0f;
 
     // Set render target (no depth)
     ITexture* renderTargets[] = { ldrOutput };
@@ -94,12 +145,19 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     // Set vertex buffer
     cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
 
-    // Set constant buffer and resources (use SetConstantBufferData for DX12 compatibility)
+    // Set constant buffer and resources
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_PostProcess));
     cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
     if (bloomTexture) {
         cmdList->SetShaderResource(EShaderStage::Pixel, 1, bloomTexture);
     }
+
+    // Bind LUT texture (use custom if available, otherwise neutral)
+    ITexture* lutTexture = (cb.lutContribution > 0.0f && m_customLUT) ? m_customLUT.get() : m_neutralLUT.get();
+    if (lutTexture) {
+        cmdList->SetShaderResource(EShaderStage::Pixel, 2, lutTexture);
+    }
+
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Draw fullscreen quad
@@ -151,16 +209,30 @@ void CPostProcessPass::createShaders() {
         }
     )";
 
-    // Pixel shader: Tone mapping + Gamma correction + Bloom compositing
+    // Pixel shader: Tone mapping + Color Grading + Gamma correction
     const char* psCode = R"(
         Texture2D hdrTexture : register(t0);
         Texture2D bloomTexture : register(t1);
+        Texture3D lutTexture : register(t2);
         SamplerState samp : register(s0);
 
         cbuffer CB_PostProcess : register(b0) {
             float gExposure;
             float gBloomIntensity;
-            float2 _pad;
+            float2 _pad0;
+
+            float3 gLift;
+            float gSaturation;
+
+            float3 gGamma;
+            float gContrast;
+
+            float3 gGain;
+            float gTemperature;
+
+            float gLutContribution;
+            int gColorGradingEnabled;
+            float2 _pad1;
         };
 
         struct PSIn {
@@ -178,6 +250,57 @@ void CPostProcessPass::createShaders() {
             return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
         }
 
+        // Lift/Gamma/Gain (ASC CDL style)
+        float3 ApplyLiftGammaGain(float3 color, float3 lift, float3 gamma, float3 gain) {
+            // Lift: offset in shadows (add)
+            color = color + lift * 0.1;
+
+            // Gamma: power curve in midtones
+            // Convert -1 to +1 range to 0.5 to 2.0 gamma adjustment
+            float3 gammaAdj = 1.0 / (1.0 + gamma);
+            color = pow(max(color, 0.0001), gammaAdj);
+
+            // Gain: multiply in highlights
+            color = color * (1.0 + gain * 0.5);
+
+            return color;
+        }
+
+        // Saturation adjustment
+        float3 ApplySaturation(float3 color, float saturation) {
+            float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+            return lerp(float3(luma, luma, luma), color, 1.0 + saturation);
+        }
+
+        // Contrast adjustment (around 0.5 pivot)
+        float3 ApplyContrast(float3 color, float contrast) {
+            return (color - 0.5) * (1.0 + contrast) + 0.5;
+        }
+
+        // Temperature adjustment (blue-orange axis)
+        float3 ApplyTemperature(float3 color, float temperature) {
+            // Warm: shift toward orange, Cool: shift toward blue
+            float3 warm = float3(1.05, 1.0, 0.95);
+            float3 cool = float3(0.95, 1.0, 1.05);
+            float3 tint = lerp(cool, warm, temperature * 0.5 + 0.5);
+            return color * tint;
+        }
+
+        // 3D LUT sampling
+        float3 ApplyLUT(float3 color, float contribution) {
+            if (contribution <= 0.0) return color;
+
+            // LUT is 32x32x32, map [0,1] color to proper UV coordinates
+            // Offset by half texel to sample center of texels
+            float lutSize = 32.0;
+            float3 scale = (lutSize - 1.0) / lutSize;
+            float3 offset = 0.5 / lutSize;
+            float3 uvw = saturate(color) * scale + offset;
+
+            float3 lutColor = lutTexture.Sample(samp, uvw).rgb;
+            return lerp(color, lutColor, contribution);
+        }
+
         float4 main(PSIn input) : SV_Target {
             // Sample HDR input (linear space)
             float3 hdrColor = hdrTexture.Sample(samp, input.uv).rgb;
@@ -191,10 +314,31 @@ void CPostProcessPass::createShaders() {
             // Apply exposure (adjust brightness before tone mapping)
             hdrColor *= gExposure;
 
-            // Tone mapping: HDR → LDR [0, 1] (still linear space)
+            // Tone mapping: HDR -> LDR [0, 1] (still linear space)
             float3 ldrColor = ACESFilm(hdrColor);
 
-            // Gamma correction: Linear → sRGB
+            // === COLOR GRADING (LDR space, after tone mapping) ===
+            if (gColorGradingEnabled) {
+                // 1. Lift/Gamma/Gain
+                ldrColor = ApplyLiftGammaGain(ldrColor, gLift, gGamma, gGain);
+
+                // 2. Saturation
+                ldrColor = ApplySaturation(ldrColor, gSaturation);
+
+                // 3. Contrast
+                ldrColor = ApplyContrast(ldrColor, gContrast);
+
+                // 4. Temperature
+                ldrColor = ApplyTemperature(ldrColor, gTemperature);
+
+                // 5. 3D LUT (final creative look)
+                ldrColor = ApplyLUT(ldrColor, gLutContribution);
+
+                // Clamp to valid range
+                ldrColor = saturate(ldrColor);
+            }
+
+            // Gamma correction: Linear -> sRGB
             // Since output RT is UNORM_SRGB, GPU will do this automatically
 
             return float4(ldrColor, 1.0);
@@ -271,7 +415,95 @@ void CPostProcessPass::createPipelineState() {
 
     // No depth stencil for post-processing
     psoDesc.depthStencilFormat = ETextureFormat::Unknown;
-    psoDesc.debugName = "PostProcess_ToneMap_PSO";
+    psoDesc.debugName = "PostProcess_ToneMap_ColorGrading_PSO";
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
+}
+
+void CPostProcessPass::createNeutralLUT() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Generate identity LUT data
+    SLUTData lutData;
+    GenerateIdentityLUT(kLUTSize, lutData);
+
+    // Convert to RGBA format (add alpha channel)
+    std::vector<float> rgbaData(kLUTSize * kLUTSize * kLUTSize * 4);
+    for (uint32_t i = 0; i < kLUTSize * kLUTSize * kLUTSize; ++i) {
+        rgbaData[i * 4 + 0] = lutData.data[i * 3 + 0];
+        rgbaData[i * 4 + 1] = lutData.data[i * 3 + 1];
+        rgbaData[i * 4 + 2] = lutData.data[i * 3 + 2];
+        rgbaData[i * 4 + 3] = 1.0f;
+    }
+
+    // Create 3D texture
+    TextureDesc desc = TextureDesc::Texture3D(
+        kLUTSize, kLUTSize, kLUTSize,
+        ETextureFormat::R32G32B32A32_FLOAT,
+        ETextureUsage::ShaderResource
+    );
+    desc.debugName = "NeutralLUT";
+
+    m_neutralLUT.reset(ctx->CreateTexture(desc, rgbaData.data()));
+
+    if (m_neutralLUT) {
+        CFFLog::Info("[PostProcess] Created neutral LUT (%dx%dx%d)", kLUTSize, kLUTSize, kLUTSize);
+    } else {
+        CFFLog::Error("[PostProcess] Failed to create neutral LUT");
+    }
+}
+
+bool CPostProcessPass::loadLUT(const std::string& cubePath) {
+    if (cubePath.empty()) {
+        m_customLUT.reset();
+        m_cachedLUTPath.clear();
+        return false;
+    }
+
+    // Load .cube file
+    SLUTData lutData;
+    if (!LoadCubeFile(cubePath, lutData)) {
+        CFFLog::Error("[PostProcess] Failed to load LUT: %s", cubePath.c_str());
+        return false;
+    }
+
+    // Validate LUT size (we only support 32x32x32 for now)
+    if (lutData.size != kLUTSize) {
+        CFFLog::Warning("[PostProcess] LUT size %u not supported, expected %d. Resampling not implemented.",
+                        lutData.size, kLUTSize);
+        return false;
+    }
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return false;
+
+    // Convert to RGBA format
+    uint32_t totalTexels = lutData.size * lutData.size * lutData.size;
+    std::vector<float> rgbaData(totalTexels * 4);
+    for (uint32_t i = 0; i < totalTexels; ++i) {
+        rgbaData[i * 4 + 0] = lutData.data[i * 3 + 0];
+        rgbaData[i * 4 + 1] = lutData.data[i * 3 + 1];
+        rgbaData[i * 4 + 2] = lutData.data[i * 3 + 2];
+        rgbaData[i * 4 + 3] = 1.0f;
+    }
+
+    // Create 3D texture
+    TextureDesc desc = TextureDesc::Texture3D(
+        lutData.size, lutData.size, lutData.size,
+        ETextureFormat::R32G32B32A32_FLOAT,
+        ETextureUsage::ShaderResource
+    );
+    desc.debugName = "CustomLUT";
+
+    m_customLUT.reset(ctx->CreateTexture(desc, rgbaData.data()));
+    m_cachedLUTPath = cubePath;
+
+    if (m_customLUT) {
+        CFFLog::Info("[PostProcess] Loaded custom LUT: %s", cubePath.c_str());
+        return true;
+    } else {
+        CFFLog::Error("[PostProcess] Failed to create custom LUT texture");
+        return false;
+    }
 }

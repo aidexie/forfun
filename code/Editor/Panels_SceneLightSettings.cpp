@@ -16,6 +16,7 @@
 #include "Core/PathManager.h"
 #include <windows.h>
 #include <commdlg.h>
+#include <cstring>
 
 // Window visibility state
 static bool s_showWindow = true;
@@ -428,8 +429,21 @@ static void DrawSSRSection(CDeferredRenderPipeline* deferredPipeline) {
                 ImGui::SliderInt("Rays/Pixel##SSR", &ssrSettings.numRays, 1, 8);
                 ImGui::SliderFloat("BRDF Bias##SSR", &ssrSettings.brdfBias, 0.0f, 1.0f, "%.2f");
                 HelpTooltip(
-                    "Rays/Pixel: More rays = better quality, slower\n"
+                    "Rays/Pixel: Base rays per pixel (adaptive may use fewer)\n"
                     "BRDF Bias: 0=uniform sampling, 1=full GGX importance sampling");
+
+                ImGui::Separator();
+                ImGui::Text("Noise Reduction");
+
+                ImGui::Checkbox("Adaptive Ray Count##SSR", &ssrSettings.useAdaptiveRays);
+                HelpTooltip("Reduce ray count for smooth surfaces (roughness < 0.3).\nImproves performance 40-70%% on typical scenes.");
+
+                ImGui::SliderFloat("Firefly Clamp##SSR", &ssrSettings.fireflyClampThreshold, 1.0f, 50.0f, "%.1f");
+                HelpTooltip("Absolute luminance clamp to prevent extreme noise spikes.");
+
+                ImGui::SliderFloat("Firefly Multiplier##SSR", &ssrSettings.fireflyMultiplier, 1.0f, 10.0f, "%.1f");
+                HelpTooltip("Adaptive threshold = average luminance * multiplier.\nHigher = more permissive, lower = more aggressive clamping.");
+
                 ImGui::TreePop();
             }
         }
@@ -523,6 +537,133 @@ static void DrawBloomSection(CSceneLightSettings& settings) {
     ImGui::Spacing();
 }
 
+static void DrawColorGradingSection(CSceneLightSettings& settings) {
+    SectionHeader("Post-Processing: Color Grading");
+
+    auto& cg = settings.colorGrading;
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
+
+    ImGui::Checkbox("Enable##ColorGrading", &showFlags.ColorGrading);
+
+    if (showFlags.ColorGrading) {
+        ImGui::Spacing();
+
+        // Preset dropdown
+        const char* presets[] = { "Neutral", "Warm", "Cool", "Cinematic", "Custom" };
+        int currentPreset = static_cast<int>(cg.preset);
+
+        ImGui::PushItemWidth(150);
+        if (ImGui::Combo("Preset##CG", &currentPreset, presets, 5)) {
+            cg.ApplyPreset(static_cast<EColorGradingPreset>(currentPreset));
+        }
+        ImGui::PopItemWidth();
+
+        // Custom LUT path (only for Custom preset)
+        if (cg.preset == EColorGradingPreset::Custom) {
+            ImGui::Spacing();
+            ImGui::Text("LUT File (.cube):");
+
+            // Use a static buffer for the input text
+            static char lutPathBuffer[256] = "";
+            if (lutPathBuffer[0] == '\0' && !cg.lutPath.empty()) {
+                strncpy(lutPathBuffer, cg.lutPath.c_str(), sizeof(lutPathBuffer) - 1);
+                lutPathBuffer[sizeof(lutPathBuffer) - 1] = '\0';  // Ensure null-termination
+            }
+
+            ImGui::PushItemWidth(200);
+            if (ImGui::InputText("##LUTPath", lutPathBuffer, sizeof(lutPathBuffer))) {
+                cg.lutPath = lutPathBuffer;
+            }
+            ImGui::PopItemWidth();
+
+            HelpTooltip("Enter relative path to .cube LUT file\nExample: luts/cinematic.cube");
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Simple adjustments
+        ImGui::Text("Adjustments:");
+        ImGui::PushItemWidth(200);
+
+        if (ImGui::SliderFloat("Saturation##CG", &cg.saturation, -1.0f, 1.0f, "%.2f")) {
+            if (cg.preset != EColorGradingPreset::Custom) {
+                cg.preset = EColorGradingPreset::Custom;
+            }
+        }
+
+        if (ImGui::SliderFloat("Contrast##CG", &cg.contrast, -1.0f, 1.0f, "%.2f")) {
+            if (cg.preset != EColorGradingPreset::Custom) {
+                cg.preset = EColorGradingPreset::Custom;
+            }
+        }
+
+        if (ImGui::SliderFloat("Temperature##CG", &cg.temperature, -1.0f, 1.0f, "%.2f")) {
+            if (cg.preset != EColorGradingPreset::Custom) {
+                cg.preset = EColorGradingPreset::Custom;
+            }
+        }
+
+        ImGui::PopItemWidth();
+
+        // Advanced: Lift/Gamma/Gain (collapsible)
+        ImGui::Spacing();
+        if (ImGui::TreeNode("Advanced (Lift/Gamma/Gain)##CG")) {
+            ImGui::PushItemWidth(200);
+
+            bool lggChanged = false;
+
+            // Lift (Shadows)
+            ImGui::Text("Lift (Shadows):");
+            lggChanged |= ImGui::SliderFloat("R##Lift", &cg.lift.x, -1.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            lggChanged |= ImGui::SliderFloat("G##Lift", &cg.lift.y, -1.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            lggChanged |= ImGui::SliderFloat("B##Lift", &cg.lift.z, -1.0f, 1.0f, "%.2f");
+
+            // Gamma (Midtones)
+            ImGui::Text("Gamma (Midtones):");
+            lggChanged |= ImGui::SliderFloat("R##Gamma", &cg.gamma.x, -1.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            lggChanged |= ImGui::SliderFloat("G##Gamma", &cg.gamma.y, -1.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            lggChanged |= ImGui::SliderFloat("B##Gamma", &cg.gamma.z, -1.0f, 1.0f, "%.2f");
+
+            // Gain (Highlights)
+            ImGui::Text("Gain (Highlights):");
+            lggChanged |= ImGui::SliderFloat("R##Gain", &cg.gain.x, -1.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            lggChanged |= ImGui::SliderFloat("G##Gain", &cg.gain.y, -1.0f, 1.0f, "%.2f");
+            ImGui::SameLine();
+            lggChanged |= ImGui::SliderFloat("B##Gain", &cg.gain.z, -1.0f, 1.0f, "%.2f");
+
+            if (lggChanged && cg.preset != EColorGradingPreset::Custom) {
+                cg.preset = EColorGradingPreset::Custom;
+            }
+
+            ImGui::PopItemWidth();
+
+            // Reset button
+            if (ImGui::Button("Reset LGG##CG")) {
+                cg.lift = cg.gamma = cg.gain = {0.0f, 0.0f, 0.0f};
+            }
+
+            ImGui::TreePop();
+        }
+
+        HelpTooltip(
+            "Saturation: -1 (grayscale) to +1 (oversaturated)\n"
+            "Contrast: -1 (flat) to +1 (high contrast)\n"
+            "Temperature: -1 (cool/blue) to +1 (warm/orange)\n\n"
+            "Lift: Adjust shadow colors\n"
+            "Gamma: Adjust midtone colors\n"
+            "Gain: Adjust highlight colors");
+    }
+
+    ImGui::Spacing();
+}
+
 // ============================================
 // Main Panel Function
 // ============================================
@@ -558,6 +699,7 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
     }
 
     DrawBloomSection(settings);
+    DrawColorGradingSection(settings);
 
     // Apply button
     if (ImGui::Button("Apply Settings")) {

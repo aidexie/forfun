@@ -68,6 +68,86 @@ struct SBloomSettings
 };
 
 // ============================================
+// Color Grading Preset - Built-in color looks
+// ============================================
+enum class EColorGradingPreset : int
+{
+    Neutral = 0,    // No grading (identity)
+    Warm,           // Warm tones, lifted shadows
+    Cool,           // Cool tones, blue tint
+    Cinematic,      // High contrast, teal/orange
+    Custom          // User-loaded LUT
+};
+
+inline const char* GetColorGradingPresetName(EColorGradingPreset preset) {
+    switch (preset) {
+        case EColorGradingPreset::Neutral:   return "Neutral";
+        case EColorGradingPreset::Warm:      return "Warm";
+        case EColorGradingPreset::Cool:      return "Cool";
+        case EColorGradingPreset::Cinematic: return "Cinematic";
+        case EColorGradingPreset::Custom:    return "Custom";
+        default: return "Unknown";
+    }
+}
+
+// ============================================
+// Color Grading Settings - LDR Color Correction
+// ============================================
+struct SColorGradingSettings
+{
+    // Preset selection
+    EColorGradingPreset preset = EColorGradingPreset::Neutral;
+
+    // Custom LUT path (.cube file)
+    std::string lutPath = "";
+
+    // Lift/Gamma/Gain (per-channel RGB control)
+    // Range: -1.0 to +1.0 for each channel
+    DirectX::XMFLOAT3 lift  = {0.0f, 0.0f, 0.0f};   // Shadows adjustment
+    DirectX::XMFLOAT3 gamma = {0.0f, 0.0f, 0.0f};   // Midtones adjustment
+    DirectX::XMFLOAT3 gain  = {0.0f, 0.0f, 0.0f};   // Highlights adjustment
+
+    // Simple adjustments (range: -1.0 to +1.0)
+    float saturation = 0.0f;   // -1 (grayscale) to +1 (oversaturated)
+    float contrast = 0.0f;     // -1 (flat) to +1 (high contrast)
+    float temperature = 0.0f;  // -1 (cool/blue) to +1 (warm/orange)
+
+    // Apply preset values
+    void ApplyPreset(EColorGradingPreset newPreset) {
+        preset = newPreset;
+        // Reset all values first
+        lift = gamma = gain = {0.0f, 0.0f, 0.0f};
+        saturation = contrast = temperature = 0.0f;
+        lutPath = "";
+
+        switch (newPreset) {
+            case EColorGradingPreset::Neutral:
+                // All defaults (identity)
+                break;
+            case EColorGradingPreset::Warm:
+                temperature = 0.3f;
+                saturation = 0.1f;
+                lift = {0.02f, 0.01f, -0.02f};
+                break;
+            case EColorGradingPreset::Cool:
+                temperature = -0.3f;
+                contrast = 0.1f;
+                lift = {-0.02f, 0.0f, 0.03f};
+                break;
+            case EColorGradingPreset::Cinematic:
+                contrast = 0.15f;
+                saturation = -0.1f;
+                lift = {-0.03f, -0.02f, 0.02f};
+                gain = {0.02f, 0.0f, -0.02f};
+                break;
+            case EColorGradingPreset::Custom:
+                // Keep current values, user will load LUT
+                break;
+        }
+    }
+};
+
+// ============================================
 // Volumetric Lightmap 配置
 // ============================================
 struct SVolumetricLightmapConfig
@@ -100,6 +180,9 @@ public:
 
     // Post-Processing: Bloom
     SBloomSettings bloom;
+
+    // Post-Processing: Color Grading
+    SColorGradingSettings colorGrading;
 
     // G-Buffer Debug Visualization
     EGBufferDebugMode gBufferDebugMode = EGBufferDebugMode::None;

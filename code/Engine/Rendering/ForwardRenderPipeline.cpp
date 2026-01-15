@@ -141,7 +141,9 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     if (ctx.showFlags.PostProcessing) {
         RHI::CScopedDebugEvent evt(cmdList, L"Post-Processing");
         m_postProcess.Render(m_offHDR.get(), nullptr, m_offLDR.get(),
-                           ctx.width, ctx.height, 1.0f, 0.0f);
+                           ctx.width, ctx.height, 1.0f, 0.0f,
+                           &ctx.scene.GetLightSettings().colorGrading,
+                           ctx.showFlags.ColorGrading);
     } else {
         // No post-processing: clear LDR with black
         RHI::ITexture* ldrRT = m_offLDR.get();
