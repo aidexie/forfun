@@ -44,7 +44,7 @@ enum class ESSRMode : int {
 // ============================================
 struct SSSRSettings {
     ESSRQuality quality = ESSRQuality::High;  // Quality preset
-    ESSRMode mode = ESSRMode::HiZTrace;       // Algorithm mode
+    ESSRMode mode = ESSRMode::Stochastic;       // Algorithm mode
     float maxDistance = 50.0f;      // Maximum ray distance (view-space)
     float thickness = 0.5f;         // Surface thickness for hit detection
     float stride = 1.0f;            // Initial step stride (pixels)

@@ -169,8 +169,10 @@ bool CDeferredRenderPipeline::Initialize()
     m_ssaoPass.Initialize();
     m_hiZPass.Initialize();
     m_ssrPass.Initialize();
+    m_autoExposurePass.Initialize();
 
     m_bloomPass.Initialize();
+    m_motionBlurPass.Initialize();
     m_postProcess.Initialize();
     m_debugLinePass.Initialize();
     CGridPass::Instance().Initialize();
@@ -193,7 +195,9 @@ void CDeferredRenderPipeline::Shutdown()
     m_ssaoPass.Shutdown();
     m_hiZPass.Shutdown();
     m_ssrPass.Shutdown();
+    m_autoExposurePass.Shutdown();
     m_bloomPass.Shutdown();
+    m_motionBlurPass.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
     CGridPass::Instance().Shutdown();
@@ -463,25 +467,49 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 7. Bloom Pass (HDR -> half-res bloom texture)
+    // 7. Auto Exposure (HDR luminance analysis)
+    // ============================================
+    RHI::IBuffer* exposureBuffer = nullptr;
+    if (ctx.showFlags.AutoExposure) {
+        const auto& aeSettings = ctx.scene.GetLightSettings().autoExposure;
+        CScopedDebugEvent evt(cmdList, L"Auto Exposure");
+        m_autoExposurePass.Render(cmdList, m_offHDR.get(), ctx.width, ctx.height,
+                                  ctx.deltaTime, aeSettings);
+        exposureBuffer = m_autoExposurePass.GetExposureBuffer();
+    }
+
+    // ============================================
+    // 8. Motion Blur Pass (HDR -> motion-blurred HDR)
+    // ============================================
+    ITexture* hdrAfterMotionBlur = m_offHDR.get();
+    if (ctx.showFlags.MotionBlur) {
+        const auto& mbSettings = ctx.scene.GetLightSettings().motionBlur;
+        CScopedDebugEvent evt(cmdList, L"Motion Blur");
+        hdrAfterMotionBlur = m_motionBlurPass.Render(
+            m_offHDR.get(), m_gbuffer.GetVelocity(),
+            ctx.width, ctx.height, mbSettings);
+    }
+
+    // ============================================
+    // 9. Bloom Pass (HDR -> half-res bloom texture)
     // ============================================
     ITexture* bloomResult = nullptr;
     if (ctx.showFlags.Bloom) {
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
         CScopedDebugEvent evt(cmdList, L"Bloom");
         bloomResult = m_bloomPass.Render(
-            m_offHDR.get(), ctx.width, ctx.height, bloomSettings);
+            hdrAfterMotionBlur, ctx.width, ctx.height, bloomSettings);
     }
 
     // ============================================
-    // 8. Post-Processing (HDR -> LDR)
+    // 10. Post-Processing (HDR -> LDR)
     // ============================================
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
         float bloomIntensity = (ctx.showFlags.Bloom && bloomResult) ? bloomSettings.intensity : 0.0f;
-        m_postProcess.Render(m_offHDR.get(), bloomResult, m_offLDR.get(),
-                             ctx.width, ctx.height, 1.0f, bloomIntensity,
+        m_postProcess.Render(hdrAfterMotionBlur, bloomResult, m_offLDR.get(),
+                             ctx.width, ctx.height, 1.0f, exposureBuffer, bloomIntensity,
                              &ctx.scene.GetLightSettings().colorGrading,
                              ctx.showFlags.ColorGrading);
     } else {
@@ -492,7 +520,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 9. Debug Lines (if enabled)
+    // 11. Debug Lines (if enabled)
     // ============================================
     if (ctx.showFlags.DebugLines) {
         CScopedDebugEvent evt(cmdList, L"Debug Lines");
@@ -504,7 +532,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 10. Grid (if enabled)
+    // 11. Grid (if enabled)
     // ============================================
     if (ctx.showFlags.Grid) {
         CScopedDebugEvent evt(cmdList, L"Grid");
@@ -516,7 +544,15 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 11. Copy to final output (if provided)
+    // 12. Auto Exposure Debug Overlay (if enabled)
+    // ============================================
+    if (ctx.showFlags.AutoExposure) {
+        CScopedDebugEvent evt(cmdList, L"Auto Exposure Debug");
+        m_autoExposurePass.RenderDebugOverlay(cmdList, m_offLDR.get(), ctx.width, ctx.height);
+    }
+
+    // ============================================
+    // 13. Copy to final output (if provided)
     // ============================================
     if (ctx.finalOutputTexture) {
         cmdList->UnbindRenderTargets();
@@ -527,7 +563,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 12. Transition LDR to SRV state
+    // 14. Transition LDR to SRV state
     // ============================================
     cmdList->UnbindRenderTargets();
     cmdList->Barrier(m_offLDR.get(), EResourceState::RenderTarget, EResourceState::ShaderResource);

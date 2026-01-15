@@ -32,10 +32,12 @@ struct FShowFlags
     // Post-Processing
     bool PostProcessing = true;     // 是否应用后处理（Tone Mapping + Gamma Correction）
     bool Bloom = false;             // 是否启用 Bloom 效果
+    bool AutoExposure = false;      // 是否启用 Auto Exposure（自动曝光）
     bool ColorGrading = false;      // 是否启用 Color Grading（色彩校正）
     bool SSAO = false;              // 是否启用 SSAO（Screen-Space Ambient Occlusion）
     bool SSR = false;               // 是否启用 SSR（Screen-Space Reflections）
     bool HiZ = false;               // 是否启用 Hi-Z（SSR 依赖）
+    bool MotionBlur = false;        // 是否启用 Motion Blur（运动模糊）
 
     // ============================================
     // Editor Tools (Only in Editor)
@@ -73,10 +75,12 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = true;
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.AutoExposure = false;     // ❌ 默认关闭
         flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
+        flags.MotionBlur = false;       // ❌ 默认关闭
         flags.Grid = true;              // ✅ 编辑器网格
         flags.DebugLines = true;        // ✅ 调试线框
         flags.Gizmos = false;           // TODO: 未来实现
@@ -97,10 +101,12 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = true;
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.AutoExposure = false;     // ❌ 默认关闭
         flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
+        flags.MotionBlur = false;       // ❌ 默认关闭
         // ❌ 无编辑器工具
         flags.Grid = false;
         flags.DebugLines = false;
@@ -122,10 +128,12 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = false;   // ❌ 预览不需要后处理
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.AutoExposure = false;     // ❌ 默认关闭
         flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
+        flags.MotionBlur = false;       // ❌ 默认关闭
         flags.Grid = false;
         flags.DebugLines = false;
         return flags;
@@ -144,10 +152,12 @@ struct FShowFlags
         flags.TransparentObjects = true;
         flags.PostProcessing = false;   // ❌ 输出 HDR，不做 Tone Mapping
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.AutoExposure = false;     // ❌ 默认关闭
         flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
+        flags.MotionBlur = false;       // ❌ 默认关闭
         // ❌ 无编辑器工具
         flags.Grid = false;
         flags.DebugLines = false;
@@ -169,10 +179,12 @@ struct FShowFlags
         flags.TransparentObjects = false;
         flags.PostProcessing = false;
         flags.Bloom = false;            // ❌ 默认关闭
+        flags.AutoExposure = false;     // ❌ 默认关闭
         flags.ColorGrading = false;     // ❌ 默认关闭
         flags.SSAO = false;             // ❌ 默认关闭
         flags.SSR = false;              // ❌ 默认关闭
         flags.HiZ = false;              // ❌ 默认关闭
+        flags.MotionBlur = false;       // ❌ 默认关闭
         flags.Wireframe = true;         // ✅ 线框模式
         flags.Grid = true;
         return flags;

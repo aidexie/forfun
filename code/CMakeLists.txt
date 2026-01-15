@@ -240,10 +240,12 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestMaterialTypes.cpp
     ${CODE_PATH}/Tests/TestDeferredPerf.cpp
     ${CODE_PATH}/Tests/TestBloom.cpp
+    ${CODE_PATH}/Tests/TestAutoExposure.cpp
     ${CODE_PATH}/Tests/TestColorGrading.cpp
     ${CODE_PATH}/Tests/TestSSAO.cpp
     ${CODE_PATH}/Tests/TestHiZ.cpp
     ${CODE_PATH}/Tests/TestSSR.cpp
+    ${CODE_PATH}/Tests/TestMotionBlur.cpp
 )
 
 add_executable(forfun WIN32
@@ -332,6 +334,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/PostProcessPass.cpp
     ${CODE_PATH}/Engine/Rendering/BloomPass.h
     ${CODE_PATH}/Engine/Rendering/BloomPass.cpp
+    ${CODE_PATH}/Engine/Rendering/MotionBlurPass.h
+    ${CODE_PATH}/Engine/Rendering/MotionBlurPass.cpp
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.h
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
     ${CODE_PATH}/Engine/Rendering/CubemapRenderer.h
@@ -384,6 +388,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/HiZPass.cpp
     ${CODE_PATH}/Engine/Rendering/SSRPass.h
     ${CODE_PATH}/Engine/Rendering/SSRPass.cpp
+    ${CODE_PATH}/Engine/Rendering/AutoExposurePass.h
+    ${CODE_PATH}/Engine/Rendering/AutoExposurePass.cpp
     ${CODE_PATH}/Engine/Rendering/GridPass.cpp
     # Deferred Rendering Pipeline (Phase 3.2)
     ${CODE_PATH}/Engine/Rendering/Deferred/GBuffer.h

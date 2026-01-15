@@ -537,6 +537,72 @@ static void DrawBloomSection(CSceneLightSettings& settings) {
     ImGui::Spacing();
 }
 
+static void DrawMotionBlurSection(CSceneLightSettings& settings) {
+    SectionHeader("Post-Processing: Motion Blur");
+
+    auto& mb = settings.motionBlur;
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
+
+    ImGui::Checkbox("Enable##MotionBlur", &showFlags.MotionBlur);
+
+    if (showFlags.MotionBlur) {
+        ImGui::PushItemWidth(150);
+        ImGui::SliderFloat("Intensity##MB", &mb.intensity, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderInt("Sample Count##MB", &mb.sampleCount, 8, 16);
+        ImGui::SliderFloat("Max Blur (px)##MB", &mb.maxBlurPixels, 8.0f, 64.0f, "%.0f");
+        ImGui::PopItemWidth();
+
+        HelpTooltip(
+            "Intensity: Motion blur strength (0=off, 1=full)\n"
+            "Sample Count: Quality vs performance (8=fast, 16=smooth)\n"
+            "Max Blur: Maximum blur radius in pixels");
+    }
+
+    ImGui::Spacing();
+}
+
+static void DrawAutoExposureSection(CSceneLightSettings& settings) {
+    SectionHeader("Post-Processing: Auto Exposure");
+
+    auto& ae = settings.autoExposure;
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
+
+    ImGui::Checkbox("Enable##AutoExposure", &showFlags.AutoExposure);
+
+    if (showFlags.AutoExposure) {
+        ImGui::Spacing();
+
+        ImGui::PushItemWidth(150);
+
+        // Exposure range (EV)
+        ImGui::SliderFloat("Min EV##AE", &ae.minEV, -8.0f, 0.0f, "%.1f");
+        ImGui::SliderFloat("Max EV##AE", &ae.maxEV, 0.0f, 8.0f, "%.1f");
+
+        ImGui::Spacing();
+
+        // Adaptation speeds
+        ImGui::SliderFloat("Speed Up##AE", &ae.adaptSpeedUp, 0.1f, 5.0f, "%.1f s");
+        ImGui::SliderFloat("Speed Down##AE", &ae.adaptSpeedDown, 0.5f, 10.0f, "%.1f s");
+
+        ImGui::Spacing();
+
+        // Exposure compensation and center weight
+        ImGui::SliderFloat("Compensation##AE", &ae.exposureCompensation, -2.0f, 2.0f, "%.2f EV");
+        ImGui::SliderFloat("Center Weight##AE", &ae.centerWeight, 0.0f, 1.0f, "%.2f");
+
+        ImGui::PopItemWidth();
+
+        HelpTooltip(
+            "Min/Max EV: Exposure value range (stops)\n"
+            "Speed Up: Dark->Bright adaptation time (faster)\n"
+            "Speed Down: Bright->Dark adaptation time (slower)\n"
+            "Compensation: Manual brightness bias\n"
+            "Center Weight: Focus metering on screen center (0=uniform, 1=center only)");
+    }
+
+    ImGui::Spacing();
+}
+
 static void DrawColorGradingSection(CSceneLightSettings& settings) {
     SectionHeader("Post-Processing: Color Grading");
 
@@ -699,6 +765,8 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
     }
 
     DrawBloomSection(settings);
+    DrawMotionBlurSection(settings);
+    DrawAutoExposureSection(settings);
     DrawColorGradingSection(settings);
 
     // Apply button

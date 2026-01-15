@@ -10,11 +10,13 @@
 #include "Engine/Rendering/ClusteredLightingPass.h"
 #include "Engine/Rendering/PostProcessPass.h"
 #include "Engine/Rendering/BloomPass.h"
+#include "Engine/Rendering/MotionBlurPass.h"
 #include "Engine/Rendering/DebugLinePass.h"
 #include "Engine/Rendering/GridPass.h"
 #include "Engine/Rendering/SSAOPass.h"
 #include "Engine/Rendering/HiZPass.h"
 #include "Engine/Rendering/SSRPass.h"
+#include "Engine/Rendering/AutoExposurePass.h"
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIHelpers.h"
 #include <DirectXMath.h>
@@ -76,6 +78,8 @@ public:
     CSSAOPass& GetSSAOPass() { return m_ssaoPass; }
     CHiZPass& GetHiZPass() { return m_hiZPass; }
     CSSRPass& GetSSRPass() { return m_ssrPass; }
+    CAutoExposurePass& GetAutoExposurePass() { return m_autoExposurePass; }
+    CMotionBlurPass& GetMotionBlurPass() { return m_motionBlurPass; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
 
 private:
@@ -93,7 +97,9 @@ private:
     CSSAOPass m_ssaoPass;
     CHiZPass m_hiZPass;
     CSSRPass m_ssrPass;
+    CAutoExposurePass m_autoExposurePass;
     CBloomPass m_bloomPass;
+    CMotionBlurPass m_motionBlurPass;
     CPostProcessPass m_postProcess;
     CDebugLinePass m_debugLinePass;
 

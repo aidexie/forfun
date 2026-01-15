@@ -22,6 +22,7 @@ public:
     // bloomTexture: Bloom texture (half resolution, can be nullptr)
     // ldrOutput: LDR sRGB output render target (R8G8B8A8_UNORM_SRGB)
     // exposure: Exposure adjustment (0.5 = darker, 1.0 = neutral, 2.0 = brighter)
+    // exposureBuffer: GPU buffer containing exposure value (overrides exposure param if provided)
     // bloomIntensity: Bloom contribution multiplier (0 = no bloom)
     // colorGrading: Color grading settings (can be nullptr to disable)
     // colorGradingEnabled: Whether color grading is enabled (from ShowFlags)
@@ -30,6 +31,7 @@ public:
                 RHI::ITexture* ldrOutput,
                 uint32_t width, uint32_t height,
                 float exposure = 1.0f,
+                RHI::IBuffer* exposureBuffer = nullptr,
                 float bloomIntensity = 1.0f,
                 const SColorGradingSettings* colorGrading = nullptr,
                 bool colorGradingEnabled = false);

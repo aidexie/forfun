@@ -19,8 +19,9 @@ struct FullscreenVertex {
 // Constant buffer for post-processing (must be 16-byte aligned)
 struct CB_PostProcess {
     float exposure;
+    int useExposureBuffer;
     float bloomIntensity;
-    float _pad0[2];
+    float _pad0;
 
     // Color Grading parameters
     DirectX::XMFLOAT3 lift;
@@ -86,6 +87,7 @@ void CPostProcessPass::Render(ITexture* hdrInput,
                               ITexture* ldrOutput,
                               uint32_t width, uint32_t height,
                               float exposure,
+                              IBuffer* exposureBuffer,
                               float bloomIntensity,
                               const SColorGradingSettings* colorGrading,
                               bool colorGradingEnabled) {
@@ -108,9 +110,10 @@ void CPostProcessPass::Render(ITexture* hdrInput,
 
     // Update constant buffer
     CB_PostProcess cb;
-    cb.exposure = exposure;
+    cb.exposure = exposure;  // Fallback value, may be overridden by GPU buffer
+    cb.useExposureBuffer = exposureBuffer ? 1 : 0;
     cb.bloomIntensity = bloomTexture ? bloomIntensity : 0.0f;
-    cb._pad0[0] = cb._pad0[1] = 0.0f;
+    cb._pad0 = 0.0f;
 
     // Color grading parameters
     if (colorGradingEnabled && colorGrading) {
@@ -158,12 +161,20 @@ void CPostProcessPass::Render(ITexture* hdrInput,
         cmdList->SetShaderResource(EShaderStage::Pixel, 2, lutTexture);
     }
 
+    // Bind exposure buffer for GPU-only auto exposure path
+    if (exposureBuffer) {
+        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, exposureBuffer);
+    }
+
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
 
     // Draw fullscreen quad
     cmdList->Draw(4, 0);
 
-    // Unbind render target to prevent hazards
+    // Unbind resources to prevent hazards
+    if (exposureBuffer) {
+        cmdList->UnbindShaderResources(EShaderStage::Pixel, 3, 1);
+    }
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 }
 
@@ -214,12 +225,14 @@ void CPostProcessPass::createShaders() {
         Texture2D hdrTexture : register(t0);
         Texture2D bloomTexture : register(t1);
         Texture3D lutTexture : register(t2);
+        StructuredBuffer<float> exposureBuffer : register(t3);
         SamplerState samp : register(s0);
 
         cbuffer CB_PostProcess : register(b0) {
             float gExposure;
+            int gUseExposureBuffer;
             float gBloomIntensity;
-            float2 _pad0;
+            float _pad0;
 
             float3 gLift;
             float gSaturation;
@@ -311,8 +324,12 @@ void CPostProcessPass::createShaders() {
                 hdrColor += bloom * gBloomIntensity;
             }
 
-            // Apply exposure (adjust brightness before tone mapping)
-            hdrColor *= gExposure;
+            // Apply exposure (from GPU buffer if available, otherwise from constant)
+            float exposure = gExposure;
+            if (gUseExposureBuffer) {
+                exposure = exposureBuffer[0];  // [0] = current exposure
+            }
+            hdrColor *= exposure;
 
             // Tone mapping: HDR -> LDR [0, 1] (still linear space)
             float3 ldrColor = ACESFilm(hdrColor);

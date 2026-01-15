@@ -68,6 +68,16 @@ struct SBloomSettings
 };
 
 // ============================================
+// Motion Blur Settings - Camera Motion Blur
+// ============================================
+struct SMotionBlurSettings
+{
+    float intensity = 0.5f;      // Blur strength multiplier (0-1)
+    int sampleCount = 12;        // Number of samples along velocity (8-16)
+    float maxBlurPixels = 32.0f; // Maximum blur radius in pixels (8-64)
+};
+
+// ============================================
 // Color Grading Preset - Built-in color looks
 // ============================================
 enum class EColorGradingPreset : int
@@ -148,6 +158,51 @@ struct SColorGradingSettings
 };
 
 // ============================================
+// Anti-Aliasing Mode - Post-Process AA Algorithm
+// ============================================
+enum class EAntiAliasingMode : int
+{
+    Off = 0,    // No anti-aliasing
+    FXAA = 1,   // Fast Approximate AA (NVIDIA, single pass, ~0.5ms)
+    SMAA = 2    // Subpixel Morphological AA (3-pass, higher quality, ~1.5ms)
+};
+
+inline const char* GetAntiAliasingModeName(EAntiAliasingMode mode) {
+    switch (mode) {
+        case EAntiAliasingMode::Off:  return "Off";
+        case EAntiAliasingMode::FXAA: return "FXAA";
+        case EAntiAliasingMode::SMAA: return "SMAA";
+        default: return "Unknown";
+    }
+}
+
+// ============================================
+// Anti-Aliasing Settings
+// ============================================
+struct SAntiAliasingSettings
+{
+    EAntiAliasingMode mode = EAntiAliasingMode::Off;
+
+    // FXAA-specific settings
+    float fxaaSubpixelQuality = 0.75f;   // 0.0 (sharp) to 1.0 (soft)
+    float fxaaEdgeThreshold = 0.166f;    // Edge detection sensitivity
+    float fxaaEdgeThresholdMin = 0.0833f; // Minimum edge threshold
+};
+
+// ============================================
+// Auto Exposure Settings - HDR Eye Adaptation
+// ============================================
+struct SAutoExposureSettings
+{
+    float minEV = -4.0f;            // Minimum exposure (EV units, very dark scenes)
+    float maxEV = 4.0f;             // Maximum exposure (EV units, very bright scenes)
+    float adaptSpeedUp = 2.0f;      // Dark->Bright adaptation speed (seconds)
+    float adaptSpeedDown = 4.0f;    // Bright->Dark adaptation speed (seconds)
+    float exposureCompensation = 0.0f;  // Manual bias (-2 to +2 EV)
+    float centerWeight = 0.7f;      // Center metering weight (0=uniform, 1=center only)
+};
+
+// ============================================
 // Volumetric Lightmap 配置
 // ============================================
 struct SVolumetricLightmapConfig
@@ -181,8 +236,17 @@ public:
     // Post-Processing: Bloom
     SBloomSettings bloom;
 
+    // Post-Processing: Motion Blur
+    SMotionBlurSettings motionBlur;
+
+    // Post-Processing: Auto Exposure
+    SAutoExposureSettings autoExposure;
+
     // Post-Processing: Color Grading
     SColorGradingSettings colorGrading;
+
+    // Post-Processing: Anti-Aliasing
+    SAntiAliasingSettings antiAliasing;
 
     // G-Buffer Debug Visualization
     EGBufferDebugMode gBufferDebugMode = EGBufferDebugMode::None;
