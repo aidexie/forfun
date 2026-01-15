@@ -396,46 +396,34 @@ void CSSAOPass::dispatchSSAO(ICommandList* cmdList,
 }
 
 void CSSAOPass::dispatchBlurH(ICommandList* cmdList) {
-    if (!m_blurHPSO || !m_ssaoBlurTemp) return;
-
-    CB_SSAOBlur cb{};
-    cb.blurDirection = XMFLOAT2(1.0f, 0.0f);
-    cb.texelSize.x = 1.0f / static_cast<float>(m_halfWidth);
-    cb.texelSize.y = 1.0f / static_cast<float>(m_halfHeight);
-    cb.depthSigma = m_settings.depthSigma;
-    cb.blurRadius = m_settings.blurRadius;
-
-    cmdList->SetPipelineState(m_blurHPSO.get());
-    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
-    cmdList->SetShaderResource(EShaderStage::Compute, 0, m_ssaoRaw.get());
-    cmdList->SetShaderResource(EShaderStage::Compute, 1, m_depthHalfRes.get());
-    cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
-    cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());
-    cmdList->SetUnorderedAccessTexture(0, m_ssaoBlurTemp.get());
-
-    cmdList->Dispatch(calcDispatchGroups(m_halfWidth), calcDispatchGroups(m_halfHeight), 1);
-
-    cmdList->SetUnorderedAccessTexture(0, nullptr);
-    cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 2);
+    dispatchBlur(cmdList, m_blurHPSO.get(), m_ssaoRaw.get(), m_ssaoBlurTemp.get(), XMFLOAT2(1.0f, 0.0f));
 }
 
 void CSSAOPass::dispatchBlurV(ICommandList* cmdList) {
-    if (!m_blurVPSO || !m_ssaoHalfBlurred) return;
+    dispatchBlur(cmdList, m_blurVPSO.get(), m_ssaoBlurTemp.get(), m_ssaoHalfBlurred.get(), XMFLOAT2(0.0f, 1.0f));
+}
+
+void CSSAOPass::dispatchBlur(ICommandList* cmdList,
+                              IPipelineState* pso,
+                              ITexture* inputAO,
+                              ITexture* outputAO,
+                              const XMFLOAT2& direction) {
+    if (!pso || !outputAO) return;
 
     CB_SSAOBlur cb{};
-    cb.blurDirection = XMFLOAT2(0.0f, 1.0f);
+    cb.blurDirection = direction;
     cb.texelSize.x = 1.0f / static_cast<float>(m_halfWidth);
     cb.texelSize.y = 1.0f / static_cast<float>(m_halfHeight);
     cb.depthSigma = m_settings.depthSigma;
     cb.blurRadius = m_settings.blurRadius;
 
-    cmdList->SetPipelineState(m_blurVPSO.get());
+    cmdList->SetPipelineState(pso);
     cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
-    cmdList->SetShaderResource(EShaderStage::Compute, 0, m_ssaoBlurTemp.get());
+    cmdList->SetShaderResource(EShaderStage::Compute, 0, inputAO);
     cmdList->SetShaderResource(EShaderStage::Compute, 1, m_depthHalfRes.get());
     cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
     cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());
-    cmdList->SetUnorderedAccessTexture(0, m_ssaoHalfBlurred.get());
+    cmdList->SetUnorderedAccessTexture(0, outputAO);
 
     cmdList->Dispatch(calcDispatchGroups(m_halfWidth), calcDispatchGroups(m_halfHeight), 1);
 

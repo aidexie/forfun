@@ -16,7 +16,6 @@ namespace SSRConfig {
     constexpr uint32_t THREAD_GROUP_SIZE = 8;   // 8x8 threads per group
     constexpr uint32_t MAX_HIZ_MIP = 10;        // Maximum Hi-Z mip level to use
     constexpr uint32_t DEFAULT_MAX_STEPS = 64;  // Default ray march steps
-    constexpr uint32_t DEFAULT_BINARY_STEPS = 8; // Binary search refinement steps
 }
 
 // ============================================
@@ -61,7 +60,12 @@ struct SSSRSettings {
 
     // Stochastic settings (Mode: Stochastic/Temporal)
     int numRays = 4;                // Rays per pixel (1-8)
-    float brdfBias = 0.5f;          // BRDF importance sampling bias (0=uniform, 1=full GGX)
+    float brdfBias = 0.7f;          // BRDF importance sampling bias (0=uniform, 1=full GGX)
+
+    // Stochastic SSR improvements
+    bool useAdaptiveRays = true;    // Adapt ray count based on roughness
+    float fireflyClampThreshold = 10.0f;  // Absolute luminance clamp
+    float fireflyMultiplier = 4.0f;       // Adaptive threshold = avg * multiplier
 
     // Temporal settings (Mode: Temporal)
     float temporalBlend = 0.9f;     // History blend factor (0=current only, 1=history only)
@@ -106,41 +110,44 @@ struct SSSRSettings {
 };
 
 // ============================================
-// Constant buffer for SSR compute shader (b0)
+// CB_SSR - Constant buffer for SSR compute shader (b0)
 // ============================================
 struct alignas(16) CB_SSR {
     DirectX::XMFLOAT4X4 proj;           // Projection matrix
     DirectX::XMFLOAT4X4 invProj;        // Inverse projection matrix
     DirectX::XMFLOAT4X4 view;           // View matrix (world to view)
     DirectX::XMFLOAT4X4 invView;        // Inverse view matrix (view to world)
-    DirectX::XMFLOAT4X4 prevViewProj;   // Previous frame view-projection (for temporal)
+    DirectX::XMFLOAT4X4 prevViewProj;   // Previous frame view-projection (temporal)
     DirectX::XMFLOAT2 screenSize;       // Full resolution (width, height)
     DirectX::XMFLOAT2 texelSize;        // 1.0 / screenSize
     float maxDistance;                   // Maximum ray distance
     float thickness;                     // Surface thickness for hit
     float stride;                        // Ray march stride
-    float strideZCutoff;                 // View-Z stride scaling cutoff
+    float strideZCutoff;                 // View-Z stride scaling cutoff (reserved)
     int maxSteps;                        // Maximum ray march steps
-    int binarySearchSteps;               // Binary search refinement
+    int binarySearchSteps;               // Binary search refinement (reserved)
     float jitterOffset;                  // Temporal jitter
-    float fadeStart;                     // Edge fade start
-    float fadeEnd;                       // Edge fade end
+    float fadeStart;                     // Edge fade start (reserved)
+    float fadeEnd;                       // Edge fade end (reserved)
     float roughnessFade;                 // Roughness cutoff
     float nearZ;                         // Camera near plane
     float farZ;                          // Camera far plane
     int hiZMipCount;                     // Number of Hi-Z mip levels
     uint32_t useReversedZ;               // 0 = standard-Z, 1 = reversed-Z
-    int ssrMode;                         // 0=HiZ, 1=Stochastic, 2=Temporal
+    int ssrMode;                         // 0=SimpleLinear, 1=HiZ, 2=Stochastic, 3=Temporal
     int numRays;                         // Rays per pixel (stochastic/temporal)
     float brdfBias;                      // BRDF importance sampling bias
     float temporalBlend;                 // History blend factor
     float motionThreshold;               // Motion rejection threshold
     uint32_t frameIndex;                 // Frame counter for temporal jitter
-    float _pad[2];                       // Padding to 16-byte alignment
+    uint32_t useAdaptiveRays;            // Enable adaptive ray count
+    float fireflyClampThreshold;         // Absolute luminance clamp
+    float fireflyMultiplier;             // Adaptive threshold multiplier
+    float _pad;                          // Padding to 16-byte alignment
 };
 
 // ============================================
-// Constant buffer for SSR composite shader (b0)
+// CB_SSRComposite - Constant buffer for SSR composite shader (b0)
 // ============================================
 struct alignas(16) CB_SSRComposite {
     DirectX::XMFLOAT2 screenSize;        // Full resolution (width, height)

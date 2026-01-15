@@ -103,7 +103,14 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Reversed-Z depth buffer support
   - Debug visualization modes
   - 详细文档: `docs/SSAO.md`
-- **3.3.3 SSR** (需要 depth + normal + roughness)
+- **3.3.3 SSR** ✅ COMPLETE
+  - Four modes: SimpleLinear, HiZ Trace, Stochastic, Temporal
+  - Hi-Z accelerated ray marching with cell-based traversal
+  - GGX importance sampling with PDF-correct weighting
+  - Adaptive ray count based on roughness (40-70% perf gain)
+  - Firefly rejection for noise reduction
+  - TAA-friendly noise distribution
+  - 详细文档: `docs/SSR.md`
 - **3.3.4 TAA** (需要 velocity + history buffer)
   - Jittered projection matrix
   - Motion vector reprojection

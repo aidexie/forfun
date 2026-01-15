@@ -15,6 +15,63 @@ using namespace DirectX;
 using namespace RHI;
 
 // ============================================
+// Internal Helpers
+// ============================================
+
+namespace {
+
+// Compile a compute shader and create its PSO
+// Returns true on success, false on failure
+bool CreateComputeShaderAndPSO(const std::string& shaderPath,
+                                const char* entryPoint,
+                                const char* shaderDebugName,
+                                const char* psoDebugName,
+                                ShaderPtr& outShader,
+                                PipelineStatePtr& outPSO)
+{
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return false;
+
+#ifdef _DEBUG
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    SCompiledShader compiled = CompileShaderFromFile(shaderPath, entryPoint, "cs_5_0", nullptr, debugShaders);
+    if (!compiled.success) {
+        CFFLog::Error("[SSRPass] Shader compilation failed (%s): %s", shaderDebugName, compiled.errorMessage.c_str());
+        return false;
+    }
+
+    ShaderDesc shaderDesc;
+    shaderDesc.type = EShaderType::Compute;
+    shaderDesc.bytecode = compiled.bytecode.data();
+    shaderDesc.bytecodeSize = compiled.bytecode.size();
+    shaderDesc.debugName = shaderDebugName;
+    outShader.reset(ctx->CreateShader(shaderDesc));
+
+    if (!outShader) {
+        CFFLog::Error("[SSRPass] Failed to create shader: %s", shaderDebugName);
+        return false;
+    }
+
+    ComputePipelineDesc psoDesc;
+    psoDesc.computeShader = outShader.get();
+    psoDesc.debugName = psoDebugName;
+    outPSO.reset(ctx->CreateComputePipelineState(psoDesc));
+
+    if (!outPSO) {
+        CFFLog::Error("[SSRPass] Failed to create PSO: %s", psoDebugName);
+        return false;
+    }
+
+    return true;
+}
+
+} // anonymous namespace
+
+// ============================================
 // Lifecycle
 // ============================================
 
@@ -149,7 +206,11 @@ void CSSRPass::Render(ICommandList* cmdList,
     cb.temporalBlend = m_settings.temporalBlend;
     cb.motionThreshold = m_settings.motionThreshold;
     cb.frameIndex = m_frameIndex++;
-    cb._pad[0] = cb._pad[1] = 0.0f;
+    // Stochastic SSR improvements
+    cb.useAdaptiveRays = m_settings.useAdaptiveRays ? 1 : 0;
+    cb.fireflyClampThreshold = m_settings.fireflyClampThreshold;
+    cb.fireflyMultiplier = m_settings.fireflyMultiplier;
+    cb._pad = 0.0f;
 
     // Store current view-proj for next frame
     m_prevViewProj = XMMatrixMultiply(view, proj);
@@ -170,48 +231,19 @@ void CSSRPass::Render(ICommandList* cmdList,
 // ============================================
 
 void CSSRPass::createShaders() {
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-#ifdef _DEBUG
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
     std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSR.cs.hlsl";
 
-    // Compile SSR compute shader
-    SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSMain", "cs_5_0", nullptr, debugShaders);
-    if (!compiled.success) {
-        CFFLog::Error("[SSRPass] SSR shader compilation failed: %s", compiled.errorMessage.c_str());
-        return;
+    if (CreateComputeShaderAndPSO(shaderPath, "CSMain", "SSR_CS", "SSR_PSO", m_ssrCS, m_ssrPSO)) {
+        CFFLog::Info("[SSRPass] SSR shader compiled successfully");
     }
+}
 
-    ShaderDesc shaderDesc;
-    shaderDesc.type = EShaderType::Compute;
-    shaderDesc.bytecode = compiled.bytecode.data();
-    shaderDesc.bytecodeSize = compiled.bytecode.size();
-    shaderDesc.debugName = "SSR_CS";
-    m_ssrCS.reset(ctx->CreateShader(shaderDesc));
+void CSSRPass::createCompositeShader() {
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSRComposite.cs.hlsl";
 
-    if (!m_ssrCS) {
-        CFFLog::Error("[SSRPass] Failed to create SSR shader");
-        return;
+    if (CreateComputeShaderAndPSO(shaderPath, "CSMain", "SSRComposite_CS", "SSRComposite_PSO", m_compositeCS, m_compositePSO)) {
+        CFFLog::Info("[SSRPass] Composite shader compiled successfully");
     }
-
-    // Create PSO
-    ComputePipelineDesc psoDesc;
-    psoDesc.computeShader = m_ssrCS.get();
-    psoDesc.debugName = "SSR_PSO";
-    m_ssrPSO.reset(ctx->CreateComputePipelineState(psoDesc));
-
-    if (!m_ssrPSO) {
-        CFFLog::Error("[SSRPass] Failed to create SSR PSO");
-        return;
-    }
-
-    CFFLog::Info("[SSRPass] Shaders compiled successfully");
 }
 
 void CSSRPass::createTextures(uint32_t width, uint32_t height) {
@@ -261,20 +293,23 @@ void CSSRPass::createSamplers() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
 
+    // Common address mode for both samplers
+    auto setClampAddressMode = [](SamplerDesc& desc) {
+        desc.addressU = ETextureAddressMode::Clamp;
+        desc.addressV = ETextureAddressMode::Clamp;
+        desc.addressW = ETextureAddressMode::Clamp;
+    };
+
     // Point sampler for depth/Hi-Z
     SamplerDesc pointDesc;
     pointDesc.filter = EFilter::MinMagMipPoint;
-    pointDesc.addressU = ETextureAddressMode::Clamp;
-    pointDesc.addressV = ETextureAddressMode::Clamp;
-    pointDesc.addressW = ETextureAddressMode::Clamp;
+    setClampAddressMode(pointDesc);
     m_pointSampler.reset(ctx->CreateSampler(pointDesc));
 
     // Linear sampler for color
     SamplerDesc linearDesc;
     linearDesc.filter = EFilter::MinMagMipLinear;
-    linearDesc.addressU = ETextureAddressMode::Clamp;
-    linearDesc.addressV = ETextureAddressMode::Clamp;
-    linearDesc.addressW = ETextureAddressMode::Clamp;
+    setClampAddressMode(linearDesc);
     m_linearSampler.reset(ctx->CreateSampler(linearDesc));
 }
 
@@ -299,51 +334,6 @@ void CSSRPass::createFallbackTexture() {
     if (!m_blackFallback) {
         CFFLog::Warning("[SSRPass] Failed to create black fallback texture");
     }
-}
-
-void CSSRPass::createCompositeShader() {
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-#ifdef _DEBUG
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSRComposite.cs.hlsl";
-
-    // Compile SSR composite compute shader
-    SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSMain", "cs_5_0", nullptr, debugShaders);
-    if (!compiled.success) {
-        CFFLog::Error("[SSRPass] SSR composite shader compilation failed: %s", compiled.errorMessage.c_str());
-        return;
-    }
-
-    ShaderDesc shaderDesc;
-    shaderDesc.type = EShaderType::Compute;
-    shaderDesc.bytecode = compiled.bytecode.data();
-    shaderDesc.bytecodeSize = compiled.bytecode.size();
-    shaderDesc.debugName = "SSRComposite_CS";
-    m_compositeCS.reset(ctx->CreateShader(shaderDesc));
-
-    if (!m_compositeCS) {
-        CFFLog::Error("[SSRPass] Failed to create SSR composite shader");
-        return;
-    }
-
-    // Create PSO
-    ComputePipelineDesc psoDesc;
-    psoDesc.computeShader = m_compositeCS.get();
-    psoDesc.debugName = "SSRComposite_PSO";
-    m_compositePSO.reset(ctx->CreateComputePipelineState(psoDesc));
-
-    if (!m_compositePSO) {
-        CFFLog::Error("[SSRPass] Failed to create SSR composite PSO");
-        return;
-    }
-
-    CFFLog::Info("[SSRPass] Composite shader compiled successfully");
 }
 
 void CSSRPass::Composite(ICommandList* cmdList,

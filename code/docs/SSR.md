@@ -113,14 +113,20 @@ Multiple rays per pixel with GGX importance sampling.
 **Characteristics:**
 - Better quality for rough surfaces
 - Physically-based reflection distribution
-- Temporal noise (without accumulation)
-- 2-8x cost vs HiZ Trace
+- PDF-correct importance sampling (energy conserving)
+- Adaptive ray count based on roughness (performance optimization)
+- Firefly rejection to reduce extreme noise
+- TAA-friendly noise distribution
+- 2-8x cost vs HiZ Trace (varies with roughness when adaptive)
 
 **Parameters:**
-- `numRays` (1-8): Rays traced per pixel
+- `numRays` (1-8): Base rays traced per pixel
 - `brdfBias` (0-1): Blend between uniform and GGX sampling
+- `useAdaptiveRays` (bool): Reduce ray count for smooth surfaces
+- `fireflyClampThreshold` (float): Absolute luminance clamp
+- `fireflyMultiplier` (float): Adaptive threshold multiplier
 
-**Use Case:** Cinematic rendering, rough metal/water
+**Use Case:** Cinematic rendering, rough metal/water, TAA-enabled pipelines
 
 ### Mode 3: Temporal
 
@@ -224,6 +230,53 @@ float3 SampleGGX(float2 Xi, float roughness) {
 
 The half-vector H is transformed from tangent space to view space, then the reflection direction is computed as `reflect(viewDir, H)`.
 
+### Stochastic SSR Improvements
+
+The Stochastic mode includes several optimizations for noise reduction and performance:
+
+**1. PDF-Correct Weighting**
+
+Importance sampling requires dividing by the PDF to get unbiased results:
+
+```hlsl
+// PDF(H) = D(H) * NdotH, PDF(L) = PDF(H) / (4 * VdotH)
+// Weight = 4 * VdotH / (D * NdotH) to cancel PDF
+float D = D_GGX(NdotH, effectiveRoughness);
+float pdfWeight = (4.0 * VdotH / (D * NdotH));
+pdfWeight = clamp(pdfWeight, 0.0, 4.0);  // Prevent extreme weights
+```
+
+**2. Adaptive Ray Count**
+
+Smooth surfaces converge quickly with fewer rays:
+
+| Roughness | Rays | Rationale |
+|-----------|------|-----------|
+| < 0.01 | 1 (early-out) | Mirror reflection, no sampling needed |
+| < 0.05 | 1 | Near-mirror, single ray sufficient |
+| 0.05-0.30 | 1-maxRays | Linear interpolation |
+| > 0.30 | maxRays | Full stochastic sampling |
+
+**3. Firefly Rejection**
+
+Extreme luminance values are clamped using an adaptive threshold:
+
+```hlsl
+// Threshold = max(absolute clamp, average luminance * multiplier)
+float adaptiveThreshold = max(fireflyClampThreshold, avgLuminance * fireflyMultiplier);
+avgColor = ClampLuminance(avgColor, adaptiveThreshold);
+```
+
+**4. R2 Quasi-Random Sequence**
+
+Uses R2 sequence (Plastic constant based) instead of golden ratio for better 2D sample distribution:
+
+```hlsl
+const float2 R2 = float2(0.7548776662466927, 0.5698402909980532);
+Xi.x = frac(noise.x + ray * R2.x);
+Xi.y = frac(noise.y + ray * R2.y);
+```
+
 ### Temporal Accumulation
 
 Temporal mode reduces noise by accumulating samples over multiple frames:
@@ -277,8 +330,11 @@ finalColor = hdrColor + ssrContribution * (1.0 - metallic * 0.5 * blendWeight);
 | `fadeEnd` | float | 1.0 | Edge fade end (screen UV) |
 | `roughnessFade` | float | 0.5 | Roughness cutoff for SSR |
 | `intensity` | float | 1.0 | SSR brightness multiplier |
-| `numRays` | int | 4 | Rays per pixel (stochastic/temporal) |
-| `brdfBias` | float | 0.5 | BRDF sampling bias (0=uniform, 1=GGX) |
+| `numRays` | int | 4 | Base rays per pixel (stochastic/temporal) |
+| `brdfBias` | float | 0.7 | BRDF sampling bias (0=uniform, 1=GGX) |
+| `useAdaptiveRays` | bool | true | Adapt ray count based on roughness |
+| `fireflyClampThreshold` | float | 10.0 | Absolute luminance clamp |
+| `fireflyMultiplier` | float | 4.0 | Adaptive threshold = avg * multiplier |
 | `temporalBlend` | float | 0.9 | History blend factor |
 | `motionThreshold` | float | 0.01 | Motion rejection threshold |
 
@@ -424,4 +480,4 @@ Potential enhancements for consideration:
 
 ---
 
-**Last Updated:** 2026-01-14
+**Last Updated:** 2026-01-15

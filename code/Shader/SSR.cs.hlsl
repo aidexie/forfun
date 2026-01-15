@@ -27,24 +27,27 @@ cbuffer CB_SSR : register(b0)
     float g_MaxDistance;       // Maximum ray distance
     float g_Thickness;         // Surface thickness for hit
     float g_Stride;            // Ray march stride
-    float g_StrideZCutoff;     // View-Z stride scaling cutoff
+    float g_StrideZCutoff;     // View-Z stride scaling cutoff (reserved)
     int g_MaxSteps;            // Maximum ray march steps
-    int g_BinarySearchSteps;   // Binary search refinement
+    int g_BinarySearchSteps;   // Binary search refinement (reserved)
     float g_JitterOffset;      // Temporal jitter
-    float g_FadeStart;         // Edge fade start
-    float g_FadeEnd;           // Edge fade end
+    float g_FadeStart;         // Edge fade start (reserved)
+    float g_FadeEnd;           // Edge fade end (reserved)
     float g_RoughnessFade;     // Roughness cutoff
     float g_NearZ;             // Camera near plane
     float g_FarZ;              // Camera far plane
     int g_HiZMipCount;         // Number of Hi-Z mip levels
     uint g_UseReversedZ;       // 0 = standard-Z, 1 = reversed-Z (always 1)
-    int g_SSRMode;             // 0=HiZ, 1=Stochastic, 2=Temporal
+    int g_SSRMode;             // 0=SimpleLinear, 1=HiZ, 2=Stochastic, 3=Temporal
     int g_NumRays;             // Rays per pixel (stochastic/temporal)
     float g_BrdfBias;          // BRDF importance sampling bias (0=uniform, 1=full GGX)
     float g_TemporalBlend;     // History blend factor
     float g_MotionThreshold;   // Motion rejection threshold
     uint g_FrameIndex;         // Frame counter for temporal jitter
-    float2 g_Pad;
+    uint g_UseAdaptiveRays;    // Enable adaptive ray count based on roughness
+    float g_FireflyClampThreshold;  // Absolute luminance clamp (e.g., 10.0)
+    float g_FireflyMultiplier;      // Multiplier for adaptive threshold (e.g., 4.0)
+    float g_Pad;
 };
 
 // ============================================
@@ -117,6 +120,53 @@ void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
     B = cross(N, T);
 }
 
+// ============================================
+// PDF and Weighting Helpers (for Stochastic SSR)
+// ============================================
+
+// GGX normal distribution function
+float D_GGX(float NdotH, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float NdotH2 = NdotH * NdotH;
+
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+
+    return a2 / max(denom, 0.0001);
+}
+
+// Luminance for firefly detection
+float Luminance(float3 color)
+{
+    return dot(color, float3(0.2126, 0.7152, 0.0722));
+}
+
+// Soft luminance clamp (preserves hue, reduces fireflies)
+float3 ClampLuminance(float3 color, float maxLuminance)
+{
+    float lum = Luminance(color);
+    if (lum > maxLuminance)
+    {
+        return color * (maxLuminance / lum);
+    }
+    return color;
+}
+
+// Adaptive ray count based on roughness
+int GetAdaptiveRayCount(float roughness, int maxRays)
+{
+    // Mirror surfaces need only 1 ray
+    if (roughness < 0.05)
+        return 1;
+
+    // Glossy: scale rays with roughness
+    // roughness 0.05 -> 1 ray, roughness 0.3 -> maxRays
+    float t = saturate((roughness - 0.05) / 0.25);
+    return max(1, int(lerp(1.0, float(maxRays), t)));
+}
+
 // Transform from tangent space to world/view space
 float3 TangentToWorld(float3 H, float3 N)
 {
@@ -128,6 +178,13 @@ float3 TangentToWorld(float3 H, float3 N)
 // ============================================
 // Helper Functions
 // ============================================
+
+// Compute quadratic roughness falloff mask
+float ComputeRoughnessMask(float roughness)
+{
+    float mask = 1.0 - saturate(roughness / g_RoughnessFade);
+    return mask * mask;  // Quadratic falloff
+}
 
 // Convert screen-space UV + depth to view-space position
 float3 ScreenToView(float2 uv, float depth)
@@ -399,21 +456,73 @@ float4 SimpleLinearTrace(float3 rayOrigin, float3 rayDir)
 }
 
 // ============================================
+// Single-Ray SSR Helper
+// ============================================
+// Traces a single reflection ray and returns color + confidence
+// Shared by SimpleLinear and HiZ modes to reduce code duplication
+float4 TraceSingleRay(float3 viewPos, float3 reflectDir, float roughness, bool useHiZ, float jitter)
+{
+    // Trace ray using selected algorithm
+    float4 hitResult = useHiZ ? HiZTrace(viewPos, reflectDir, jitter) : SimpleLinearTrace(viewPos, reflectDir);
+
+    // Sample scene color at hit point
+    float3 reflectionColor = float3(0, 0, 0);
+    if (hitResult.w > 0.001)
+    {
+        reflectionColor = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
+    }
+
+    // Apply roughness fade
+    float confidence = hitResult.w * ComputeRoughnessMask(roughness);
+
+    return float4(reflectionColor, confidence);
+}
+
+// ============================================
 // Stochastic SSR - Multiple rays with importance sampling
+// Improved with: PDF weighting, firefly rejection, adaptive ray count
 // ============================================
 float4 StochasticSSR(float3 viewPos, float3 normalVS, float3 viewDir, float roughness, uint2 pixelCoord)
 {
     float4 noise = GetBlueNoise(pixelCoord);
 
+    // Adaptive ray count based on roughness (smooth surfaces need fewer rays)
+    int baseRays = min(g_NumRays, 8);
+    int numRays = g_UseAdaptiveRays ? GetAdaptiveRayCount(roughness, baseRays) : baseRays;
+
+    // Early-out for mirror-like surfaces: single perfect reflection
+    if (roughness < 0.01)
+    {
+        float3 reflectDir = reflect(viewDir, normalVS);
+        if (reflectDir.z < 0.0)
+            return float4(0, 0, 0, 0);
+
+        float jitter = 1.0 + noise.z * 0.5;
+        float4 hitResult = HiZTrace(viewPos, reflectDir, jitter);
+
+        if (hitResult.w > 0.001)
+        {
+            float3 color = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
+            color = ClampLuminance(color, g_FireflyClampThreshold);
+            return float4(color, hitResult.w);
+        }
+        return float4(0, 0, 0, 0);
+    }
+
     float3 totalColor = float3(0, 0, 0);
     float totalWeight = 0.0;
+    int validSamples = 0;
 
-    int numRays = min(g_NumRays, 8);  // Cap at 8 rays
+    // Effective roughness for GGX sampling
+    float effectiveRoughness = lerp(1.0, roughness, g_BrdfBias);
+
+    // First pass: collect samples and track luminance for adaptive firefly threshold
+    float totalLuminance = 0.0;
 
     [loop]
     for (int ray = 0; ray < numRays; ++ray)
     {
-        // Generate sample point
+        // Generate sample point using R2 quasi-random sequence (better 2D distribution)
         float2 Xi;
         if (ray == 0)
         {
@@ -421,33 +530,33 @@ float4 StochasticSSR(float3 viewPos, float3 normalVS, float3 viewDir, float roug
         }
         else
         {
-            // Use golden ratio offset for additional samples
-            const float goldenRatio = 1.61803398875;
-            Xi.x = frac(noise.x + ray * goldenRatio);
-            Xi.y = frac(noise.y + ray * goldenRatio * goldenRatio);
+            // R2 sequence constants (Plastic constant based)
+            const float2 R2 = float2(0.7548776662466927, 0.5698402909980532);
+            Xi.x = frac(noise.x + ray * R2.x);
+            Xi.y = frac(noise.y + ray * R2.y);
         }
 
-        // Lerp between uniform hemisphere and GGX based on brdfBias
-        float effectiveRoughness = lerp(1.0, roughness, g_BrdfBias);
+        // GGX importance sampling
+        float3 H_tangent = SampleGGX(Xi, effectiveRoughness);
+        float3 H = TangentToWorld(H_tangent, normalVS);
+        float3 reflectDir = reflect(viewDir, H);
 
-        // Sample reflection direction
-        float3 reflectDir;
-        if (effectiveRoughness < 0.01)
-        {
-            // Mirror reflection for very smooth surfaces
-            reflectDir = reflect(viewDir, normalVS);
-        }
-        else
-        {
-            // GGX importance sampling
-            float3 H_tangent = SampleGGX(Xi, effectiveRoughness);
-            float3 H = TangentToWorld(H_tangent, normalVS);
-            reflectDir = reflect(viewDir, H);
-        }
-
-        // Skip rays pointing away from camera
-        if (reflectDir.z < 0.0)
+        // Skip rays pointing into surface or away from camera
+        float NdotL = dot(normalVS, reflectDir);
+        if (NdotL < 0.001 || reflectDir.z < 0.0)
             continue;
+
+        // Compute PDF weight for importance sampling
+        float NdotH = saturate(dot(normalVS, H));
+        float VdotH = saturate(dot(-viewDir, H));  // viewDir points toward pixel
+
+        // PDF-correct weight: for GGX importance sampling on H
+        // PDF(H) = D(H) * NdotH, PDF(L) = PDF(H) / (4 * VdotH)
+        // Weight = 4 * VdotH / (D * NdotH) to cancel PDF
+        float D = D_GGX(NdotH, effectiveRoughness);
+        float pdfWeight = (D > 0.001 && NdotH > 0.001) ?
+                          (4.0 * VdotH / (D * NdotH)) : 1.0;
+        pdfWeight = clamp(pdfWeight, 0.0, 4.0);  // Prevent extreme weights
 
         // Jitter for temporal stability
         float jitter = 1.0 + noise.z * 0.5;
@@ -459,23 +568,37 @@ float4 StochasticSSR(float3 viewPos, float3 normalVS, float3 viewDir, float roug
         {
             float3 reflectionColor = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
 
-            // Weight by confidence and NdotL
-            float NdotL = saturate(dot(normalVS, reflectDir));
-            float weight = hitResult.w * (0.5 + 0.5 * NdotL);
+            // Track luminance for adaptive firefly threshold
+            float lum = Luminance(reflectionColor);
+            totalLuminance += lum;
+            validSamples++;
+
+            // Combined weight: hit confidence * PDF weight * geometric term
+            float weight = hitResult.w * pdfWeight * NdotL;
 
             totalColor += reflectionColor * weight;
             totalWeight += weight;
         }
     }
 
-    if (totalWeight > 0.001)
-    {
-        float3 avgColor = totalColor / totalWeight;
-        float avgConfidence = totalWeight / numRays;
-        return float4(avgColor, avgConfidence);
-    }
+    // No valid samples
+    if (validSamples == 0 || totalWeight < 0.001)
+        return float4(0, 0, 0, 0);
 
-    return float4(0, 0, 0, 0);
+    // Compute average color
+    float3 avgColor = totalColor / totalWeight;
+
+    // Apply firefly rejection using adaptive threshold
+    // Threshold = max(user threshold, average luminance * multiplier)
+    float avgLuminance = totalLuminance / float(validSamples);
+    float adaptiveThreshold = max(g_FireflyClampThreshold, avgLuminance * g_FireflyMultiplier);
+    avgColor = ClampLuminance(avgColor, adaptiveThreshold);
+
+    // Confidence based on valid sample ratio
+    float sampleRatio = float(validSamples) / float(numRays);
+    float avgConfidence = saturate(totalWeight / float(validSamples)) * sampleRatio;
+
+    return float4(avgColor, avgConfidence);
 }
 
 // ============================================
@@ -577,88 +700,37 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
     float4 result;
 
     // Select SSR mode (ordered simple to complex)
-    if (g_SSRMode == 0)
+    if (g_SSRMode == 0 || g_SSRMode == 1)
     {
-        // SimpleLinear - basic ray march without Hi-Z
+        // SimpleLinear (mode 0) or HiZ Trace (mode 1) - single ray tracing
         float3 reflectDir = reflect(viewDir, normalVS);
 
         // Only trace forward-facing reflections (towards camera)
-        if (reflectDir.z < 0.0)
-        {
-            g_SSROutput[DTid.xy] = float4(0.0, 0, 0, 0);
-            return;
-        }
-
-        float4 hitResult = SimpleLinearTrace(viewPos, reflectDir);
-
-        // Sample scene color at hit point
-        float3 reflectionColor = float3(0, 0, 0);
-        if (hitResult.w > 0.001)
-        {
-            reflectionColor = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
-        }
-
-        // Apply roughness fade (quadratic for smoother falloff)
-        float roughnessMask = 1.0 - saturate(roughness / g_RoughnessFade);
-        roughnessMask *= roughnessMask;
-        float confidence = hitResult.w * roughnessMask;
-
-        result = float4(reflectionColor, confidence);
-    }
-    else if (g_SSRMode == 1)
-    {
-        // HiZ Trace - single ray with Hi-Z acceleration
-        float3 reflectDir = reflect(viewDir, normalVS);
-
-        // Only trace forward-facing reflections (towards camera)
-        // In view-space, negative Z points towards camera
+        // In view-space with LH coordinates, positive Z points away from camera
         if (reflectDir.z < 0.0)
         {
             g_SSROutput[DTid.xy] = float4(0, 0, 0, 0);
             return;
         }
 
-        // Add jitter for temporal stability
+        // Add jitter for temporal stability (HiZ mode only)
         float jitter = 1.0 + g_JitterOffset;
+        bool useHiZ = (g_SSRMode == 1);
 
-        // Hi-Z accelerated ray trace
-        float4 hitResult = HiZTrace(viewPos, reflectDir, jitter);
-
-        // Sample scene color at hit point
-        float3 reflectionColor = float3(0, 0, 0);
-        if (hitResult.w > 0.001)
-        {
-            reflectionColor = g_SceneColor.SampleLevel(g_LinearSampler, hitResult.xy, 0).rgb;
-        }
-
-        // Apply roughness fade (quadratic for smoother falloff)
-        float roughnessMask = 1.0 - saturate(roughness / g_RoughnessFade);
-        roughnessMask *= roughnessMask;
-        float confidence = hitResult.w * roughnessMask;
-
-        result = float4(reflectionColor, confidence);
+        result = TraceSingleRay(viewPos, reflectDir, roughness, useHiZ, jitter);
     }
     else if (g_SSRMode == 2)
     {
-        // Stochastic SSR
+        // Stochastic SSR - multiple rays with importance sampling
         result = StochasticSSR(viewPos, normalVS, viewDir, roughness, DTid.xy);
-
-        // Apply roughness fade
-        float roughnessMask = 1.0 - saturate(roughness / g_RoughnessFade);
-        roughnessMask *= roughnessMask;
-        result.a *= roughnessMask;
+        result.a *= ComputeRoughnessMask(roughness);
     }
     else
     {
-        // Temporal SSR
-        // Get world position for reprojection
+        // Temporal SSR - stochastic + history reprojection
         float3 worldPos = mul(float4(viewPos, 1.0), g_InvView).xyz;
         result = TemporalSSR(viewPos, worldPos, normalVS, viewDir, roughness, DTid.xy, uv);
-
-        // Apply roughness fade
-        float roughnessMask = 1.0 - saturate(roughness / g_RoughnessFade);
-        roughnessMask *= roughnessMask;
-        result.a *= roughnessMask;
+        result.a *= ComputeRoughnessMask(roughness);
     }
 
     // Output: reflection color + confidence

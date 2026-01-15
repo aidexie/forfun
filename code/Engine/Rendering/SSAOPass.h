@@ -6,6 +6,7 @@
 // Forward declarations
 namespace RHI {
     class ICommandList;
+    class IPipelineState;
     class ITexture;
 }
 
@@ -164,6 +165,11 @@ private:
 
     void dispatchBlurH(RHI::ICommandList* cmdList);
     void dispatchBlurV(RHI::ICommandList* cmdList);
+    void dispatchBlur(RHI::ICommandList* cmdList,
+                      RHI::IPipelineState* pso,
+                      RHI::ITexture* inputAO,
+                      RHI::ITexture* outputAO,
+                      const DirectX::XMFLOAT2& direction);
     void dispatchUpsample(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
 
     // ============================================
