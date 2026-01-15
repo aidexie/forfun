@@ -131,11 +131,12 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Bokeh shape support (circle, hexagon)
   - Near/far blur with smooth transitions
   - Auto-focus or manual focus distance
-- **3.3.8 Auto Exposure** (需要 HDR buffer)
-  - Histogram-based luminance analysis
-  - Eye adaptation (gradual adjustment)
-  - Min/max exposure clamping
-  - Exposure compensation control
+- **3.3.8 Auto Exposure** ✅ COMPLETE
+  - Histogram-based luminance analysis (256 bins, log2 scale)
+  - Eye adaptation with asymmetric speeds (faster bright, slower dark)
+  - Center-weighted metering (Gaussian falloff)
+  - GPU-only path (no CPU readback)
+  - 详细文档: `docs/AUTO_EXPOSURE.md`
 - **3.3.9 FSR 2.0** (AMD FidelityFX)
   - Temporal upscaling (works on all GPUs)
   - Quality modes: Ultra Quality → Performance
@@ -151,7 +152,7 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Saturation, contrast, temperature
   - Artist-friendly preset system
 
-**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR, TestTAA, TestDLSS, TestMotionBlur, TestDoF, TestAutoExposure, TestFSR, TestFXAA, TestColorGrading ✅ 通过
+**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA, TestDLSS, TestMotionBlur, TestDoF, TestAutoExposure ✅, TestFSR, TestFXAA, TestColorGrading ✅ 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 
@@ -242,4 +243,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2026-01-12
+**Last Updated**: 2026-01-15
