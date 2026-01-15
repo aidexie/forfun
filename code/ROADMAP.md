@@ -145,13 +145,13 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - FXAA: Fast approximate AA (fallback)
   - SMAA: Enhanced morphological AA (better quality)
   - Used when TAA/DLSS disabled
-- **3.3.11 Color Grading** (需要 LDR output)
+- **3.3.11 Color Grading** ✅ (需要 LDR output)
   - 3D LUT (Look-Up Table) support
   - Lift/Gamma/Gain controls
   - Saturation, contrast, temperature
   - Artist-friendly preset system
 
-**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR, TestTAA, TestDLSS, TestMotionBlur, TestDoF, TestAutoExposure, TestFSR, TestFXAA, TestColorGrading 通过
+**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR, TestTAA, TestDLSS, TestMotionBlur, TestDoF, TestAutoExposure, TestFSR, TestFXAA, TestColorGrading ✅ 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 
