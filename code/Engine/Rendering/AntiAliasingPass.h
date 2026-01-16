@@ -51,15 +51,18 @@ private:
     RHI::ShaderPtr m_fxaaPS;
     RHI::PipelineStatePtr m_fxaaPSO;
 
-    // SMAA resources (3-pass)
+    // SMAA resources (3-pass) - each pass has its own VS for pre-calculated offsets
+    RHI::ShaderPtr m_smaaEdgeVS;
     RHI::ShaderPtr m_smaaEdgePS;
     RHI::PipelineStatePtr m_smaaEdgePSO;
     RHI::TexturePtr m_smaaEdgesTex;
 
+    RHI::ShaderPtr m_smaaBlendVS;
     RHI::ShaderPtr m_smaaBlendPS;
     RHI::PipelineStatePtr m_smaaBlendPSO;
     RHI::TexturePtr m_smaaBlendTex;
 
+    RHI::ShaderPtr m_smaaNeighborVS;
     RHI::ShaderPtr m_smaaNeighborPS;
     RHI::PipelineStatePtr m_smaaNeighborPSO;
 

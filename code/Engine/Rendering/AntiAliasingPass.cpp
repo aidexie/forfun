@@ -62,14 +62,17 @@ void CAntiAliasingPass::Shutdown() {
     m_fxaaPSO.reset();
 
     // SMAA resources
+    m_smaaEdgeVS.reset();
     m_smaaEdgePS.reset();
     m_smaaEdgePSO.reset();
     m_smaaEdgesTex.reset();
 
+    m_smaaBlendVS.reset();
     m_smaaBlendPS.reset();
     m_smaaBlendPSO.reset();
     m_smaaBlendTex.reset();
 
+    m_smaaNeighborVS.reset();
     m_smaaNeighborPS.reset();
     m_smaaNeighborPSO.reset();
 
@@ -352,50 +355,84 @@ void CAntiAliasingPass::createFXAAResources() {
 
 void CAntiAliasingPass::createSMAAResources() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx || !m_fullscreenVS) return;
+    if (!ctx) return;
 
     std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
 
-    // Compile SMAA shaders
-    SCompiledShader edgeCompiled = CompileShaderFromFile(shaderDir + "SMAAEdgeDetection.ps.hlsl", "main", "ps_5_0", nullptr, kDebugShaders);
-    if (!edgeCompiled.success) {
-        CFFLog::Error("[AntiAliasing] Failed to compile SMAAEdgeDetection.ps.hlsl: %s", edgeCompiled.errorMessage.c_str());
+    // Include handler for SMAA.hlsl
+    CDefaultShaderIncludeHandler includeHandler(shaderDir);
+
+    // Compile SMAA Edge Detection shaders (VS + PS)
+    SCompiledShader edgeVSCompiled = CompileShaderFromFile(shaderDir + "SMAAEdgeDetection.ps.hlsl", "VSMain", "vs_5_0", &includeHandler, kDebugShaders);
+    if (!edgeVSCompiled.success) {
+        CFFLog::Error("[AntiAliasing] Failed to compile SMAAEdgeDetection VS: %s", edgeVSCompiled.errorMessage.c_str());
         return;
     }
+    ShaderDesc edgeVSDesc;
+    edgeVSDesc.type = EShaderType::Vertex;
+    edgeVSDesc.bytecode = edgeVSCompiled.bytecode.data();
+    edgeVSDesc.bytecodeSize = edgeVSCompiled.bytecode.size();
+    m_smaaEdgeVS.reset(ctx->CreateShader(edgeVSDesc));
 
-    ShaderDesc edgeDesc;
-    edgeDesc.type = EShaderType::Pixel;
-    edgeDesc.bytecode = edgeCompiled.bytecode.data();
-    edgeDesc.bytecodeSize = edgeCompiled.bytecode.size();
-    m_smaaEdgePS.reset(ctx->CreateShader(edgeDesc));
-
-    SCompiledShader blendCompiled = CompileShaderFromFile(shaderDir + "SMAABlendingWeight.ps.hlsl", "main", "ps_5_0", nullptr, kDebugShaders);
-    if (!blendCompiled.success) {
-        CFFLog::Error("[AntiAliasing] Failed to compile SMAABlendingWeight.ps.hlsl: %s", blendCompiled.errorMessage.c_str());
+    SCompiledShader edgePSCompiled = CompileShaderFromFile(shaderDir + "SMAAEdgeDetection.ps.hlsl", "main", "ps_5_0", &includeHandler, kDebugShaders);
+    if (!edgePSCompiled.success) {
+        CFFLog::Error("[AntiAliasing] Failed to compile SMAAEdgeDetection PS: %s", edgePSCompiled.errorMessage.c_str());
         return;
     }
+    ShaderDesc edgePSDesc;
+    edgePSDesc.type = EShaderType::Pixel;
+    edgePSDesc.bytecode = edgePSCompiled.bytecode.data();
+    edgePSDesc.bytecodeSize = edgePSCompiled.bytecode.size();
+    m_smaaEdgePS.reset(ctx->CreateShader(edgePSDesc));
 
-    ShaderDesc blendDesc;
-    blendDesc.type = EShaderType::Pixel;
-    blendDesc.bytecode = blendCompiled.bytecode.data();
-    blendDesc.bytecodeSize = blendCompiled.bytecode.size();
-    m_smaaBlendPS.reset(ctx->CreateShader(blendDesc));
-
-    SCompiledShader neighborCompiled = CompileShaderFromFile(shaderDir + "SMAANeighborhoodBlend.ps.hlsl", "main", "ps_5_0", nullptr, kDebugShaders);
-    if (!neighborCompiled.success) {
-        CFFLog::Error("[AntiAliasing] Failed to compile SMAANeighborhoodBlend.ps.hlsl: %s", neighborCompiled.errorMessage.c_str());
+    // Compile SMAA Blending Weight shaders (VS + PS)
+    SCompiledShader blendVSCompiled = CompileShaderFromFile(shaderDir + "SMAABlendingWeight.ps.hlsl", "VSMain", "vs_5_0", &includeHandler, kDebugShaders);
+    if (!blendVSCompiled.success) {
+        CFFLog::Error("[AntiAliasing] Failed to compile SMAABlendingWeight VS: %s", blendVSCompiled.errorMessage.c_str());
         return;
     }
+    ShaderDesc blendVSDesc;
+    blendVSDesc.type = EShaderType::Vertex;
+    blendVSDesc.bytecode = blendVSCompiled.bytecode.data();
+    blendVSDesc.bytecodeSize = blendVSCompiled.bytecode.size();
+    m_smaaBlendVS.reset(ctx->CreateShader(blendVSDesc));
 
-    ShaderDesc neighborDesc;
-    neighborDesc.type = EShaderType::Pixel;
-    neighborDesc.bytecode = neighborCompiled.bytecode.data();
-    neighborDesc.bytecodeSize = neighborCompiled.bytecode.size();
-    m_smaaNeighborPS.reset(ctx->CreateShader(neighborDesc));
+    SCompiledShader blendPSCompiled = CompileShaderFromFile(shaderDir + "SMAABlendingWeight.ps.hlsl", "main", "ps_5_0", &includeHandler, kDebugShaders);
+    if (!blendPSCompiled.success) {
+        CFFLog::Error("[AntiAliasing] Failed to compile SMAABlendingWeight PS: %s", blendPSCompiled.errorMessage.c_str());
+        return;
+    }
+    ShaderDesc blendPSDesc;
+    blendPSDesc.type = EShaderType::Pixel;
+    blendPSDesc.bytecode = blendPSCompiled.bytecode.data();
+    blendPSDesc.bytecodeSize = blendPSCompiled.bytecode.size();
+    m_smaaBlendPS.reset(ctx->CreateShader(blendPSDesc));
+
+    // Compile SMAA Neighborhood Blending shaders (VS + PS)
+    SCompiledShader neighborVSCompiled = CompileShaderFromFile(shaderDir + "SMAANeighborhoodBlend.ps.hlsl", "VSMain", "vs_5_0", &includeHandler, kDebugShaders);
+    if (!neighborVSCompiled.success) {
+        CFFLog::Error("[AntiAliasing] Failed to compile SMAANeighborhoodBlend VS: %s", neighborVSCompiled.errorMessage.c_str());
+        return;
+    }
+    ShaderDesc neighborVSDesc;
+    neighborVSDesc.type = EShaderType::Vertex;
+    neighborVSDesc.bytecode = neighborVSCompiled.bytecode.data();
+    neighborVSDesc.bytecodeSize = neighborVSCompiled.bytecode.size();
+    m_smaaNeighborVS.reset(ctx->CreateShader(neighborVSDesc));
+
+    SCompiledShader neighborPSCompiled = CompileShaderFromFile(shaderDir + "SMAANeighborhoodBlend.ps.hlsl", "main", "ps_5_0", &includeHandler, kDebugShaders);
+    if (!neighborPSCompiled.success) {
+        CFFLog::Error("[AntiAliasing] Failed to compile SMAANeighborhoodBlend PS: %s", neighborPSCompiled.errorMessage.c_str());
+        return;
+    }
+    ShaderDesc neighborPSDesc;
+    neighborPSDesc.type = EShaderType::Pixel;
+    neighborPSDesc.bytecode = neighborPSCompiled.bytecode.data();
+    neighborPSDesc.bytecodeSize = neighborPSCompiled.bytecode.size();
+    m_smaaNeighborPS.reset(ctx->CreateShader(neighborPSDesc));
 
     // Create SMAA PSOs - base description shared across all passes
     PipelineStateDesc basePsoDesc;
-    basePsoDesc.vertexShader = m_fullscreenVS.get();
     basePsoDesc.inputLayout = {
         { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
         { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 8, 0 }
@@ -411,6 +448,7 @@ void CAntiAliasingPass::createSMAAResources() {
 
     // Edge Detection PSO (RG8 output)
     PipelineStateDesc edgePsoDesc = basePsoDesc;
+    edgePsoDesc.vertexShader = m_smaaEdgeVS.get();
     edgePsoDesc.pixelShader = m_smaaEdgePS.get();
     edgePsoDesc.renderTargetFormats = { ETextureFormat::R8G8_UNORM };
     edgePsoDesc.debugName = "SMAA_EdgeDetection_PSO";
@@ -418,6 +456,7 @@ void CAntiAliasingPass::createSMAAResources() {
 
     // Blending Weight PSO (RGBA8 output)
     PipelineStateDesc blendPsoDesc = basePsoDesc;
+    blendPsoDesc.vertexShader = m_smaaBlendVS.get();
     blendPsoDesc.pixelShader = m_smaaBlendPS.get();
     blendPsoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM };
     blendPsoDesc.debugName = "SMAA_BlendWeight_PSO";
@@ -425,6 +464,7 @@ void CAntiAliasingPass::createSMAAResources() {
 
     // Neighborhood Blending PSO (SRGB output)
     PipelineStateDesc neighborPsoDesc = basePsoDesc;
+    neighborPsoDesc.vertexShader = m_smaaNeighborVS.get();
     neighborPsoDesc.pixelShader = m_smaaNeighborPS.get();
     neighborPsoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
     neighborPsoDesc.debugName = "SMAA_NeighborBlend_PSO";

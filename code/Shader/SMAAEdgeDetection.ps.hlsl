@@ -1,72 +1,44 @@
-// SMAA Edge Detection Pass - Detects edges using luma-based comparison.
-// Outputs RG8 texture marking horizontal and vertical edges.
+// SMAA Edge Detection Pass - Uses official SMAA implementation
 // Reference: "SMAA: Enhanced Subpixel Morphological Antialiasing" (Jimenez et al., 2012)
 
-#define SMAA_THRESHOLD 0.1
-#define SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR 2.0
+// Configuration
+#define SMAA_HLSL_4 1
+#define SMAA_PRESET_HIGH 1
 
 cbuffer CB_SMAAEdge : register(b0) {
     float4 gRTMetrics;  // (1/width, 1/height, width, height)
 };
 
-Texture2D<float4> gInputTexture : register(t0);
+#define SMAA_RT_METRICS gRTMetrics
+
+// Include official SMAA implementation
+#include "SMAA.hlsl"
+
+Texture2D gInputTexture : register(t0);
 SamplerState gLinearSampler : register(s0);
 SamplerState gPointSampler : register(s1);
-
-float RGBToLuma(float3 rgb) {
-    return dot(rgb, float3(0.2126, 0.7152, 0.0722));
-}
 
 struct PSInput {
     float4 position : SV_Position;
     float2 uv : TEXCOORD0;
+    float4 offset[3] : TEXCOORD1;
 };
 
-struct PSOutput {
-    float2 edges : SV_Target0;
+struct VSInput {
+    float2 position : POSITION;
+    float2 uv : TEXCOORD0;
 };
 
-PSOutput main(PSInput input) {
-    PSOutput output;
-    output.edges = float2(0.0, 0.0);
-
-    float2 uv = input.uv;
-    float2 texelSize = gRTMetrics.xy;
-
-    // Sample center and neighbors
-    float L = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv, 0).rgb);
-    float Lleft = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv + float2(-texelSize.x, 0), 0).rgb);
-    float Ltop = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv + float2(0, -texelSize.y), 0).rgb);
-
-    // Calculate deltas
-    float2 delta;
-    delta.x = abs(L - Lleft);
-    delta.y = abs(L - Ltop);
-
-    // Threshold edges
-    float2 edges = step(SMAA_THRESHOLD, delta);
-
-    // Early exit if no edges
-    if (dot(edges, float2(1.0, 1.0)) == 0.0) {
-        return output;
-    }
-
-    // Local contrast adaptation (reduces false positives in high-contrast areas)
-    float Lright = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv + float2(texelSize.x, 0), 0).rgb);
-    float Lbottom = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv + float2(0, texelSize.y), 0).rgb);
-
-    float maxDelta = max(max(delta.x, delta.y),
-                         max(abs(L - Lright), abs(L - Lbottom)));
-
-    // Sample additional neighbors for better adaptation
-    float Lleftleft = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv + float2(-2.0 * texelSize.x, 0), 0).rgb);
-    float Ltoptop = RGBToLuma(gInputTexture.SampleLevel(gPointSampler, uv + float2(0, -2.0 * texelSize.y), 0).rgb);
-
-    maxDelta = max(maxDelta, max(abs(Lleft - Lleftleft), abs(Ltop - Ltoptop)));
-
-    // Apply local contrast adaptation
-    edges *= step(maxDelta, delta * SMAA_LOCAL_CONTRAST_ADAPTATION_FACTOR);
-
-    output.edges = edges;
+// Vertex shader with pre-calculated offsets
+PSInput VSMain(VSInput input) {
+    PSInput output;
+    output.position = float4(input.position, 0.0, 1.0);
+    output.uv = input.uv;
+    SMAAEdgeDetectionVS(input.uv, output.offset);
     return output;
+}
+
+// Pixel shader using official SMAA luma edge detection
+float2 main(PSInput input) : SV_Target {
+    return SMAALumaEdgeDetectionPS(input.uv, input.offset, gInputTexture);
 }

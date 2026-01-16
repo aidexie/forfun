@@ -702,9 +702,12 @@ void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
     }
 
     // LDR Pre-AA Render Target (for AA input/output swap)
+    // Uses sRGB SRV so AA shaders read linear values (automatic sRGB→linear conversion)
+    // This prevents double gamma encoding: PostProcess→sRGB storage→linear read→AA→sRGB output
     {
         TextureDesc desc = TextureDesc::LDRRenderTarget(w, h);
         desc.debugName = "Deferred_LDR_PreAA_RT";
+        desc.srvFormat = ETextureFormat::R8G8B8A8_UNORM_SRGB;  // Read as linear for correct AA processing
         desc.clearColor[0] = 0.0f;
         desc.clearColor[1] = 0.0f;
         desc.clearColor[2] = 0.0f;
