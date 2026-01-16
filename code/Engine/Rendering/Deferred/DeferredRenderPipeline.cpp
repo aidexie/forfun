@@ -303,8 +303,10 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // 1.5. Enable/disable camera jitter for TAA
     // ============================================
     // Note: We need to cast away const because camera jitter state needs to be updated
+    // Only enable jitter when TAA is on AND algorithm actually does temporal work
     CCamera& camera = const_cast<CCamera&>(ctx.camera);
-    camera.SetTAAEnabled(ctx.showFlags.TAA);
+    bool taaActive = ctx.showFlags.TAA && m_taaPass.GetSettings().algorithm != ETAAAlgorithm::Off;
+    camera.SetTAAEnabled(taaActive);
     camera.SetJitterSampleCount(m_taaPass.GetSettings().jitter_samples);
 
     // ============================================

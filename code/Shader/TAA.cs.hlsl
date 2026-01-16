@@ -209,17 +209,24 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
         : g_HistoryColor.SampleLevel(g_LinearSampler, historyUV, 0).rgb;
 
     // Apply clamping/clipping (algorithm-dependent)
-    if (g_Algorithm >= 3)
-    {
-        float3 mean, stddev, minC, maxC;
-        ComputeVarianceStatistics(DTid.xy, mean, stddev, minC, maxC);
-        float3 aabbMin = mean - g_VarianceClipGamma * stddev;
-        float3 aabbMax = mean + g_VarianceClipGamma * stddev;
-        float3 historyYCoCg = RGBToYCoCg(history);
-        historyYCoCg = ClipToAABB(historyYCoCg, aabbMin, aabbMax);
-        history = YCoCgToRGB(historyYCoCg);
-    }
-    else if (g_Algorithm >= 2)
+    // if (g_Algorithm >= 3)
+    // {
+    //     float3 mean, stddev, minC, maxC;
+    //     ComputeVarianceStatistics(DTid.xy, mean, stddev, minC, maxC);
+    //     float3 aabbMin = mean - g_VarianceClipGamma * stddev;
+    //     float3 aabbMax = mean + g_VarianceClipGamma * stddev;
+
+    //     // Blend variance bounds with actual min/max for stability in high-frequency areas
+    //     // Pure variance clipping is too aggressive and causes flickering on fine details
+    //     aabbMin = lerp(aabbMin, minC, 0.5);
+    //     aabbMax = lerp(aabbMax, maxC, 0.5);
+
+    //     float3 historyYCoCg = RGBToYCoCg(history);
+    //     historyYCoCg = ClipToAABB(historyYCoCg, aabbMin, aabbMax);
+    //     history = YCoCgToRGB(historyYCoCg);
+    // }
+    // else 
+    if (g_Algorithm >= 2)
     {
         float3 minC, maxC;
         ComputeNeighborhoodMinMax(DTid.xy, minC, maxC);
@@ -230,13 +237,11 @@ void CSMain(uint3 DTid : SV_DispatchThreadID)
     float blend = g_HistoryBlend;
     if (g_Algorithm >= 5)
     {
-        blend *= ComputeRejectionWeight(DTid.xy, velocity);
-
-        // Luminance anti-flicker
-        float currentLum = Luminance(current);
-        float historyLum = Luminance(history);
-        float lumDiff = abs(currentLum - historyLum) / max(currentLum + historyLum, 0.001);
-        blend *= saturate(1.0 - lumDiff * 2.0);
+        // Only reject based on motion, not spatial depth edges or luminance
+        // Depth rejection causes flickering at silhouettes in static scenes
+        // Luminance rejection causes flickering due to normal jitter variation
+        float velocityLength = length(velocity * g_ScreenSize);
+        blend *= saturate(1.0 - velocityLength * g_VelocityRejectionScale);
     }
 
     // Blend current and history

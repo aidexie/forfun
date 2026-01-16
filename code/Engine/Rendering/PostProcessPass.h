@@ -51,6 +51,7 @@ private:
     // Resources
     RHI::BufferPtr m_vertexBuffer;
     RHI::BufferPtr m_constantBuffer;
+    RHI::BufferPtr m_dummyExposureBuffer;  // Dummy buffer for t3 when no exposure buffer
     RHI::SamplerPtr m_sampler;
     RHI::PipelineStatePtr m_pso;
 

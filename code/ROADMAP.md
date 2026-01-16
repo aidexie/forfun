@@ -121,11 +121,11 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Quality modes: Ultra Performance → Quality
   - Motion vectors + depth input
   - Optional: Frame Generation (DLSS 3)
-- **3.3.6 Motion Blur** (需要 velocity buffer)
-  - Per-object motion blur from velocity buffer
-  - Camera motion blur (optional)
-  - Variable blur length based on velocity magnitude
-  - Tile-based optimization for performance
+- **3.3.6 Motion Blur** ✅ COMPLETE
+  - Camera motion blur from velocity buffer
+  - Linear blur along velocity direction with tent filter
+  - Configurable intensity, sample count, max blur radius
+  - 详细文档: `docs/MOTION_BLUR.md`
 - **3.3.7 Depth of Field** (需要 depth buffer)
   - Gather-based circular blur
   - Bokeh shape support (circle, hexagon)
@@ -142,17 +142,18 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Quality modes: Ultra Quality → Performance
   - Motion vectors + depth input
   - Alternative to DLSS for non-NVIDIA hardware
-- **3.3.10 FXAA/SMAA** (需要 LDR output)
-  - FXAA: Fast approximate AA (fallback)
-  - SMAA: Enhanced morphological AA (better quality)
-  - Used when TAA/DLSS disabled
+- **3.3.10 FXAA/SMAA** ✅ COMPLETE
+  - FXAA: Fast approximate AA (single-pass, ~0.5ms @ 1080p)
+  - SMAA: Official reference implementation with diagonal/corner detection
+  - sRGB-correct gamma handling (prevents brightness issues)
+  - 详细文档: `docs/ANTI_ALIASING.md`
 - **3.3.11 Color Grading** ✅ (需要 LDR output)
   - 3D LUT (Look-Up Table) support
   - Lift/Gamma/Gain controls
   - Saturation, contrast, temperature
   - Artist-friendly preset system
 
-**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA, TestDLSS, TestMotionBlur, TestDoF, TestAutoExposure ✅, TestFSR, TestFXAA, TestColorGrading ✅ 通过
+**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA, TestDLSS, TestMotionBlur ✅, TestDoF, TestAutoExposure ✅, TestFSR, TestAntiAliasing ✅, TestColorGrading ✅ 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 
@@ -243,4 +244,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2026-01-15
+**Last Updated**: 2026-01-16

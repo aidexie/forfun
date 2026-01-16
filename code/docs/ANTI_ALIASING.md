@@ -7,7 +7,25 @@ Post-process anti-aliasing for the deferred rendering pipeline.
 Anti-aliasing smooths jagged edges (aliasing artifacts) that occur when rendering diagonal lines and high-contrast edges. This implementation provides two screen-space algorithms:
 
 - **FXAA** (Fast Approximate Anti-Aliasing): Single-pass, fast (~0.5ms @ 1080p)
-- **SMAA** (Subpixel Morphological Anti-Aliasing): 3-pass, higher quality (~1.5ms @ 1080p)
+- **SMAA** (Subpixel Morphological Anti-Aliasing): 3-pass, higher quality (~1.5ms @ 1080p), uses official reference implementation
+
+## Implementation Notes
+
+### Gamma Correction
+
+The AA input texture (`m_offLDR_PreAA`) uses **sRGB SRV format** to ensure correct gamma handling:
+
+```cpp
+desc.srvFormat = ETextureFormat::R8G8B8A8_UNORM_SRGB;  // Read as linear
+```
+
+This prevents double gamma encoding:
+1. PostProcess writes linear → sRGB RTV → stored as sRGB
+2. AA reads via sRGB SRV → automatic sRGB→linear decode
+3. AA processes in linear space
+4. AA writes linear → sRGB RTV → stored as sRGB
+
+Without this fix, the screen would appear too bright when AA is enabled.
 
 ## Pipeline Position
 
@@ -68,14 +86,21 @@ private:
     // FXAA: single PSO
     RHI::PipelineStatePtr m_fxaaPSO;
 
-    // SMAA: 3 PSOs + intermediate textures + lookup textures
+    // SMAA: 3 PSOs (each with dedicated VS for pre-calculated offsets)
+    RHI::ShaderPtr m_smaaEdgeVS, m_smaaEdgePS;
+    RHI::ShaderPtr m_smaaBlendVS, m_smaaBlendPS;
+    RHI::ShaderPtr m_smaaNeighborVS, m_smaaNeighborPS;
     RHI::PipelineStatePtr m_smaaEdgePSO;
     RHI::PipelineStatePtr m_smaaBlendPSO;
     RHI::PipelineStatePtr m_smaaNeighborPSO;
+
+    // SMAA intermediate textures
     RHI::TexturePtr m_smaaEdgesTex;   // RG8
     RHI::TexturePtr m_smaaBlendTex;   // RGBA8
-    RHI::TexturePtr m_smaaAreaTex;    // Pre-computed (160x560 RG8)
-    RHI::TexturePtr m_smaaSearchTex;  // Pre-computed (64x16 R8)
+
+    // SMAA lookup textures (official pre-computed data)
+    RHI::TexturePtr m_smaaAreaTex;    // 160x560 RG8 (~179KB)
+    RHI::TexturePtr m_smaaSearchTex;  // 64x16 R8 (~1KB)
 };
 ```
 
@@ -129,7 +154,26 @@ struct CB_FXAA {
 
 ## SMAA Algorithm
 
-SMAA 1x - 3-pass morphological anti-aliasing.
+SMAA 1x - 3-pass morphological anti-aliasing using the **official reference implementation** from [iryoku/smaa](https://github.com/iryoku/smaa).
+
+### Shader Files
+
+| File | Purpose |
+|------|---------|
+| `Shader/SMAA.hlsl` | Official SMAA implementation (1300+ lines) |
+| `Shader/SMAAEdgeDetection.ps.hlsl` | Wrapper: VS + PS for edge detection |
+| `Shader/SMAABlendingWeight.ps.hlsl` | Wrapper: VS + PS for blend weight calculation |
+| `Shader/SMAANeighborhoodBlend.ps.hlsl` | Wrapper: VS + PS for final blending |
+| `Engine/Rendering/SMAAAreaTex.h` | Official pre-computed area texture data |
+| `Engine/Rendering/SMAASearchTex.h` | Official pre-computed search texture data |
+
+### Key Features (Official Implementation)
+
+- **Diagonal edge detection**: Handles diagonal patterns that simplified implementations miss
+- **Corner detection**: Proper handling of corner cases with `SMAA_CORNER_ROUNDING`
+- **Local contrast adaptation**: Reduces false positives in high-contrast areas
+- **Pre-calculated vertex shader offsets**: Each pass has dedicated VS for efficiency
+- **SMAA_PRESET_HIGH**: 16 search steps, 8 diagonal steps, 25% corner rounding
 
 ### Pass 1: Edge Detection
 
@@ -177,10 +221,10 @@ color = lerp(color, rightColor, blendWeights.z);
 
 | Texture | Size | Format | Purpose |
 |---------|------|--------|---------|
-| AreaTex | 160x560 | RG8 | Pre-computed area coverage for edge patterns |
-| SearchTex | 64x16 | R8 | Acceleration structure for edge search |
+| AreaTex | 160x560 | RG8 | Pre-computed area coverage for edge patterns (~179KB) |
+| SearchTex | 64x16 | R8 | Acceleration structure for edge search (~1KB) |
 
-These are static data from the SMAA reference implementation (~180KB total).
+These are **official pre-computed data** from the SMAA reference implementation, not procedurally generated. The official data includes complex diagonal patterns and precise coverage calculations that simplified implementations miss.
 
 ### Performance
 
@@ -288,4 +332,4 @@ Test cases:
 
 ---
 
-**Last Updated**: 2026-01-15
+**Last Updated**: 2026-01-16

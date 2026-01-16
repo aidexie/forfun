@@ -65,6 +65,16 @@ bool CPostProcessPass::Initialize() {
     cbDesc.cpuAccess = ECPUAccess::Write;
     m_constantBuffer.reset(ctx->CreateBuffer(cbDesc, nullptr));
 
+    // Create dummy exposure buffer for t3 slot when no real exposure buffer is provided
+    // DX12 GPU validation requires all declared SRVs to have valid resources bound
+    BufferDesc dummyDesc;
+    dummyDesc.size = sizeof(float);
+    dummyDesc.usage = EBufferUsage::Structured;
+    dummyDesc.cpuAccess = ECPUAccess::None;
+    dummyDesc.structureByteStride = sizeof(float);
+    float dummyExposure = 1.0f;
+    m_dummyExposureBuffer.reset(ctx->CreateBuffer(dummyDesc, &dummyExposure));
+
     m_initialized = true;
     return true;
 }
@@ -75,6 +85,7 @@ void CPostProcessPass::Shutdown() {
     m_ps.reset();
     m_vertexBuffer.reset();
     m_constantBuffer.reset();
+    m_dummyExposureBuffer.reset();
     m_sampler.reset();
     m_neutralLUT.reset();
     m_customLUT.reset();
@@ -162,8 +173,11 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     }
 
     // Bind exposure buffer for GPU-only auto exposure path
+    // Always bind a valid buffer to t3 to satisfy DX12 GPU validation
     if (exposureBuffer) {
         cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, exposureBuffer);
+    } else {
+        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, m_dummyExposureBuffer.get());
     }
 
     cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
