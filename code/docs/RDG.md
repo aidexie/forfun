@@ -11,6 +11,69 @@ This design is inspired by Frostbite Frame Graph (GDC 2017) and Unreal Engine 5 
 
 ---
 
+## Implementation Status
+
+| Phase | Component | Status | Test |
+|-------|-----------|--------|------|
+| 1 | Core Types & Handle System | ✅ Complete | - |
+| 2 | Pass Graph API & Resource Registry | ✅ Complete | TestRDGBasic ✅ |
+| 3 | Dependency Analysis & Compilation | 🔲 Pending | TestRDGBasic |
+| 4 | Lifetime Analysis & Memory Aliasing | 🔲 Pending | TestRDGAliasing |
+| 5 | Heap Management & Placed Resources | 🔲 Pending | TestRDGAliasing |
+| 6 | Automatic Barrier Insertion | 🔲 Pending | TestRDGBarrier |
+| 7 | RDG Context & Execution | 🔲 Pending | TestRDGBasic |
+| 8 | Integration & Validation | 🔲 Pending | All tests |
+
+### What's Working Now
+
+```cpp
+// ✅ Create RDG builder and begin frame
+CRDGBuilder rdg;
+rdg.BeginFrame(frameId);
+
+// ✅ Create transient resources
+auto albedo = rdg.CreateTexture("GBuffer.Albedo",
+    RDGTextureDesc::CreateRenderTarget(1280, 720, DXGI_FORMAT_R8G8B8A8_UNORM));
+
+// ✅ Import external resources
+auto backBuffer = rdg.ImportTexture("BackBuffer", resource,
+    D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_PRESENT);
+
+// ✅ Register passes with UE5-style API
+struct FMyPassData {
+    RDGTextureHandle Input;
+    RDGTextureHandle Output;
+};
+
+rdg.AddPass<FMyPassData>("MyPass",
+    [&](FMyPassData& data, RDGPassBuilder& builder) {
+        data.Input = builder.ReadTexture(someHandle);
+        data.Output = builder.CreateTexture("Output", desc);
+        builder.WriteRTV(data.Output);
+    },
+    [](const FMyPassData& data, RDGContext& ctx) {
+        // Execute pass (not yet implemented)
+    }
+);
+
+// ✅ Compile graph (basic - just orders passes sequentially for now)
+rdg.Compile();
+
+// ✅ Debug dump
+rdg.DumpGraph();  // Logs all passes and resources
+```
+
+### What's Not Yet Implemented
+
+- DAG construction and topological sort (Phase 3)
+- Dead pass/resource culling (Phase 3)
+- Lifetime analysis (Phase 4)
+- Memory aliasing with placed resources (Phase 4-5)
+- Automatic barrier insertion (Phase 6)
+- RDGContext execution (Phase 7)
+
+---
+
 ## Architecture
 
 ```
@@ -380,21 +443,23 @@ barrierBatcher.Flush(cmdList);
 
 ```
 Core/RDG/
-├── RDGTypes.h              # RDGHandle, RDGTextureDesc, RDGBufferDesc, enums
-├── RDGBuilder.h            # CRDGBuilder, RDGPassBuilder (template AddPass)
-├── RDGBuilder.cpp          # Non-template implementation
-├── RDGCompiler.h           # CRDGCompiler (DAG, topological sort)
-├── RDGCompiler.cpp
-├── RDGMemoryAliasing.h     # Lifetime analysis, bin packing algorithm
-├── RDGMemoryAliasing.cpp
-├── RDGHeapAllocator.h      # Heap pools, placed resource allocation
-├── RDGHeapAllocator.cpp
-├── RDGBarrierBatcher.h     # State tracking, barrier batching
-├── RDGBarrierBatcher.cpp
-├── RDGContext.h            # RDGContext (handle resolution, execution)
-├── RDGContext.cpp
-└── RDGDebug.h/cpp          # Graphviz export, memory visualization
+├── RDGTypes.h              # ✅ RDGHandle, RDGTextureDesc, RDGBufferDesc, enums
+├── RDGBuilder.h            # ✅ CRDGBuilder, RDGPassBuilder (template AddPass)
+├── RDGBuilder.cpp          # ✅ Implementation (pass registration, resource creation)
+├── RDGCompiler.h           # 🔲 CRDGCompiler (DAG, topological sort)
+├── RDGCompiler.cpp         # 🔲
+├── RDGMemoryAliasing.h     # 🔲 Lifetime analysis, bin packing algorithm
+├── RDGMemoryAliasing.cpp   # 🔲
+├── RDGHeapAllocator.h      # 🔲 Heap pools, placed resource allocation
+├── RDGHeapAllocator.cpp    # 🔲
+├── RDGBarrierBatcher.h     # 🔲 State tracking, barrier batching
+├── RDGBarrierBatcher.cpp   # 🔲
+├── RDGContext.h            # 🔲 RDGContext (handle resolution, execution)
+├── RDGContext.cpp          # 🔲
+└── RDGDebug.h/cpp          # 🔲 Graphviz export, memory visualization
 ```
+
+✅ = Implemented | 🔲 = Header only / Pending
 
 ---
 
@@ -564,10 +629,11 @@ void RenderFrame(CRDGBuilder& rdg)
 
 ## Test Cases
 
-### TestRDGBasic
-- Create simple 3-pass graph (A → B → C)
-- Verify execution order
-- Verify barriers are inserted
+### TestRDGBasic ✅
+- Create simple 3-pass graph (GBuffer → Lighting → ToneMap)
+- Verify pass registration with dependencies
+- Verify handle type safety
+- Verify graph compilation
 
 ### TestRDGAliasing
 - Create passes with non-overlapping resource lifetimes
@@ -595,4 +661,4 @@ void RenderFrame(CRDGBuilder& rdg)
 
 ---
 
-**Last Updated**: 2026-01-19
+**Last Updated**: 2026-01-19 (Phase 2 Complete)
