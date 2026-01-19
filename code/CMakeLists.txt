@@ -150,6 +150,14 @@ set(CORE_SRC
     ${CODE_PATH}/Core/Testing/TestCase.cpp
     ${CODE_PATH}/Core/Testing/TestCase.h
     ${CODE_PATH}/Core/Testing/TestRegistry.h
+    # RDG (Render Dependency Graph)
+    ${CODE_PATH}/Core/RDG/RDGTypes.h
+    ${CODE_PATH}/Core/RDG/RDGBuilder.cpp
+    ${CODE_PATH}/Core/RDG/RDGBuilder.h
+    ${CODE_PATH}/Core/RDG/RDGCompiler.h
+    ${CODE_PATH}/Core/RDG/RDGHeapAllocator.h
+    ${CODE_PATH}/Core/RDG/RDGBarrierBatcher.h
+    ${CODE_PATH}/Core/RDG/RDGContext.h
 )
 
 # RHI sources
@@ -283,6 +291,8 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestTAA.cpp
     ${CODE_PATH}/Tests/TestFSR2.cpp
     ${CODE_PATH}/Tests/TestAntiAliasing.cpp
+    ${CODE_PATH}/Tests/TestRDGBasic.cpp
+    ${CODE_PATH}/Tests/TestDeferredStress.cpp
 )
 
 add_executable(forfun WIN32

@@ -193,11 +193,13 @@ public:
         pass->ExecuteFunction = std::move(executeFunc);
 
         uint32_t passIndex = static_cast<uint32_t>(m_Passes.size());
-        RDGPassBuilder builder(*this, passIndex);
 
-        setupFunc(pass->Data, builder);
-
+        // Add pass BEFORE calling setup so RecordTextureAccess can find it
         m_Passes.push_back(std::move(pass));
+
+        RDGPassBuilder builder(*this, passIndex);
+        auto* passPtr = static_cast<TRDGPass<PassData>*>(m_Passes.back().get());
+        setupFunc(passPtr->Data, builder);
     }
 
     // Convenience overload for raster passes
@@ -235,12 +237,24 @@ public:
     void RecordBufferAccess(uint32_t passIndex, uint32_t bufferIndex,
                             ERDGViewType viewType, ERDGResourceAccess access);
 
+    // Debug
+    void DumpGraph() const;
+
 private:
     uint32_t m_FrameId = 0;
 
     std::vector<RDGTextureEntry> m_Textures;
     std::vector<RDGBufferEntry> m_Buffers;
     std::vector<std::unique_ptr<IRDGPass>> m_Passes;
+
+    // Extraction requests (resources to keep alive after execution)
+    struct ExtractionRequest
+    {
+        uint32_t TextureIndex;
+        ID3D12Resource** OutResource;
+        D3D12_RESOURCE_STATES FinalState;
+    };
+    std::vector<ExtractionRequest> m_ExtractionRequests;
 
     // Compiled data
     bool m_IsCompiled = false;
