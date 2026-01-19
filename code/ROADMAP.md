@@ -111,11 +111,15 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Firefly rejection for noise reduction
   - TAA-friendly noise distribution
   - 详细文档: `docs/SSR.md`
-- **3.3.4 TAA** (需要 velocity + history buffer)
-  - Jittered projection matrix
-  - Motion vector reprojection
-  - Neighborhood clamping (3×3 or 5-tap)
-  - Exponential history blend
+- **3.3.4 TAA** ✅ COMPLETE
+  - 6 progressive algorithm levels (Off → Production)
+  - Sub-pixel jitter using Halton(2,3) sequence
+  - Motion vector reprojection from velocity buffer
+  - Neighborhood min/max clamping (3×3)
+  - Catmull-Rom history sampling (sharper than bilinear)
+  - Velocity-based rejection for moving objects
+  - Post-TAA sharpening pass
+  - 详细文档: `docs/TAA.md`
 - **3.3.5 DLSS** (需要 NVIDIA NGX SDK)
   - DLSS 3.x integration
   - Quality modes: Ultra Performance → Quality
@@ -153,7 +157,7 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Saturation, contrast, temperature
   - Artist-friendly preset system
 
-**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA, TestDLSS, TestMotionBlur ✅, TestDoF, TestAutoExposure ✅, TestFSR, TestAntiAliasing ✅, TestColorGrading ✅ 通过
+**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA ✅, TestDLSS, TestMotionBlur ✅, TestDoF, TestAutoExposure ✅, TestFSR, TestAntiAliasing ✅, TestColorGrading ✅ 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 
@@ -184,13 +188,26 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
 
 **验收标准**: TestInstancing 通过 (1000 立方体, 1 Draw Call)
 
-### 3.6 Render Dependency Graph (RDG) - 1周
+### 3.6 Render Dependency Graph (RDG) - 2周
 
-自动化资源屏障和 Pass 依赖管理。
+自动化资源管理：Pass 依赖分析、屏障插入、**Placed Resource 内存复用**。
 
-**核心**: Pass 声明 → 依赖分析 → 自动屏障插入
+**技术文档**: `docs/RDG.md`
 
-**验收标准**: TestRDG 通过
+**核心功能**:
+- Pass 声明式 API (UE5 风格)
+- 自动依赖分析与拓扑排序
+- 资源生命周期分析
+- Placed Resource 内存复用 (VRAM 节省 30-50%)
+- 自动屏障插入 (Transition + Aliasing)
+
+**文件结构**: `Core/RDG/` (RDGTypes, RDGBuilder, RDGCompiler, RDGHeapAllocator, RDGBarrierBatcher, RDGContext)
+
+**验收标准**:
+- TestRDGBasic 通过
+- TestRDGAliasing 通过
+- TestRDGBarrier 通过
+- TestRDGImport 通过
 
 ### 3.7 Descriptor Set 抽象 - 1周
 
