@@ -7,6 +7,7 @@
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include <algorithm>
 
 using namespace RHI;
@@ -45,307 +46,6 @@ struct SCBComposite {
     float texelSizeY;       // 1.0 / height
     float _pad[2];
 };
-
-// ============================================
-// Embedded Shaders
-// ============================================
-namespace {
-
-// Shared fullscreen vertex shader
-static const char* kFullscreenVS = R"(
-    struct VSIn {
-        float2 pos : POSITION;
-        float2 uv : TEXCOORD0;
-    };
-    struct VSOut {
-        float4 pos : SV_Position;
-        float2 uv : TEXCOORD0;
-    };
-    VSOut main(VSIn input) {
-        VSOut output;
-        output.pos = float4(input.pos, 0.0, 1.0);
-        output.uv = input.uv;
-        return output;
-    }
-)";
-
-// Pass 1: CoC Calculation
-// Computes signed Circle of Confusion from depth buffer
-// Negative = near field (in front of focus), Positive = far field (behind focus)
-static const char* kCoCPS = R"(
-    cbuffer CB_CoC : register(b0) {
-        float gFocusDistance;
-        float gFocalRange;
-        float gAperture;
-        float gMaxCoCRadius;
-        float gNearZ;
-        float gFarZ;
-        float2 gTexelSize;
-    };
-
-    Texture2D gDepthBuffer : register(t0);
-    SamplerState gPointSampler : register(s0);
-
-    struct PSIn {
-        float4 pos : SV_Position;
-        float2 uv : TEXCOORD0;
-    };
-
-    // Linearize depth from reversed-Z depth buffer
-    float LinearizeDepth(float rawDepth) {
-        // Reversed-Z: near=1, far=0
-        // Convert to linear view-space depth
-        float z = rawDepth;
-        return gNearZ * gFarZ / (gFarZ + z * (gNearZ - gFarZ));
-    }
-
-    float main(PSIn input) : SV_Target {
-        float rawDepth = gDepthBuffer.SampleLevel(gPointSampler, input.uv, 0).r;
-        float linearDepth = LinearizeDepth(rawDepth);
-
-        // Calculate signed CoC
-        // Negative = near field, Positive = far field, Zero = in focus
-        float depthDiff = linearDepth - gFocusDistance;
-
-        // Smooth transition using focal range
-        float coc = depthDiff / gFocalRange;
-
-        // Scale by aperture (lower f-stop = more blur)
-        // Normalize aperture: f/2.8 as baseline (1.0), f/1.4 = 2.0, f/5.6 = 0.5
-        float apertureScale = 2.8 / max(gAperture, 0.1);
-        coc *= apertureScale;
-
-        // Clamp to max radius (in normalized units, will be scaled to pixels later)
-        coc = clamp(coc, -1.0, 1.0);
-
-        return coc;
-    }
-)";
-
-// Pass 2: Downsample + Near/Far Split
-// Downsamples to half-res and splits into near/far layers
-static const char* kDownsampleSplitPS = R"(
-    Texture2D gHDRInput : register(t0);
-    Texture2D gCoCBuffer : register(t1);
-    SamplerState gLinearSampler : register(s0);
-    SamplerState gPointSampler : register(s1);
-
-    struct PSIn {
-        float4 pos : SV_Position;
-        float2 uv : TEXCOORD0;
-    };
-
-    struct PSOut {
-        float4 nearColor : SV_Target0;  // Near layer color + alpha
-        float4 farColor : SV_Target1;   // Far layer color + alpha
-        float nearCoC : SV_Target2;     // Near CoC (absolute value)
-        float farCoC : SV_Target3;      // Far CoC (absolute value)
-    };
-
-    PSOut main(PSIn input) {
-        PSOut output;
-
-        // Sample color (bilinear for quality downsample)
-        float4 color = gHDRInput.SampleLevel(gLinearSampler, input.uv, 0);
-
-        // Sample CoC (point for accuracy)
-        float coc = gCoCBuffer.SampleLevel(gPointSampler, input.uv, 0).r;
-
-        // Split into near/far based on CoC sign
-        if (coc < 0.0) {
-            // Near field (in front of focus)
-            output.nearColor = float4(color.rgb, 1.0);
-            output.nearCoC = abs(coc);
-            output.farColor = float4(0.0, 0.0, 0.0, 0.0);
-            output.farCoC = 0.0;
-        } else {
-            // Far field (behind focus) or in-focus
-            output.farColor = float4(color.rgb, 1.0);
-            output.farCoC = coc;
-            output.nearColor = float4(0.0, 0.0, 0.0, 0.0);
-            output.nearCoC = 0.0;
-        }
-
-        return output;
-    }
-)";
-
-// Pass 3/4: Separable Gaussian Blur (Horizontal/Vertical)
-// Blurs near and far layers separately with CoC-weighted kernel
-static const char* kBlurHPS = R"(
-    cbuffer CB_Blur : register(b0) {
-        float2 gTexelSize;
-        float gMaxCoCRadius;
-        int gSampleCount;
-    };
-
-    Texture2D gColorInput : register(t0);
-    Texture2D gCoCInput : register(t1);
-    SamplerState gLinearSampler : register(s0);
-
-    static const float2 kBlurDir = float2(1.0, 0.0);  // Horizontal
-
-    struct PSIn {
-        float4 pos : SV_Position;
-        float2 uv : TEXCOORD0;
-    };
-
-    // Gaussian weights for 11-tap blur
-    static const float kGaussianWeights[11] = {
-        0.0093, 0.028, 0.0659, 0.1216, 0.1756,
-        0.1974,  // Center
-        0.1756, 0.1216, 0.0659, 0.028, 0.0093
-    };
-
-    float4 main(PSIn input) : SV_Target {
-        float centerCoC = gCoCInput.SampleLevel(gLinearSampler, input.uv, 0).r;
-
-        // Scale blur radius by CoC
-        float blurRadius = centerCoC * gMaxCoCRadius;
-
-        float4 colorSum = float4(0.0, 0.0, 0.0, 0.0);
-        float weightSum = 0.0;
-
-        // 11-tap Gaussian blur
-        for (int i = 0; i < 11; ++i) {
-            float offset = (float)(i - 5);  // -5 to +5
-            float2 sampleUV = input.uv + kBlurDir * gTexelSize * offset * blurRadius;
-
-            // Clamp to valid UV range
-            sampleUV = saturate(sampleUV);
-
-            float4 sampleColor = gColorInput.SampleLevel(gLinearSampler, sampleUV, 0);
-            float sampleCoC = gCoCInput.SampleLevel(gLinearSampler, sampleUV, 0).r;
-
-            float weight = kGaussianWeights[i];
-
-            // Bilateral weight: reduce contribution of samples with very different CoC
-            float cocDiff = abs(sampleCoC - centerCoC);
-            weight *= exp(-cocDiff * 4.0);
-
-            colorSum += sampleColor * weight;
-            weightSum += weight;
-        }
-
-        return colorSum / max(weightSum, 0.0001);
-    }
-)";
-
-static const char* kBlurVPS = R"(
-    cbuffer CB_Blur : register(b0) {
-        float2 gTexelSize;
-        float gMaxCoCRadius;
-        int gSampleCount;
-    };
-
-    Texture2D gColorInput : register(t0);
-    Texture2D gCoCInput : register(t1);
-    SamplerState gLinearSampler : register(s0);
-
-    static const float2 kBlurDir = float2(0.0, 1.0);  // Vertical
-
-    struct PSIn {
-        float4 pos : SV_Position;
-        float2 uv : TEXCOORD0;
-    };
-
-    // Gaussian weights for 11-tap blur
-    static const float kGaussianWeights[11] = {
-        0.0093, 0.028, 0.0659, 0.1216, 0.1756,
-        0.1974,  // Center
-        0.1756, 0.1216, 0.0659, 0.028, 0.0093
-    };
-
-    float4 main(PSIn input) : SV_Target {
-        float centerCoC = gCoCInput.SampleLevel(gLinearSampler, input.uv, 0).r;
-
-        // Scale blur radius by CoC
-        float blurRadius = centerCoC * gMaxCoCRadius;
-
-        float4 colorSum = float4(0.0, 0.0, 0.0, 0.0);
-        float weightSum = 0.0;
-
-        // 11-tap Gaussian blur
-        for (int i = 0; i < 11; ++i) {
-            float offset = (float)(i - 5);  // -5 to +5
-            float2 sampleUV = input.uv + kBlurDir * gTexelSize * offset * blurRadius;
-
-            // Clamp to valid UV range
-            sampleUV = saturate(sampleUV);
-
-            float4 sampleColor = gColorInput.SampleLevel(gLinearSampler, sampleUV, 0);
-            float sampleCoC = gCoCInput.SampleLevel(gLinearSampler, sampleUV, 0).r;
-
-            float weight = kGaussianWeights[i];
-
-            // Bilateral weight: reduce contribution of samples with very different CoC
-            float cocDiff = abs(sampleCoC - centerCoC);
-            weight *= exp(-cocDiff * 4.0);
-
-            colorSum += sampleColor * weight;
-            weightSum += weight;
-        }
-
-        return colorSum / max(weightSum, 0.0001);
-    }
-)";
-
-// Pass 5: Bilateral Upsample + Composite
-// Upsamples blurred layers and composites with sharp original
-static const char* kCompositePS = R"(
-    cbuffer CB_Composite : register(b0) {
-        float2 gTexelSize;
-        float2 _pad;
-    };
-
-    Texture2D gHDRInput : register(t0);      // Original sharp HDR
-    Texture2D gCoCBuffer : register(t1);     // Full-res CoC
-    Texture2D gNearBlurred : register(t2);   // Blurred near layer (half-res)
-    Texture2D gFarBlurred : register(t3);    // Blurred far layer (half-res)
-    Texture2D gNearCoC : register(t4);       // Near CoC (half-res)
-    Texture2D gFarCoC : register(t5);        // Far CoC (half-res)
-    SamplerState gLinearSampler : register(s0);
-    SamplerState gPointSampler : register(s1);
-
-    struct PSIn {
-        float4 pos : SV_Position;
-        float2 uv : TEXCOORD0;
-    };
-
-    float4 main(PSIn input) : SV_Target {
-        // Sample original sharp image
-        float4 sharpColor = gHDRInput.SampleLevel(gLinearSampler, input.uv, 0);
-
-        // Sample full-res CoC
-        float coc = gCoCBuffer.SampleLevel(gPointSampler, input.uv, 0).r;
-        float absCoc = abs(coc);
-
-        // Sample blurred layers (bilinear upsample)
-        float4 nearBlurred = gNearBlurred.SampleLevel(gLinearSampler, input.uv, 0);
-        float4 farBlurred = gFarBlurred.SampleLevel(gLinearSampler, input.uv, 0);
-        float nearCocVal = gNearCoC.SampleLevel(gLinearSampler, input.uv, 0).r;
-        float farCocVal = gFarCoC.SampleLevel(gLinearSampler, input.uv, 0).r;
-
-        // Composite: blend between sharp and blurred based on CoC
-        float4 result = sharpColor;
-
-        if (coc > 0.0) {
-            // Far field: blend sharp -> blurred based on CoC
-            float farBlend = saturate(absCoc * 3.0);  // Smooth transition
-            result = lerp(sharpColor, farBlurred, farBlend * farBlurred.a);
-        }
-
-        // Near field always overlays on top (foreground occludes background)
-        if (nearBlurred.a > 0.0) {
-            float nearBlend = saturate(nearCocVal * 3.0);
-            result = lerp(result, nearBlurred, nearBlend * nearBlurred.a);
-        }
-
-        return float4(result.rgb, 1.0);
-    }
-)";
-
-} // anonymous namespace
 
 // ============================================
 // Lifecycle
@@ -722,18 +422,20 @@ bool CDepthOfFieldPass::createShaders() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
 
 #if defined(_DEBUG)
-    bool debugShaders = true;
+    static constexpr bool kDebugShaders = true;
 #else
-    bool debugShaders = false;
+    static constexpr bool kDebugShaders = false;
 #endif
 
-    // Fullscreen VS
+    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
+
+    // Fullscreen VS (shared with other post-process passes)
     {
-        SCompiledShader compiled = CompileShaderFromSource(
-            kFullscreenVS, "main", "vs_5_0", nullptr, debugShaders);
+        std::string path = shaderDir + "Fullscreen.vs.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(path, "main", "vs_5_0", nullptr, kDebugShaders);
 
         if (!compiled.success) {
-            CFFLog::Error("[DepthOfFieldPass] Fullscreen VS compilation failed: %s", compiled.errorMessage.c_str());
+            CFFLog::Error("[DepthOfFieldPass] Fullscreen.vs.hlsl compilation failed: %s", compiled.errorMessage.c_str());
             return false;
         }
 
@@ -746,11 +448,11 @@ bool CDepthOfFieldPass::createShaders() {
 
     // CoC PS
     {
-        SCompiledShader compiled = CompileShaderFromSource(
-            kCoCPS, "main", "ps_5_0", nullptr, debugShaders);
+        std::string path = shaderDir + "DoFCoC.ps.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(path, "main", "ps_5_0", nullptr, kDebugShaders);
 
         if (!compiled.success) {
-            CFFLog::Error("[DepthOfFieldPass] CoC PS compilation failed: %s", compiled.errorMessage.c_str());
+            CFFLog::Error("[DepthOfFieldPass] DoFCoC.ps.hlsl compilation failed: %s", compiled.errorMessage.c_str());
             return false;
         }
 
@@ -763,11 +465,11 @@ bool CDepthOfFieldPass::createShaders() {
 
     // Downsample + Split PS
     {
-        SCompiledShader compiled = CompileShaderFromSource(
-            kDownsampleSplitPS, "main", "ps_5_0", nullptr, debugShaders);
+        std::string path = shaderDir + "DoFDownsampleSplit.ps.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(path, "main", "ps_5_0", nullptr, kDebugShaders);
 
         if (!compiled.success) {
-            CFFLog::Error("[DepthOfFieldPass] Downsample/Split PS compilation failed: %s", compiled.errorMessage.c_str());
+            CFFLog::Error("[DepthOfFieldPass] DoFDownsampleSplit.ps.hlsl compilation failed: %s", compiled.errorMessage.c_str());
             return false;
         }
 
@@ -780,11 +482,11 @@ bool CDepthOfFieldPass::createShaders() {
 
     // Blur Horizontal PS
     {
-        SCompiledShader compiled = CompileShaderFromSource(
-            kBlurHPS, "main", "ps_5_0", nullptr, debugShaders);
+        std::string path = shaderDir + "DoFBlurH.ps.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(path, "main", "ps_5_0", nullptr, kDebugShaders);
 
         if (!compiled.success) {
-            CFFLog::Error("[DepthOfFieldPass] Blur H PS compilation failed: %s", compiled.errorMessage.c_str());
+            CFFLog::Error("[DepthOfFieldPass] DoFBlurH.ps.hlsl compilation failed: %s", compiled.errorMessage.c_str());
             return false;
         }
 
@@ -797,11 +499,11 @@ bool CDepthOfFieldPass::createShaders() {
 
     // Blur Vertical PS
     {
-        SCompiledShader compiled = CompileShaderFromSource(
-            kBlurVPS, "main", "ps_5_0", nullptr, debugShaders);
+        std::string path = shaderDir + "DoFBlurV.ps.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(path, "main", "ps_5_0", nullptr, kDebugShaders);
 
         if (!compiled.success) {
-            CFFLog::Error("[DepthOfFieldPass] Blur V PS compilation failed: %s", compiled.errorMessage.c_str());
+            CFFLog::Error("[DepthOfFieldPass] DoFBlurV.ps.hlsl compilation failed: %s", compiled.errorMessage.c_str());
             return false;
         }
 
@@ -814,11 +516,11 @@ bool CDepthOfFieldPass::createShaders() {
 
     // Composite PS
     {
-        SCompiledShader compiled = CompileShaderFromSource(
-            kCompositePS, "main", "ps_5_0", nullptr, debugShaders);
+        std::string path = shaderDir + "DoFComposite.ps.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(path, "main", "ps_5_0", nullptr, kDebugShaders);
 
         if (!compiled.success) {
-            CFFLog::Error("[DepthOfFieldPass] Composite PS compilation failed: %s", compiled.errorMessage.c_str());
+            CFFLog::Error("[DepthOfFieldPass] DoFComposite.ps.hlsl compilation failed: %s", compiled.errorMessage.c_str());
             return false;
         }
 
