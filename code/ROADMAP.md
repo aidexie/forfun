@@ -130,11 +130,12 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Linear blur along velocity direction with tent filter
   - Configurable intensity, sample count, max blur radius
   - 详细文档: `docs/MOTION_BLUR.md`
-- **3.3.7 Depth of Field** (需要 depth buffer)
-  - Gather-based circular blur
-  - Bokeh shape support (circle, hexagon)
-  - Near/far blur with smooth transitions
-  - Auto-focus or manual focus distance
+- **3.3.7 Depth of Field** ✅ COMPLETE
+  - Two-pass separated near/far algorithm (5 passes total)
+  - Artist-friendly CoC model (focus distance, focal range, aperture)
+  - Near/far layer separation prevents foreground bleeding
+  - Half-resolution blur with bilateral upsample
+  - 详细文档: `docs/DEPTH_OF_FIELD.md`
 - **3.3.8 Auto Exposure** ✅ COMPLETE
   - Histogram-based luminance analysis (256 bins, log2 scale)
   - Eye adaptation with asymmetric speeds (faster bright, slower dark)

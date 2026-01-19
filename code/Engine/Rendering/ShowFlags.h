@@ -38,6 +38,7 @@ struct FShowFlags
     bool SSR = false;               // 是否启用 SSR（Screen-Space Reflections）
     bool HiZ = false;               // 是否启用 Hi-Z（SSR 依赖）
     bool MotionBlur = false;        // 是否启用 Motion Blur（运动模糊）
+    bool DepthOfField = false;      // 是否启用 Depth of Field（景深）
     bool TAA = false;               // 是否启用 TAA（Temporal Anti-Aliasing）
     bool AntiAliasing = false;      // 是否启用 Anti-Aliasing（FXAA/SMAA）
 

@@ -175,6 +175,7 @@ bool CDeferredRenderPipeline::Initialize()
 
     m_bloomPass.Initialize();
     m_motionBlurPass.Initialize();
+    m_dofPass.Initialize();
     m_postProcess.Initialize();
     m_debugLinePass.Initialize();
     CGridPass::Instance().Initialize();
@@ -202,6 +203,7 @@ void CDeferredRenderPipeline::Shutdown()
     m_aaPass.Shutdown();
     m_bloomPass.Shutdown();
     m_motionBlurPass.Shutdown();
+    m_dofPass.Shutdown();
     m_postProcess.Shutdown();
     m_debugLinePass.Shutdown();
     CGridPass::Instance().Shutdown();
@@ -542,6 +544,19 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
+    // 8.5. Depth of Field Pass (HDR -> focus-blurred HDR)
+    // ============================================
+    ITexture* hdrAfterDoF = hdrAfterMotionBlur;
+    if (ctx.showFlags.DepthOfField) {
+        const auto& dofSettings = ctx.scene.GetLightSettings().depthOfField;
+        CScopedDebugEvent evt(cmdList, L"Depth of Field");
+        hdrAfterDoF = m_dofPass.Render(
+            hdrAfterMotionBlur, m_gbuffer.GetDepthBuffer(),
+            ctx.camera.nearZ, ctx.camera.farZ,
+            ctx.width, ctx.height, dofSettings);
+    }
+
+    // ============================================
     // 9. Bloom Pass (HDR -> half-res bloom texture)
     // ============================================
     ITexture* bloomResult = nullptr;
@@ -549,7 +564,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
         CScopedDebugEvent evt(cmdList, L"Bloom");
         bloomResult = m_bloomPass.Render(
-            hdrAfterMotionBlur, ctx.width, ctx.height, bloomSettings);
+            hdrAfterDoF, ctx.width, ctx.height, bloomSettings);
     }
 
     // ============================================
@@ -564,7 +579,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
         float bloomIntensity = (ctx.showFlags.Bloom && bloomResult) ? bloomSettings.intensity : 0.0f;
-        m_postProcess.Render(hdrAfterMotionBlur, bloomResult, postProcessOutput,
+        m_postProcess.Render(hdrAfterDoF, bloomResult, postProcessOutput,
                              ctx.width, ctx.height, 1.0f, exposureBuffer, bloomIntensity,
                              &ctx.scene.GetLightSettings().colorGrading,
                              ctx.showFlags.ColorGrading);

@@ -190,6 +190,17 @@ struct SAntiAliasingSettings
 };
 
 // ============================================
+// Depth of Field Settings - Cinematic Focus Blur
+// ============================================
+struct SDepthOfFieldSettings
+{
+    float focusDistance = 10.0f;   // Focus plane distance in world units (1-100)
+    float focalRange = 5.0f;       // Depth range that remains in focus (1-20)
+    float aperture = 2.8f;         // f-stop value, lower = more blur (1.4-16)
+    float maxBlurRadius = 8.0f;    // Maximum blur radius in pixels (4-16)
+};
+
+// ============================================
 // Auto Exposure Settings - HDR Eye Adaptation
 // ============================================
 struct SAutoExposureSettings
@@ -247,6 +258,9 @@ public:
 
     // Post-Processing: Anti-Aliasing
     SAntiAliasingSettings antiAliasing;
+
+    // Post-Processing: Depth of Field
+    SDepthOfFieldSettings depthOfField;
 
     // G-Buffer Debug Visualization
     EGBufferDebugMode gBufferDebugMode = EGBufferDebugMode::None;

@@ -562,6 +562,32 @@ static void DrawMotionBlurSection(CSceneLightSettings& settings) {
     ImGui::Spacing();
 }
 
+static void DrawDepthOfFieldSection(CSceneLightSettings& settings) {
+    SectionHeader("Post-Processing: Depth of Field");
+
+    auto& dof = settings.depthOfField;
+    auto& showFlags = CEditorContext::Instance().GetShowFlags();
+
+    ImGui::Checkbox("Enable##DoF", &showFlags.DepthOfField);
+
+    if (showFlags.DepthOfField) {
+        ImGui::PushItemWidth(150);
+        ImGui::SliderFloat("Focus Distance##DoF", &dof.focusDistance, 1.0f, 100.0f, "%.1f m");
+        ImGui::SliderFloat("Focal Range##DoF", &dof.focalRange, 0.5f, 20.0f, "%.1f m");
+        ImGui::SliderFloat("Aperture (f/)##DoF", &dof.aperture, 1.4f, 16.0f, "%.1f");
+        ImGui::SliderFloat("Max Blur (px)##DoF", &dof.maxBlurRadius, 4.0f, 16.0f, "%.0f");
+        ImGui::PopItemWidth();
+
+        HelpTooltip(
+            "Focus Distance: Distance to the focal plane (in world units)\n"
+            "Focal Range: Depth range that remains in sharp focus\n"
+            "Aperture: f-stop value (lower = more blur, like f/1.4)\n"
+            "Max Blur: Maximum blur radius in pixels");
+    }
+
+    ImGui::Spacing();
+}
+
 static void DrawTAASection(CDeferredRenderPipeline* deferred_pipeline) {
     SectionHeader("Post-Processing: TAA (Temporal Anti-Aliasing)");
 
@@ -916,6 +942,7 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
 
     DrawBloomSection(settings);
     DrawMotionBlurSection(settings);
+    DrawDepthOfFieldSection(settings);
     DrawAutoExposureSection(settings);
     DrawColorGradingSection(settings);
     DrawAntiAliasingSection(settings);

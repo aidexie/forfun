@@ -11,6 +11,7 @@
 #include "Engine/Rendering/PostProcessPass.h"
 #include "Engine/Rendering/BloomPass.h"
 #include "Engine/Rendering/MotionBlurPass.h"
+#include "Engine/Rendering/DepthOfFieldPass.h"
 #include "Engine/Rendering/DebugLinePass.h"
 #include "Engine/Rendering/GridPass.h"
 #include "Engine/Rendering/SSAOPass.h"
@@ -82,6 +83,7 @@ public:
     CSSRPass& GetSSRPass() { return m_ssrPass; }
     CAutoExposurePass& GetAutoExposurePass() { return m_autoExposurePass; }
     CMotionBlurPass& GetMotionBlurPass() { return m_motionBlurPass; }
+    CDepthOfFieldPass& GetDepthOfFieldPass() { return m_dofPass; }
     CTAAPass& GetTAAPass() { return m_taaPass; }
     CAntiAliasingPass& GetAAPass() { return m_aaPass; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
@@ -106,6 +108,7 @@ private:
     CAntiAliasingPass m_aaPass;
     CBloomPass m_bloomPass;
     CMotionBlurPass m_motionBlurPass;
+    CDepthOfFieldPass m_dofPass;
     CPostProcessPass m_postProcess;
     CDebugLinePass m_debugLinePass;
 

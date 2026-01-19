@@ -246,6 +246,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestHiZ.cpp
     ${CODE_PATH}/Tests/TestSSR.cpp
     ${CODE_PATH}/Tests/TestMotionBlur.cpp
+    ${CODE_PATH}/Tests/TestDoF.cpp
     ${CODE_PATH}/Tests/TestTAA.cpp
     ${CODE_PATH}/Tests/TestAntiAliasing.cpp
 )
@@ -338,6 +339,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/BloomPass.cpp
     ${CODE_PATH}/Engine/Rendering/MotionBlurPass.h
     ${CODE_PATH}/Engine/Rendering/MotionBlurPass.cpp
+    ${CODE_PATH}/Engine/Rendering/DepthOfFieldPass.h
+    ${CODE_PATH}/Engine/Rendering/DepthOfFieldPass.cpp
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.h
     ${CODE_PATH}/Engine/Rendering/IBLGenerator.cpp
     ${CODE_PATH}/Engine/Rendering/CubemapRenderer.h
