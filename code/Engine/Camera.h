@@ -61,6 +61,10 @@ public:
     // Get projection matrix with sub-pixel jitter applied (for TAA)
     DirectX::XMMATRIX GetJitteredProjectionMatrix(uint32_t screenWidth, uint32_t screenHeight) const;
 
+    // Get projection matrix with custom jitter offset (for FSR2 or external jitter)
+    // jitterNDC: Jitter offset in NDC space (-1 to 1 range)
+    DirectX::XMMATRIX GetJitteredProjectionMatrix(const DirectX::XMFLOAT2& jitterNDC) const;
+
     // Get current jitter offset in pixels (centered at 0)
     DirectX::XMFLOAT2 GetJitterOffset() const;
 

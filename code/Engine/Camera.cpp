@@ -252,6 +252,20 @@ XMMATRIX CCamera::GetJitteredProjectionMatrix(uint32_t screenWidth, uint32_t scr
     return XMLoadFloat4x4(&projF);
 }
 
+XMMATRIX CCamera::GetJitteredProjectionMatrix(const XMFLOAT2& jitterNDC) const {
+    XMMATRIX proj = GetProjectionMatrix();
+
+    // Apply jitter to projection matrix
+    // For row-major matrix, modify elements [2][0] and [2][1]
+    // This shifts the entire frustum by sub-pixel amount
+    XMFLOAT4X4 projF;
+    XMStoreFloat4x4(&projF, proj);
+    projF._31 += jitterNDC.x;
+    projF._32 += jitterNDC.y;
+
+    return XMLoadFloat4x4(&projF);
+}
+
 void CCamera::AdvanceJitter() {
     m_jitterFrameIndex++;
 }

@@ -19,6 +19,7 @@
 #include "Engine/Rendering/SSRPass.h"
 #include "Engine/Rendering/AutoExposurePass.h"
 #include "Engine/Rendering/TAAPass.h"
+#include "Engine/Rendering/FSR2Pass.h"
 #include "Engine/Rendering/AntiAliasingPass.h"
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIHelpers.h"
@@ -85,6 +86,7 @@ public:
     CMotionBlurPass& GetMotionBlurPass() { return m_motionBlurPass; }
     CDepthOfFieldPass& GetDepthOfFieldPass() { return m_dofPass; }
     CTAAPass& GetTAAPass() { return m_taaPass; }
+    CFSR2Pass& GetFSR2Pass() { return m_fsr2Pass; }
     CAntiAliasingPass& GetAAPass() { return m_aaPass; }
     CGBuffer& GetGBuffer() { return m_gbuffer; }
 
@@ -105,6 +107,7 @@ private:
     CSSRPass m_ssrPass;
     CAutoExposurePass m_autoExposurePass;
     CTAAPass m_taaPass;
+    CFSR2Pass m_fsr2Pass;
     CAntiAliasingPass m_aaPass;
     CBloomPass m_bloomPass;
     CMotionBlurPass m_motionBlurPass;

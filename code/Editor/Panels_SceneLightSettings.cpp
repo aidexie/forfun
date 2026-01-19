@@ -677,6 +677,88 @@ static void DrawTAASection(CDeferredRenderPipeline* deferred_pipeline) {
     DoubleSpacing();
 }
 
+// ============================================
+// FSR 2.0 Section (AMD FidelityFX Super Resolution 2)
+// ============================================
+static void DrawFSR2Section(CDeferredRenderPipeline* deferred_pipeline, CSceneLightSettings& settings) {
+    SectionHeader("Post-Processing: FSR 2.0 (Temporal Upscaling)");
+
+    auto& fsr2 = settings.fsr2;
+    bool isSupported = deferred_pipeline->GetFSR2Pass().IsSupported();
+
+    // Show support status
+    if (!isSupported) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "FSR 2.0 requires DX12 backend");
+        ImGui::Spacing();
+    }
+
+    // Enable checkbox (disabled if not supported)
+    ImGui::BeginDisabled(!isSupported);
+    if (ImGui::Checkbox("Enable##FSR2", &fsr2.enabled)) {
+        if (fsr2.enabled) {
+            // Disable TAA when FSR2 is enabled (FSR2 replaces TAA)
+            CEditorContext::Instance().GetShowFlags().TAA = false;
+            CFFLog::Info("[FSR2] Enabled - TAA disabled");
+        }
+    }
+    ImGui::EndDisabled();
+
+    if (fsr2.enabled && isSupported) {
+        ImGui::Spacing();
+
+        // Quality mode dropdown
+        static const char* kQualityModeNames[] = {
+            "Native AA (1.0x)",
+            "Quality (1.5x)",
+            "Balanced (1.7x)",
+            "Performance (2.0x)",
+            "Ultra Performance (3.0x)"
+        };
+        int qualityMode = static_cast<int>(fsr2.qualityMode);
+
+        ImGui::PushItemWidth(180);
+        if (ImGui::Combo("Quality Mode##FSR2", &qualityMode, kQualityModeNames, IM_ARRAYSIZE(kQualityModeNames))) {
+            fsr2.qualityMode = static_cast<EFSR2QualityMode>(qualityMode);
+            deferred_pipeline->GetFSR2Pass().InvalidateHistory();
+            CFFLog::Info("[FSR2] Quality mode changed to: %s", kQualityModeNames[qualityMode]);
+        }
+
+        HelpTooltip(
+            "Native AA: No upscaling, FSR as TAA replacement only\n"
+            "Quality: 1.5x upscale (67% render resolution)\n"
+            "Balanced: 1.7x upscale (59% render resolution)\n"
+            "Performance: 2.0x upscale (50% render resolution)\n"
+            "Ultra Performance: 3.0x upscale (33% render resolution)");
+
+        ImGui::Spacing();
+
+        // Sharpness slider
+        ImGui::SliderFloat("Sharpness##FSR2", &fsr2.sharpness, 0.0f, 1.0f, "%.2f");
+        HelpTooltip("RCAS sharpening strength\n0.0 = No sharpening\n1.0 = Maximum sharpening\nRecommended: 0.3-0.7");
+
+        ImGui::PopItemWidth();
+
+        // Debug section
+        if (ImGui::TreeNode("Debug##FSR2")) {
+            if (ImGui::Button("Invalidate History##FSR2")) {
+                deferred_pipeline->GetFSR2Pass().InvalidateHistory();
+                CFFLog::Info("[FSR2] History invalidated");
+            }
+            HelpTooltip("Use after camera cuts or scene transitions");
+
+            ImGui::Spacing();
+
+            // Show FSR2 status
+            bool isReady = deferred_pipeline->GetFSR2Pass().IsReady();
+            ImGui::Text("Status: %s", isReady ? "Ready" : "Initializing...");
+
+            ImGui::TreePop();
+        }
+    }
+
+    DoubleSpacing();
+}
+
 static void DrawAutoExposureSection(CSceneLightSettings& settings) {
     SectionHeader("Post-Processing: Auto Exposure");
 
@@ -938,6 +1020,7 @@ void Panels::DrawSceneLightSettings(CRenderPipeline* pipeline) {
         DrawSSAOSection(deferredPipeline);
         DrawSSRSection(deferredPipeline);
         DrawTAASection(deferredPipeline);
+        DrawFSR2Section(deferredPipeline, settings);
     }
 
     DrawBloomSection(settings);

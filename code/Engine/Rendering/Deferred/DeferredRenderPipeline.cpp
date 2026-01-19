@@ -171,6 +171,7 @@ bool CDeferredRenderPipeline::Initialize()
     m_ssrPass.Initialize();
     m_autoExposurePass.Initialize();
     m_taaPass.Initialize();
+    m_fsr2Pass.Initialize();  // FSR 2.0 (DX12 only, no-op on DX11)
     m_aaPass.Initialize();
 
     m_bloomPass.Initialize();
@@ -200,6 +201,7 @@ void CDeferredRenderPipeline::Shutdown()
     m_ssrPass.Shutdown();
     m_autoExposurePass.Shutdown();
     m_taaPass.Shutdown();
+    m_fsr2Pass.Shutdown();
     m_aaPass.Shutdown();
     m_bloomPass.Shutdown();
     m_motionBlurPass.Shutdown();
@@ -483,11 +485,43 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     }
 
     // ============================================
-    // 6.9. TAA Pass (Temporal Anti-Aliasing)
+    // 6.9. TAA Pass / FSR2 Pass (Temporal Anti-Aliasing / Upscaling)
     // ============================================
-    // TAA runs in HDR space, after SSR and before Auto Exposure
+    // TAA/FSR2 runs in HDR space, after SSR and before Auto Exposure
+    // FSR2 replaces TAA when enabled (provides both temporal AA and upscaling)
     ITexture* hdrAfterTAA = m_offHDR.get();
-    if (ctx.showFlags.TAA) {
+    const auto& fsr2Settings = ctx.scene.GetLightSettings().fsr2;
+
+    if (fsr2Settings.enabled && m_fsr2Pass.IsSupported()) {
+        // FSR 2.0 Path
+        CScopedDebugEvent evt(cmdList, L"FSR2 Pass");
+
+        // Ensure FSR2 resources are ready
+        m_fsr2Pass.EnsureResources(ctx.width, ctx.height, fsr2Settings);
+
+        if (m_fsr2Pass.IsReady()) {
+            // Get frame index for jitter
+            uint32_t frameIndex = ctx.camera.GetJitterFrameIndex();
+
+            // FSR2 needs delta time in milliseconds
+            float deltaTimeMs = ctx.deltaTime * 1000.0f;
+
+            // Render FSR2 (in-place for NativeAA mode, upscaling for other modes)
+            // For now, we use the same HDR buffer as input/output (native resolution)
+            m_fsr2Pass.Render(cmdList,
+                              m_offHDR.get(),
+                              m_gbuffer.GetDepthBuffer(),
+                              m_gbuffer.GetVelocity(),
+                              m_offHDR.get(),  // Output same buffer for now
+                              ctx.camera,
+                              deltaTimeMs,
+                              frameIndex,
+                              fsr2Settings);
+
+            hdrAfterTAA = m_offHDR.get();
+        }
+    } else if (ctx.showFlags.TAA) {
+        // TAA Path (fallback when FSR2 disabled or unsupported)
         CScopedDebugEvent evt(cmdList, L"TAA Pass");
 
         // Get current jitter offset

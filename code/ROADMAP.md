@@ -142,11 +142,14 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Center-weighted metering (Gaussian falloff)
   - GPU-only path (no CPU readback)
   - 详细文档: `docs/AUTO_EXPOSURE.md`
-- **3.3.9 FSR 2.0** (AMD FidelityFX)
-  - Temporal upscaling (works on all GPUs)
-  - Quality modes: Ultra Quality → Performance
-  - Motion vectors + depth input
+- **3.3.9 FSR 2.0** ✅ COMPLETE (AMD FidelityFX)
+  - Temporal upscaling (works on all GPUs, DX12-only)
+  - Quality modes: NativeAA (1.0x), Quality (1.5x), Balanced (1.7x), Performance (2.0x), UltraPerformance (3.0x)
+  - Motion vectors + depth + jittered rendering input
+  - Conditional compilation: FSR2_AVAILABLE macro for stub when SDK not built
+  - Sharpening control (0.0-1.0)
   - Alternative to DLSS for non-NVIDIA hardware
+  - 详细文档: `docs/FSR2.md`
 - **3.3.10 FXAA/SMAA** ✅ COMPLETE
   - FXAA: Fast approximate AA (single-pass, ~0.5ms @ 1080p)
   - SMAA: Official reference implementation with diagonal/corner detection
@@ -158,7 +161,7 @@ Forward+ 更适合 <50 灯光场景；Deferred 更适合复杂场景和屏幕空
   - Saturation, contrast, temperature
   - Artist-friendly preset system
 
-**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA ✅, TestDLSS, TestMotionBlur ✅, TestDoF, TestAutoExposure ✅, TestFSR, TestAntiAliasing ✅, TestColorGrading ✅ 通过
+**验收标准**: TestBloom ✅, TestSSAO ✅, TestSSR ✅, TestTAA ✅, TestDLSS, TestMotionBlur ✅, TestDoF, TestAutoExposure ✅, TestFSR2 ✅, TestAntiAliasing ✅, TestColorGrading ✅ 通过
 
 ### 3.4 RTGI (Real-Time Global Illumination) - 2-4周
 
@@ -262,4 +265,4 @@ GPU 粒子 + Compute Shader
 
 ---
 
-**Last Updated**: 2026-01-16
+**Last Updated**: 2026-01-19

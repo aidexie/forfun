@@ -17,6 +17,7 @@ set(IMGUIZMO_DIR ${THIRD_PARTY_PATH}/ImGuizmo)
 set(KTX_DIR ${THIRD_PARTY_PATH}/KTX-Software)
 set(XATLAS_DIR ${THIRD_PARTY_PATH}/xatlas/source/xatlas)
 set(OIDN_DIR ${THIRD_PARTY_PATH}/oidn)
+set(FSR2_DIR ${THIRD_PARTY_PATH}/fsr2)
 
 add_library(imgui_docking STATIC
     ${IMGUI_DIR}/imgui.cpp
@@ -59,6 +60,38 @@ target_include_directories(xatlas PUBLIC
 )
 if (MSVC)
     target_compile_options(xatlas PRIVATE /utf-8 /W0)  # Disable warnings for thirdparty
+endif()
+
+# FSR2 library (AMD FidelityFX Super Resolution 2)
+# Note: FSR2 SDK requires building to generate shader permutation headers.
+# If the shader headers don't exist, we skip FSR2 and use stub implementation.
+set(FSR2_API_DIR ${FSR2_DIR}/src/ffx-fsr2-api)
+set(FSR2_SHADER_HEADER ${FSR2_API_DIR}/dx12/shaders/ffx_fsr2_tcr_autogen_pass_permutations.h)
+
+if(EXISTS "${FSR2_SHADER_HEADER}")
+    message(STATUS "FSR2: Found shader permutation headers, building FSR2 library")
+    add_library(fsr2 STATIC
+        ${FSR2_API_DIR}/ffx_fsr2.cpp
+        ${FSR2_API_DIR}/ffx_assert.cpp
+        ${FSR2_API_DIR}/dx12/ffx_fsr2_dx12.cpp
+        ${FSR2_API_DIR}/dx12/shaders/ffx_fsr2_shaders_dx12.cpp
+    )
+    target_include_directories(fsr2 PUBLIC
+        ${FSR2_API_DIR}
+        ${FSR2_API_DIR}/dx12
+    )
+    target_compile_definitions(fsr2 PRIVATE FFX_GCC)
+    target_compile_definitions(fsr2 PUBLIC FSR2_AVAILABLE=1)
+    if (MSVC)
+        target_compile_options(fsr2 PRIVATE /utf-8 /W0 /wd4244 /wd4267)
+    endif()
+else()
+    message(WARNING "FSR2: Shader permutation headers not found. FSR2 will be disabled.")
+    message(WARNING "       To enable FSR2, build the FSR2 SDK first:")
+    message(WARNING "       cd ${FSR2_DIR}/build && GenerateSolutions.bat && cmake --build .")
+    # Create empty interface library so linking still works
+    add_library(fsr2 INTERFACE)
+    target_compile_definitions(fsr2 INTERFACE FSR2_AVAILABLE=0)
 endif()
 
 # Core sources - explicitly listed (no GLOB)
@@ -248,6 +281,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestMotionBlur.cpp
     ${CODE_PATH}/Tests/TestDoF.cpp
     ${CODE_PATH}/Tests/TestTAA.cpp
+    ${CODE_PATH}/Tests/TestFSR2.cpp
     ${CODE_PATH}/Tests/TestAntiAliasing.cpp
 )
 
@@ -274,6 +308,7 @@ target_link_libraries(forfun
         imgui_docking
         imguizmo
         xatlas
+        fsr2
         d3d11 d3d12 dxgi d3dcompiler dxguid
         ${KTX_DIR}/lib/ktx.lib
         ${OIDN_DIR}/lib/OpenImageDenoise.lib
@@ -395,6 +430,10 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/SSRPass.cpp
     ${CODE_PATH}/Engine/Rendering/TAAPass.h
     ${CODE_PATH}/Engine/Rendering/TAAPass.cpp
+    ${CODE_PATH}/Engine/Rendering/FSR2Context.h
+    ${CODE_PATH}/Engine/Rendering/FSR2Context.cpp
+    ${CODE_PATH}/Engine/Rendering/FSR2Pass.h
+    ${CODE_PATH}/Engine/Rendering/FSR2Pass.cpp
     ${CODE_PATH}/Engine/Rendering/AntiAliasingPass.h
     ${CODE_PATH}/Engine/Rendering/AntiAliasingPass.cpp
     ${CODE_PATH}/Engine/Rendering/SMAALookupTextures.h
@@ -444,6 +483,11 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/SMAAEdgeDetection.ps.hlsl
     ${CODE_PATH}/Shader/SMAABlendingWeight.ps.hlsl
     ${CODE_PATH}/Shader/SMAANeighborhoodBlend.ps.hlsl
+    ${CODE_PATH}/Shader/DoFCoC.ps.hlsl
+    ${CODE_PATH}/Shader/DoFDownsampleSplit.ps.hlsl
+    ${CODE_PATH}/Shader/DoFBlurH.ps.hlsl
+    ${CODE_PATH}/Shader/DoFBlurV.ps.hlsl
+    ${CODE_PATH}/Shader/DoFComposite.ps.hlsl
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})
@@ -493,6 +537,11 @@ if (MSVC)
         ${CODE_PATH}/Shader/SMAAEdgeDetection.ps.hlsl
         ${CODE_PATH}/Shader/SMAABlendingWeight.ps.hlsl
         ${CODE_PATH}/Shader/SMAANeighborhoodBlend.ps.hlsl
+        ${CODE_PATH}/Shader/DoFCoC.ps.hlsl
+        ${CODE_PATH}/Shader/DoFDownsampleSplit.ps.hlsl
+        ${CODE_PATH}/Shader/DoFBlurH.ps.hlsl
+        ${CODE_PATH}/Shader/DoFBlurV.ps.hlsl
+        ${CODE_PATH}/Shader/DoFComposite.ps.hlsl
         PROPERTIES
         VS_SHADER_TYPE Pixel
         VS_SHADER_MODEL 5.0

@@ -190,6 +190,39 @@ struct SAntiAliasingSettings
 };
 
 // ============================================
+// FSR 2.0 Quality Mode - Upscaling Presets
+// ============================================
+enum class EFSR2QualityMode : int
+{
+    NativeAA = 0,        // 1.0x (FSR as TAA only, no upscaling)
+    Quality = 1,         // 1.5x upscale
+    Balanced = 2,        // 1.7x upscale
+    Performance = 3,     // 2.0x upscale
+    UltraPerformance = 4 // 3.0x upscale
+};
+
+inline const char* GetFSR2QualityModeName(EFSR2QualityMode mode) {
+    switch (mode) {
+        case EFSR2QualityMode::NativeAA:         return "Native AA";
+        case EFSR2QualityMode::Quality:          return "Quality";
+        case EFSR2QualityMode::Balanced:         return "Balanced";
+        case EFSR2QualityMode::Performance:      return "Performance";
+        case EFSR2QualityMode::UltraPerformance: return "Ultra Performance";
+        default: return "Unknown";
+    }
+}
+
+// ============================================
+// FSR 2.0 Settings - Temporal Upscaling
+// ============================================
+struct SFSR2Settings
+{
+    bool enabled = false;  // Enable FSR 2.0 (replaces TAA when enabled)
+    EFSR2QualityMode qualityMode = EFSR2QualityMode::Quality;
+    float sharpness = 0.5f;   // RCAS sharpening strength (0.0-1.0)
+};
+
+// ============================================
 // Depth of Field Settings - Cinematic Focus Blur
 // ============================================
 struct SDepthOfFieldSettings
@@ -258,6 +291,9 @@ public:
 
     // Post-Processing: Anti-Aliasing
     SAntiAliasingSettings antiAliasing;
+
+    // Post-Processing: FSR 2.0 (Temporal Upscaling)
+    SFSR2Settings fsr2;
 
     // Post-Processing: Depth of Field
     SDepthOfFieldSettings depthOfField;
