@@ -16,7 +16,9 @@ Comprehensive guide to Claude Code features, extensibility, and how agents work.
 8. [Settings](#settings)
 9. [How Agents Work](#how-agents-work)
 10. [Why Agents Are Effective](#why-agents-are-effective)
-11. [Plugin Features](#plugin-features)
+11. [Local Configuration (This Project)](#local-configuration-this-project)
+12. [Quick Reference](#quick-reference)
+13. [Plugin Features](#plugin-features)
 
 ---
 
@@ -1007,6 +1009,130 @@ where:
 
 ---
 
+## Local Configuration (This Project)
+
+### Notification Hooks
+
+This project uses hooks to notify when Claude needs attention.
+
+**Location**: `.claude/settings.local.json`
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"E:/forfun/source/code/.claude/notify.ps1\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"E:/forfun/source/code/.claude/notify.ps1\" -Message \"Claude has a question\""
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+| Hook | Matcher | Trigger | Message |
+|------|---------|---------|---------|
+| `Stop` | (any) | Claude stops and waits for input | "Needs input" |
+| `PreToolUse` | `AskUserQuestion` | Claude presents choices/questions | "Claude has a question" |
+
+**Notification Script**: `.claude/notify.ps1`
+- Uses BurntToast module if installed
+- Falls back to Windows Toast via .NET
+- Final fallback: console beep + colored output
+- Reads `CLAUDE_TAB` environment variable to identify which terminal
+
+### VS Code Shortcuts for Claude 1-5
+
+Keyboard shortcuts to launch Claude Code with different tab identifiers.
+
+**Terminal Profiles** (in VS Code `settings.json`):
+
+```json
+{
+  "terminal.integrated.profiles.windows": {
+    "Claude 1": {
+      "path": "powershell.exe",
+      "args": ["-NoExit", "-Command", "$Host.UI.RawUI.WindowTitle='CC 1'; $env:CLAUDE_TAB='1'; claude"],
+      "icon": "robot",
+      "color": "terminal.ansiBlue",
+      "overrideName": true
+    },
+    "Claude 2": {
+      "path": "powershell.exe",
+      "args": ["-NoExit", "-Command", "$Host.UI.RawUI.WindowTitle='CC 2'; $env:CLAUDE_TAB='2'; claude"],
+      "icon": "robot",
+      "color": "terminal.ansiGreen",
+      "overrideName": true
+    },
+    "Claude 3": {
+      "path": "powershell.exe",
+      "args": ["-NoExit", "-Command", "$Host.UI.RawUI.WindowTitle='CC 3'; $env:CLAUDE_TAB='3'; claude"],
+      "icon": "robot",
+      "color": "terminal.ansiYellow",
+      "overrideName": true
+    },
+    "Claude 4": {
+      "path": "powershell.exe",
+      "args": ["-NoExit", "-Command", "$Host.UI.RawUI.WindowTitle='CC 4'; $env:CLAUDE_TAB='4'; claude"],
+      "icon": "robot",
+      "color": "terminal.ansiMagenta",
+      "overrideName": true
+    },
+    "Claude 5": {
+      "path": "powershell.exe",
+      "args": ["-NoExit", "-Command", "$Host.UI.RawUI.WindowTitle='CC 5'; $env:CLAUDE_TAB='5'; claude"],
+      "icon": "robot",
+      "color": "terminal.ansiCyan",
+      "overrideName": true
+    }
+  }
+}
+```
+
+**Keybindings** (in VS Code `keybindings.json`):
+
+```json
+[
+  { "key": "ctrl+alt+1", "command": "workbench.action.terminal.newWithProfile", "args": { "profileName": "Claude 1" } },
+  { "key": "ctrl+alt+2", "command": "workbench.action.terminal.newWithProfile", "args": { "profileName": "Claude 2" } },
+  { "key": "ctrl+alt+3", "command": "workbench.action.terminal.newWithProfile", "args": { "profileName": "Claude 3" } },
+  { "key": "ctrl+alt+4", "command": "workbench.action.terminal.newWithProfile", "args": { "profileName": "Claude 4" } },
+  { "key": "ctrl+alt+5", "command": "workbench.action.terminal.newWithProfile", "args": { "profileName": "Claude 5" } }
+]
+```
+
+| Shortcut | Terminal | Color |
+|----------|----------|-------|
+| `Ctrl+Alt+1` | Claude 1 | Blue |
+| `Ctrl+Alt+2` | Claude 2 | Green |
+| `Ctrl+Alt+3` | Claude 3 | Yellow |
+| `Ctrl+Alt+4` | Claude 4 | Magenta |
+| `Ctrl+Alt+5` | Claude 5 | Cyan |
+
+**How It Works**:
+1. Shortcut opens new terminal with profile
+2. Profile sets `CLAUDE_TAB` environment variable
+3. Profile runs `claude` command automatically
+4. When Claude needs input, notification shows "Claude: 1 - Needs input" (or appropriate tab number)
+
+---
+
 ## Quick Reference
 
 ### Install a Plugin
@@ -1194,4 +1320,4 @@ A single plugin can include **any combination** of these features.
 
 ---
 
-**Last Updated**: 2026-01-13
+**Last Updated**: 2026-01-20

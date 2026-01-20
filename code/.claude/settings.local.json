@@ -36,7 +36,16 @@
       "mcp__plugin_context7_context7__query-docs",
       "WebFetch(domain:www.ea.com)",
       "WebFetch(domain:advances.realtimerendering.com)",
-      "Skill(git-commit)"
+      "Skill(git-commit)",
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(curl:*)",
+      "Bash(test:*)",
+      "Bash(E:)",
+      "Bash(cmd /c \"cd /d E:\\\\forfun\\\\source\\\\code && cmake --build build --target forfun 2>&1\")",
+      "Bash(cmd.exe /c \"cd /d E:\\\\forfun\\\\source\\\\code && rmdir /s /q build\\\\CMakeCache.txt 2>nul & rmdir /s /q build\\\\CMakeFiles 2>nul & del build\\\\CMakeCache.txt 2>nul\")",
+      "Bash(cmd.exe /c \"\"\"E:\\\\VisualStuido\\\\2022\\\\Common7\\\\Tools\\\\VsDevCmd.bat\"\" -arch=amd64 && cd /d E:\\\\forfun\\\\source\\\\code && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug\")",
+      "Bash(cmd.exe /c:*)"
     ],
     "deny": [],
     "ask": []
@@ -49,6 +58,17 @@
           {
             "type": "command",
             "command": "powershell -ExecutionPolicy Bypass -File \"E:/forfun/source/code/.claude/notify.ps1\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \"E:/forfun/source/code/.claude/notify.ps1\" -Message \"Claude has a question\""
           }
         ]
       }
