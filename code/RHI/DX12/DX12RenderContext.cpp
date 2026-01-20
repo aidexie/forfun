@@ -163,7 +163,7 @@ void CDX12RenderContext::BeginFrame() {
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    m_commandList->GetNativeCommandList()->ResourceBarrier(1, &barrier);
+    m_commandList->GetD3D12CommandListTyped()->ResourceBarrier(1, &barrier);
 
     // Update backbuffer wrapper's tracked state to match
     if (m_backbufferWrappers[frameIndex]) {
@@ -193,13 +193,13 @@ void CDX12RenderContext::EndFrame() {
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    m_commandList->GetNativeCommandList()->ResourceBarrier(1, &barrier);
+    m_commandList->GetD3D12CommandListTyped()->ResourceBarrier(1, &barrier);
 
     // Close command list
     m_commandList->Close();
 
     // Execute command list
-    ID3D12CommandList* cmdLists[] = { m_commandList->GetNativeCommandList() };
+    ID3D12CommandList* cmdLists[] = { m_commandList->GetD3D12CommandListTyped() };
     CDX12Context::Instance().GetCommandQueue()->ExecuteCommandLists(1, cmdLists);
 
     // Signal fence for upload manager
@@ -352,7 +352,7 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
     } else if (initialData && heapType == D3D12_HEAP_TYPE_DEFAULT) {
         // Upload via staging buffer
         CDX12CommandList* cmdList = m_commandList.get();
-        ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetNativeCommandList();
+        ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetD3D12CommandListTyped();
 
         // Allocate upload buffer
         auto& uploadMgr = CDX12UploadManager::Instance();
@@ -654,7 +654,7 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
     if (subresources && numSubresources > 0 && heapProps.Type == D3D12_HEAP_TYPE_DEFAULT) {
         // Get command list for upload
         CDX12CommandList* cmdList = m_commandList.get();
-        ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetNativeCommandList();
+        ID3D12GraphicsCommandList* d3dCmdList = cmdList->GetD3D12CommandListTyped();
 
         // Get texture resource and desc for footprint calculation
         ID3D12Resource* dstResource = texture->GetD3D12Resource();
@@ -1072,7 +1072,7 @@ void CDX12RenderContext::ExecuteAndWait() {
     m_commandList->Close();
 
     // Execute
-    ID3D12CommandList* cmdLists[] = { m_commandList->GetNativeCommandList() };
+    ID3D12CommandList* cmdLists[] = { m_commandList->GetD3D12CommandListTyped() };
     ctx.GetCommandQueue()->ExecuteCommandLists(1, cmdLists);
 
     // Wait for GPU completion

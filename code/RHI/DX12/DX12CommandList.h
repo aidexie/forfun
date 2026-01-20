@@ -40,8 +40,11 @@ public:
     // Close command list (before execution)
     void Close();
 
-    // Get native command list
-    ID3D12GraphicsCommandList* GetNativeCommandList() { return m_commandList.Get(); }
+    // Get native command list (ICommandList interface)
+    void* GetNativeCommandList() override { return m_commandList.Get(); }
+
+    // Get typed DX12 command list (for internal DX12 code)
+    ID3D12GraphicsCommandList* GetD3D12CommandListTyped() { return m_commandList.Get(); }
 
     // Get resource state tracker
     CDX12ResourceStateTracker& GetStateTracker() { return m_stateTracker; }

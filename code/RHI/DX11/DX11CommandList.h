@@ -87,6 +87,9 @@ public:
     void DispatchRays(const DispatchRaysDesc& desc) override {}
     void SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) override {}
 
+    // Native Access (DX11 doesn't expose command list)
+    void* GetNativeCommandList() override { return nullptr; }
+
 private:
     ID3D11DeviceContext* m_context;  // Non-owning
     ID3D11Device* m_device;          // Non-owning, for creating dynamic CBs

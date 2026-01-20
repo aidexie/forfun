@@ -137,6 +137,9 @@ bool CFSR2Context::Initialize(uint32_t displayWidth, uint32_t displayHeight, EFS
 void CFSR2Context::Shutdown() {
     if (!m_initialized) return;
 
+    // Wait for GPU to finish using FSR2 resources before destroying them
+    RHI::CRHIManager::Instance().GetRenderContext()->ExecuteAndWait();
+
     if (m_context) {
         ffxFsr2ContextDestroy(static_cast<FfxFsr2Context*>(m_context));
         delete static_cast<FfxFsr2Context*>(m_context);
@@ -242,7 +245,7 @@ void CFSR2Context::Execute(
     }
 
     // Get native DX12 command list
-    ID3D12GraphicsCommandList* dx12CmdList = static_cast<ID3D12GraphicsCommandList*>(cmdList->GetNativeContext());
+    ID3D12GraphicsCommandList* dx12CmdList = static_cast<ID3D12GraphicsCommandList*>(cmdList->GetNativeCommandList());
     if (!dx12CmdList) {
         CFFLog::Error("[FSR2] Failed to get DX12 command list");
         return;

@@ -202,6 +202,15 @@ public:
     // Set acceleration structure for shader access
     // Binds TLAS to shader resource slot for TraceRay() calls
     virtual void SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) = 0;
+
+    // ============================================
+    // Native Access (for SDK integrations like FSR2)
+    // ============================================
+
+    // Get native command list pointer
+    // DX12: ID3D12GraphicsCommandList*
+    // DX11: nullptr (not applicable)
+    virtual void* GetNativeCommandList() = 0;
 };
 
 // RAII wrapper for debug events

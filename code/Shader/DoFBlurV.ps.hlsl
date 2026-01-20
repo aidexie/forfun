@@ -1,8 +1,8 @@
 // ============================================
 // Depth of Field - Pass 4: Vertical Gaussian Blur
 // ============================================
-// 11-tap separable Gaussian blur with bilateral weighting
-// Blurs near and far layers separately based on CoC
+// 11-tap separable Gaussian blur with gather-as-scatter
+// Uses max neighbor CoC to allow blur to spread into in-focus areas
 // ============================================
 
 cbuffer CB_Blur : register(b0) {
@@ -32,8 +32,23 @@ static const float kGaussianWeights[11] = {
 float4 main(PSIn input) : SV_Target {
     float centerCoC = gCoCInput.SampleLevel(gLinearSampler, input.uv, 0).r;
 
-    // Scale blur radius by CoC
-    float blurRadius = centerCoC * gMaxCoCRadius;
+    // Find max CoC in neighborhood - this allows blur to spread into lower-CoC areas
+    float maxNeighborCoC = centerCoC;
+    for (int p = 0; p < 11; ++p) {
+        float preOffset = (float)(p - 5);
+        float2 preUV = input.uv + kBlurDir * gTexelSize * preOffset * gMaxCoCRadius;
+        preUV = saturate(preUV);
+        float neighborCoC = gCoCInput.SampleLevel(gLinearSampler, preUV, 0).r;
+        maxNeighborCoC = max(maxNeighborCoC, neighborCoC);
+    }
+
+    // Use max neighbor CoC for blur radius (gather-as-scatter)
+    float blurRadius = maxNeighborCoC * gMaxCoCRadius;
+
+    // Early out if no blur needed
+    if (blurRadius < 0.5) {
+        return gColorInput.SampleLevel(gLinearSampler, input.uv, 0);
+    }
 
     float4 colorSum = float4(0.0, 0.0, 0.0, 0.0);
     float weightSum = 0.0;
@@ -42,8 +57,6 @@ float4 main(PSIn input) : SV_Target {
     for (int i = 0; i < 11; ++i) {
         float offset = (float)(i - 5);  // -5 to +5
         float2 sampleUV = input.uv + kBlurDir * gTexelSize * offset * blurRadius;
-
-        // Clamp to valid UV range
         sampleUV = saturate(sampleUV);
 
         float4 sampleColor = gColorInput.SampleLevel(gLinearSampler, sampleUV, 0);
@@ -51,13 +64,23 @@ float4 main(PSIn input) : SV_Target {
 
         float weight = kGaussianWeights[i];
 
-        // Bilateral weight: reduce contribution of samples with very different CoC
+        // Weight by sample's CoC - higher CoC samples contribute more to blur
+        // This simulates scatter: blurry pixels "spread" their color to neighbors
+        float cocContribution = saturate(sampleCoC * 2.0 + 0.1);
+        weight *= cocContribution;
+
+        // Soft bilateral weight to prevent extreme CoC differences from mixing
         float cocDiff = abs(sampleCoC - centerCoC);
-        weight *= exp(-cocDiff * 4.0);
+        weight *= exp(-cocDiff * 1.5);
 
         colorSum += sampleColor * weight;
         weightSum += weight;
     }
 
-    return colorSum / max(weightSum, 0.0001);
+    // Fallback to center color if no valid samples
+    if (weightSum < 0.0001) {
+        return gColorInput.SampleLevel(gLinearSampler, input.uv, 0);
+    }
+
+    return colorSum / weightSum;
 }
