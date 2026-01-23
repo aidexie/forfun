@@ -118,8 +118,8 @@ bool CScreenshot::CaptureTest(CRenderPipeline* pipeline, const std::string& test
         CFFLog::Error("Screenshot: Null render pipeline");
         return false;
     }
-    // CFFLog::Error("Screenshot: cur claude code not support read image");
-    // return false;
+     CFFLog::Info("Screenshot: cur claude code not support read image");
+     return false;
 
     // Build path: E:/forfun/debug/{testName}/screenshot_frame{frame}.png
     std::string path = GetTestScreenshotPath(testName.c_str(), frame);

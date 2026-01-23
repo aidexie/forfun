@@ -8,6 +8,7 @@
 #include "DX12AccelerationStructure.h"
 #include "DX12RayTracingPipeline.h"
 #include "DX12ShaderBindingTable.h"
+#include "DX12RootSignatureCache.h"
 #include "../../Core/FFLog.h"
 #include "../../Core/RenderConfig.h"
 
@@ -58,6 +59,16 @@ bool CDX12RenderContext::Initialize(void* nativeWindowHandle, uint32_t width, ui
         return false;
     }
 
+    // Initialize root signature cache for descriptor sets
+    CDX12RootSignatureCache::Instance().Initialize(device);
+
+    // Initialize descriptor set allocator
+    m_descriptorSetAllocator = std::make_unique<CDX12DescriptorSetAllocator>();
+    if (!m_descriptorSetAllocator->Initialize(device)) {
+        CFFLog::Error("[DX12RenderContext] Failed to initialize descriptor set allocator");
+        return false;
+    }
+
     // Create root signatures
     if (!CreateRootSignatures()) {
         CFFLog::Error("[DX12RenderContext] Failed to create root signatures");
@@ -100,6 +111,7 @@ void CDX12RenderContext::Shutdown() {
     m_generateMipsPass.Shutdown();
 
     // Release resources
+    m_descriptorSetAllocator.reset();
     m_dynamicBufferRing.reset();
     m_depthStencilBuffer.reset();
     ReleaseBackbufferWrappers();
@@ -110,6 +122,7 @@ void CDX12RenderContext::Shutdown() {
 
     // Shutdown managers
     CDX12PSOCache::Instance().Shutdown();
+    CDX12RootSignatureCache::Instance().Shutdown();
     CDX12UploadManager::Instance().Shutdown();
     CDX12DescriptorHeapManager::Instance().Shutdown();
     CDX12Context::Instance().Shutdown();
@@ -151,6 +164,11 @@ void CDX12RenderContext::BeginFrame() {
 
     // Reset descriptor staging rings for this frame
     CDX12DescriptorHeapManager::Instance().BeginFrame(frameIndex);
+
+    // Reset descriptor set allocator for this frame
+    if (m_descriptorSetAllocator) {
+        m_descriptorSetAllocator->BeginFrame(frameIndex);
+    }
 
     // Reset command list with current frame's allocator
     m_commandList->Reset(CDX12Context::Instance().GetCurrentCommandAllocator());
@@ -826,8 +844,36 @@ IShader* CDX12RenderContext::CreateShader(const ShaderDesc& desc) {
 IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc& desc) {
     CDX12PSOBuilder builder;
 
+    // Check if descriptor set layouts are specified
+    bool usesDescriptorSets = false;
+    for (int i = 0; i < 4; ++i) {
+        if (desc.setLayouts[i] != nullptr) {
+            usesDescriptorSets = true;
+            break;
+        }
+    }
+
+    ID3D12RootSignature* rootSignature = nullptr;
+    SSetRootParamInfo setBindings[4] = {};
+
+    if (usesDescriptorSets) {
+        // Use root signature cache to get/create per-pipeline root signature
+        SRootSignatureResult result = CDX12RootSignatureCache::Instance().GetOrCreate(desc.setLayouts);
+        if (!result.rootSignature) {
+            CFFLog::Error("[DX12RenderContext] Failed to create root signature from descriptor set layouts");
+            return nullptr;
+        }
+        rootSignature = result.rootSignature.Get();
+        for (int i = 0; i < 4; ++i) {
+            setBindings[i] = result.setBindings[i];
+        }
+    } else {
+        // Use legacy global root signature
+        rootSignature = m_graphicsRootSignature.Get();
+    }
+
     // Set root signature
-    builder.SetRootSignature(m_graphicsRootSignature.Get());
+    builder.SetRootSignature(rootSignature);
 
     // Set shaders
     if (desc.vertexShader) {
@@ -947,7 +993,11 @@ IPipelineState* CDX12RenderContext::CreatePipelineState(const PipelineStateDesc&
         pso->SetName(wname);
     }
 
-    return new CDX12PipelineState(pso.Get(), m_graphicsRootSignature.Get(), false);
+    if (usesDescriptorSets) {
+        return new CDX12PipelineState(pso.Get(), rootSignature, setBindings, desc.setLayouts, false);
+    } else {
+        return new CDX12PipelineState(pso.Get(), rootSignature, false);
+    }
 }
 
 IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipelineDesc& desc) {
@@ -958,8 +1008,36 @@ IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipe
 
     CDX12Shader* cs = static_cast<CDX12Shader*>(desc.computeShader);
 
+    // Check if descriptor set layouts are specified
+    bool usesDescriptorSets = false;
+    for (int i = 0; i < 4; ++i) {
+        if (desc.setLayouts[i] != nullptr) {
+            usesDescriptorSets = true;
+            break;
+        }
+    }
+
+    ID3D12RootSignature* rootSignature = nullptr;
+    SSetRootParamInfo setBindings[4] = {};
+
+    if (usesDescriptorSets) {
+        // Use root signature cache to get/create per-pipeline root signature
+        SRootSignatureResult result = CDX12RootSignatureCache::Instance().GetOrCreate(desc.setLayouts);
+        if (!result.rootSignature) {
+            CFFLog::Error("[DX12RenderContext] Failed to create root signature from descriptor set layouts (compute)");
+            return nullptr;
+        }
+        rootSignature = result.rootSignature.Get();
+        for (int i = 0; i < 4; ++i) {
+            setBindings[i] = result.setBindings[i];
+        }
+    } else {
+        // Use legacy global root signature
+        rootSignature = m_computeRootSignature.Get();
+    }
+
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.pRootSignature = m_computeRootSignature.Get();
+    psoDesc.pRootSignature = rootSignature;
     psoDesc.CS = cs->GetBytecode();
 
     ComPtr<ID3D12PipelineState> pso;
@@ -977,7 +1055,11 @@ IPipelineState* CDX12RenderContext::CreateComputePipelineState(const ComputePipe
         pso->SetName(wname);
     }
 
-    return new CDX12PipelineState(pso.Get(), m_computeRootSignature.Get(), true);
+    if (usesDescriptorSets) {
+        return new CDX12PipelineState(pso.Get(), rootSignature, setBindings, desc.setLayouts, true);
+    } else {
+        return new CDX12PipelineState(pso.Get(), rootSignature, true);
+    }
 }
 
 ITexture* CDX12RenderContext::WrapNativeTexture(void* nativeTexture, void* nativeSRV, uint32_t width, uint32_t height, ETextureFormat format) {
@@ -1080,6 +1162,10 @@ void CDX12RenderContext::ExecuteAndWait() {
 
     // Reset command list for next use
     m_commandList->Reset(ctx.GetCurrentCommandAllocator());
+}
+
+IDescriptorSetAllocator* CDX12RenderContext::GetDescriptorSetAllocator() {
+    return m_descriptorSetAllocator.get();
 }
 
 ID3D12Device* CDX12RenderContext::GetDevice() const {

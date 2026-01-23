@@ -512,6 +512,128 @@ void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint3
 }
 
 // ============================================
+// Descriptor Set Binding
+// ============================================
+
+void CDX12CommandList::BindDescriptorSet(uint32_t setIndex, IDescriptorSet* set) {
+    if (!set || setIndex >= 4) return;
+
+    // Must have PSO set first to know root signature layout
+    if (!m_currentPSO) {
+        CFFLog::Error("[DX12CommandList] BindDescriptorSet: No PSO set");
+        return;
+    }
+
+    // Check if PSO uses descriptor sets
+    if (!m_currentPSO->UsesDescriptorSets()) {
+        CFFLog::Error("[DX12CommandList] BindDescriptorSet: PSO does not use descriptor sets");
+        return;
+    }
+
+    const SSetRootParamInfo& bindingInfo = m_currentPSO->GetSetBindingInfo(setIndex);
+    if (!bindingInfo.isUsed) {
+        // This set is not used by current pipeline - skip
+        return;
+    }
+
+    // STRICT layout matching - pointer equality required
+    IDescriptorSetLayout* expectedLayout = m_currentPSO->GetExpectedLayout(setIndex);
+    if (set->GetLayout() != expectedLayout) {
+        CFFLog::Error("[DX12CommandList] BindDescriptorSet: Layout pointer mismatch for set %u", setIndex);
+        return;
+    }
+
+    auto* dx12Set = static_cast<CDX12DescriptorSet*>(set);
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    auto* device = CDX12Context::Instance().GetDevice();
+
+    EnsureDescriptorHeapsBound();
+
+    // Choose graphics vs compute binding based on PSO type
+    bool isCompute = m_currentPSO->IsCompute();
+
+    // Bind SRV table if present
+    if (bindingInfo.srvTableRootParam != UINT32_MAX && dx12Set->HasSRVs()) {
+        auto& stagingRing = heapMgr.GetSRVStagingRing();
+        D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = dx12Set->CopySRVsToStaging(stagingRing, device);
+        if (gpuHandle.ptr != 0) {
+            if (isCompute) {
+                m_commandList->SetComputeRootDescriptorTable(bindingInfo.srvTableRootParam, gpuHandle);
+            } else {
+                m_commandList->SetGraphicsRootDescriptorTable(bindingInfo.srvTableRootParam, gpuHandle);
+            }
+        }
+    }
+
+    // Bind UAV table if present
+    if (bindingInfo.uavTableRootParam != UINT32_MAX && dx12Set->HasUAVs()) {
+        auto& stagingRing = heapMgr.GetSRVStagingRing();
+        D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = dx12Set->CopyUAVsToStaging(stagingRing, device);
+        if (gpuHandle.ptr != 0) {
+            if (isCompute) {
+                m_commandList->SetComputeRootDescriptorTable(bindingInfo.uavTableRootParam, gpuHandle);
+            } else {
+                m_commandList->SetGraphicsRootDescriptorTable(bindingInfo.uavTableRootParam, gpuHandle);
+            }
+        }
+    }
+
+    // Bind Sampler table if present
+    if (bindingInfo.samplerTableRootParam != UINT32_MAX && dx12Set->HasSamplers()) {
+        auto& stagingRing = heapMgr.GetSamplerStagingRing();
+        D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle = dx12Set->CopySamplersToStaging(stagingRing, device);
+        if (gpuHandle.ptr != 0) {
+            if (isCompute) {
+                m_commandList->SetComputeRootDescriptorTable(bindingInfo.samplerTableRootParam, gpuHandle);
+            } else {
+                m_commandList->SetGraphicsRootDescriptorTable(bindingInfo.samplerTableRootParam, gpuHandle);
+            }
+        }
+    }
+
+    // Bind Volatile CBV if present (root CBV)
+    if (bindingInfo.volatileCBVRootParam != UINT32_MAX && dx12Set->HasVolatileCBV()) {
+        if (!m_dynamicBuffer) {
+            CFFLog::Error("[DX12CommandList] BindDescriptorSet: No dynamic buffer ring for volatile CBV");
+        } else {
+            D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = dx12Set->AllocateVolatileCBV(*m_dynamicBuffer);
+            if (gpuAddress != 0) {
+                if (isCompute) {
+                    m_commandList->SetComputeRootConstantBufferView(bindingInfo.volatileCBVRootParam, gpuAddress);
+                } else {
+                    m_commandList->SetGraphicsRootConstantBufferView(bindingInfo.volatileCBVRootParam, gpuAddress);
+                }
+            }
+        }
+    }
+
+    // Bind static Constant Buffer if present (root CBV)
+    if (bindingInfo.constantBufferRootParam != UINT32_MAX && dx12Set->HasConstantBuffer()) {
+        D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = dx12Set->GetConstantBufferGPUAddress();
+        if (gpuAddress != 0) {
+            if (isCompute) {
+                m_commandList->SetComputeRootConstantBufferView(bindingInfo.constantBufferRootParam, gpuAddress);
+            } else {
+                m_commandList->SetGraphicsRootConstantBufferView(bindingInfo.constantBufferRootParam, gpuAddress);
+            }
+        }
+    }
+
+    // Bind Push Constants if present (root constants)
+    if (bindingInfo.pushConstantRootParam != UINT32_MAX && dx12Set->HasPushConstants()) {
+        uint32_t dwordCount = dx12Set->GetPushConstantDwordCount();
+        const void* data = dx12Set->GetPushConstantData();
+        if (dwordCount > 0 && data) {
+            if (isCompute) {
+                m_commandList->SetComputeRoot32BitConstants(bindingInfo.pushConstantRootParam, dwordCount, data, 0);
+            } else {
+                m_commandList->SetGraphicsRoot32BitConstants(bindingInfo.pushConstantRootParam, dwordCount, data, 0);
+            }
+        }
+    }
+}
+
+// ============================================
 // Draw Commands
 // ============================================
 

@@ -170,6 +170,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/RHIHelpers.cpp
     ${CODE_PATH}/RHI/RHIHelpers.h
     ${CODE_PATH}/RHI/ICommandList.h
+    ${CODE_PATH}/RHI/IDescriptorSet.h
     ${CODE_PATH}/RHI/IRenderContext.h
     ${CODE_PATH}/RHI/RHIFactory.cpp
     ${CODE_PATH}/RHI/RHIFactory.h
@@ -220,6 +221,12 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12ShaderBindingTable.cpp
     ${CODE_PATH}/RHI/DX12/DX12ShaderCompiler.cpp
     ${CODE_PATH}/RHI/DX12/DX12Debug.cpp
+    ${CODE_PATH}/RHI/DX12/DX12DescriptorSet.h
+    ${CODE_PATH}/RHI/DX12/DX12DescriptorSet.cpp
+    ${CODE_PATH}/RHI/DX12/DX12DescriptorSetAllocator.h
+    ${CODE_PATH}/RHI/DX12/DX12DescriptorSetAllocator.cpp
+    ${CODE_PATH}/RHI/DX12/DX12RootSignatureCache.h
+    ${CODE_PATH}/RHI/DX12/DX12RootSignatureCache.cpp
 )
 
 # Engine root sources - explicitly listed (no GLOB)

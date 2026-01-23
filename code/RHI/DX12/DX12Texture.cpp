@@ -449,7 +449,23 @@ CDX12PipelineState::CDX12PipelineState(ID3D12PipelineState* pso, ID3D12RootSigna
     : m_pso(pso)
     , m_rootSignature(rootSig)
     , m_isCompute(isCompute)
+    , m_usesDescriptorSets(false)
 {
+}
+
+CDX12PipelineState::CDX12PipelineState(ID3D12PipelineState* pso, ID3D12RootSignature* rootSig,
+                                       const SSetRootParamInfo setBindings[4],
+                                       IDescriptorSetLayout* const expectedLayouts[4],
+                                       bool isCompute)
+    : m_pso(pso)
+    , m_rootSignature(rootSig)
+    , m_isCompute(isCompute)
+    , m_usesDescriptorSets(true)
+{
+    for (int i = 0; i < 4; ++i) {
+        m_setBindings[i] = setBindings[i];
+        m_expectedLayouts[i] = expectedLayouts[i];
+    }
 }
 
 } // namespace DX12

@@ -14,6 +14,9 @@ class IShaderBindingTable;
 class IRayTracingPipelineState;
 struct DispatchRaysDesc;
 
+// Forward declaration for descriptor sets
+class IDescriptorSet;
+
 class ICommandList {
 public:
     virtual ~ICommandList() = default;
@@ -98,6 +101,16 @@ public:
     // Clear UAV buffer with uint values (for resetting atomic counters, etc.)
     // values: array of 4 uint32_t values to clear with
     virtual void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) = 0;
+
+    // ============================================
+    // Descriptor Set Binding (DX12/Vulkan only)
+    // ============================================
+
+    // Bind descriptor set to set index (0=PerFrame, 1=PerPass, 2=PerMaterial, 3=PerDraw)
+    // All bindings (SRV, UAV, CBV, Sampler, PushConstants) are applied from the set
+    // Sets remain bound until replaced
+    // NOTE: Requires PSO with setLayouts specified. No-op on DX11.
+    virtual void BindDescriptorSet(uint32_t setIndex, IDescriptorSet* set) = 0;
 
     // ============================================
     // Draw Commands

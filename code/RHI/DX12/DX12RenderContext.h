@@ -5,6 +5,7 @@
 #include "DX12CommandList.h"
 #include "DX12DynamicBuffer.h"
 #include "DX12GenerateMipsPass.h"
+#include "DX12DescriptorSetAllocator.h"
 #include "../IRenderContext.h"
 #include "../RHIRayTracing.h"
 
@@ -67,6 +68,9 @@ public:
     // Synchronous Execution
     void ExecuteAndWait() override;
 
+    // Descriptor Set Allocator
+    IDescriptorSetAllocator* GetDescriptorSetAllocator() override;
+
     // Ray Tracing (DXR)
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override;
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const TLASDesc& desc) override;
@@ -119,6 +123,9 @@ private:
 
     // GenerateMips compute pass
     CDX12GenerateMipsPass m_generateMipsPass;
+
+    // Descriptor set allocator
+    std::unique_ptr<CDX12DescriptorSetAllocator> m_descriptorSetAllocator;
 
     // Frame state
     bool m_frameInProgress = false;

@@ -87,6 +87,9 @@ public:
     void DispatchRays(const DispatchRaysDesc& desc) override {}
     void SetAccelerationStructure(uint32_t slot, IAccelerationStructure* tlas) override {}
 
+    // Descriptor Set Binding (stub - DX11 doesn't support descriptor sets)
+    void BindDescriptorSet(uint32_t setIndex, IDescriptorSet* set) override {}
+
     // Native Access (DX11 doesn't expose command list)
     void* GetNativeCommandList() override { return nullptr; }
 

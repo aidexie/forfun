@@ -2,6 +2,11 @@
 #include "RHICommon.h"
 #include <vector>
 
+// Forward declaration for descriptor set layouts
+namespace RHI {
+class IDescriptorSetLayout;
+}
+
 // ============================================
 // RHI Resource Descriptors
 // ============================================
@@ -318,6 +323,11 @@ struct PipelineStateDesc {
     // Primitive topology
     EPrimitiveTopology primitiveTopology = EPrimitiveTopology::TriangleList;
 
+    // Descriptor set layouts (DX12/Vulkan only, nullptr = not used)
+    // Index = set index (0=PerFrame, 1=PerPass, 2=PerMaterial, 3=PerDraw)
+    // When any layout is non-null, pipeline uses descriptor set binding model
+    IDescriptorSetLayout* setLayouts[4] = {nullptr, nullptr, nullptr, nullptr};
+
     // Debug name
     const char* debugName = nullptr;
 };
@@ -327,6 +337,10 @@ struct PipelineStateDesc {
 // ============================================
 struct ComputePipelineDesc {
     class IShader* computeShader = nullptr;
+
+    // Descriptor set layouts (DX12/Vulkan only, nullptr = not used)
+    IDescriptorSetLayout* setLayouts[4] = {nullptr, nullptr, nullptr, nullptr};
+
     const char* debugName = nullptr;
 };
 

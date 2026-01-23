@@ -3,6 +3,7 @@
 #include "DX12Common.h"
 #include "DX12ResourceStateTracker.h"
 #include "DX12DynamicBuffer.h"
+#include "DX12DescriptorSet.h"
 #include "../ICommandList.h"
 #include "../RHIResources.h"
 #include "../RHIRayTracing.h"
@@ -78,6 +79,9 @@ public:
     void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) override;
     void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) override;
     void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) override;
+
+    // Descriptor Set Binding (DX12 only)
+    void BindDescriptorSet(uint32_t setIndex, IDescriptorSet* set) override;
 
     // Draw Commands
     void Draw(uint32_t vertexCount, uint32_t startVertex = 0) override;

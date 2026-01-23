@@ -2,6 +2,7 @@
 
 #include "DX12Common.h"
 #include "DX12DescriptorHeap.h"
+#include "DX12DescriptorSet.h"
 #include "../RHIResources.h"
 #include <unordered_map>
 
@@ -223,7 +224,15 @@ private:
 // ============================================
 class CDX12PipelineState : public IPipelineState {
 public:
+    // Legacy constructor (no descriptor sets)
     CDX12PipelineState(ID3D12PipelineState* pso, ID3D12RootSignature* rootSig, bool isCompute = false);
+
+    // Descriptor set constructor
+    CDX12PipelineState(ID3D12PipelineState* pso, ID3D12RootSignature* rootSig,
+                       const SSetRootParamInfo setBindings[4],
+                       IDescriptorSetLayout* const expectedLayouts[4],
+                       bool isCompute = false);
+
     ~CDX12PipelineState() override = default;
 
     void* GetNativeHandle() override { return m_pso.Get(); }
@@ -232,10 +241,24 @@ public:
     ID3D12RootSignature* GetRootSignature() { return m_rootSignature.Get(); }
     bool IsCompute() const { return m_isCompute; }
 
+    // Descriptor set support
+    bool UsesDescriptorSets() const { return m_usesDescriptorSets; }
+    const SSetRootParamInfo& GetSetBindingInfo(uint32_t setIndex) const {
+        return m_setBindings[setIndex];
+    }
+    IDescriptorSetLayout* GetExpectedLayout(uint32_t setIndex) const {
+        return m_expectedLayouts[setIndex];
+    }
+
 private:
     ComPtr<ID3D12PipelineState> m_pso;
     ComPtr<ID3D12RootSignature> m_rootSignature;
     bool m_isCompute = false;
+
+    // Descriptor set support
+    bool m_usesDescriptorSets = false;
+    SSetRootParamInfo m_setBindings[4];
+    IDescriptorSetLayout* m_expectedLayouts[4] = {nullptr, nullptr, nullptr, nullptr};
 };
 
 // ============================================

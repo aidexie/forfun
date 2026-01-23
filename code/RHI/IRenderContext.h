@@ -20,6 +20,9 @@ struct RayTracingPipelineDesc;
 struct ShaderBindingTableDesc;
 struct AccelerationStructurePrebuildInfo;
 
+// Forward declaration for descriptor sets
+class IDescriptorSetAllocator;
+
 class IRenderContext {
 public:
     virtual ~IRenderContext() = default;
@@ -146,6 +149,14 @@ public:
     // Execute pending commands and wait for GPU completion
     // Use sparingly - primarily for offline baking operations
     virtual void ExecuteAndWait() = 0;
+
+    // ============================================
+    // Descriptor Set Allocator (DX12/Vulkan only)
+    // ============================================
+
+    // Get the descriptor set allocator for this context
+    // Returns nullptr on DX11 (descriptor sets not supported)
+    virtual IDescriptorSetAllocator* GetDescriptorSetAllocator() = 0;
 
     // ============================================
     // Ray Tracing (DXR)
