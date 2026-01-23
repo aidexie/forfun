@@ -57,8 +57,11 @@ public:
     // Synchronous Execution (no-op for DX11 since it's already immediate)
     void ExecuteAndWait() override;
 
-    // Descriptor Set Allocator (stub - DX11 doesn't support descriptor sets)
-    IDescriptorSetAllocator* GetDescriptorSetAllocator() override { return nullptr; }
+    // Descriptor Set API (stubs - DX11 doesn't support descriptor sets)
+    IDescriptorSetLayout* CreateDescriptorSetLayout(const BindingLayoutDesc&) override { return nullptr; }
+    void DestroyDescriptorSetLayout(IDescriptorSetLayout*) override {}
+    IDescriptorSet* AllocateDescriptorSet(IDescriptorSetLayout*) override { return nullptr; }
+    void FreeDescriptorSet(IDescriptorSet*) override {}
 
     // Ray Tracing (stubs - DX11 doesn't support ray tracing)
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override { return {}; }

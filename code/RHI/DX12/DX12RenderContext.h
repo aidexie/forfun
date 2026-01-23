@@ -68,8 +68,11 @@ public:
     // Synchronous Execution
     void ExecuteAndWait() override;
 
-    // Descriptor Set Allocator
-    IDescriptorSetAllocator* GetDescriptorSetAllocator() override;
+    // Descriptor Set API
+    IDescriptorSetLayout* CreateDescriptorSetLayout(const BindingLayoutDesc& desc) override;
+    void DestroyDescriptorSetLayout(IDescriptorSetLayout* layout) override;
+    IDescriptorSet* AllocateDescriptorSet(IDescriptorSetLayout* layout) override;
+    void FreeDescriptorSet(IDescriptorSet* set) override;
 
     // Ray Tracing (DXR)
     AccelerationStructurePrebuildInfo GetAccelerationStructurePrebuildInfo(const BLASDesc& desc) override;

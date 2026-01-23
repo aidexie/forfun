@@ -165,11 +165,6 @@ void CDX12RenderContext::BeginFrame() {
     // Reset descriptor staging rings for this frame
     CDX12DescriptorHeapManager::Instance().BeginFrame(frameIndex);
 
-    // Reset descriptor set allocator for this frame
-    if (m_descriptorSetAllocator) {
-        m_descriptorSetAllocator->BeginFrame(frameIndex);
-    }
-
     // Reset command list with current frame's allocator
     m_commandList->Reset(CDX12Context::Instance().GetCurrentCommandAllocator());
 
@@ -1164,8 +1159,24 @@ void CDX12RenderContext::ExecuteAndWait() {
     m_commandList->Reset(ctx.GetCurrentCommandAllocator());
 }
 
-IDescriptorSetAllocator* CDX12RenderContext::GetDescriptorSetAllocator() {
-    return m_descriptorSetAllocator.get();
+IDescriptorSetLayout* CDX12RenderContext::CreateDescriptorSetLayout(const BindingLayoutDesc& desc) {
+    return m_descriptorSetAllocator ? m_descriptorSetAllocator->CreateLayout(desc) : nullptr;
+}
+
+void CDX12RenderContext::DestroyDescriptorSetLayout(IDescriptorSetLayout* layout) {
+    if (m_descriptorSetAllocator && layout) {
+        m_descriptorSetAllocator->DestroyLayout(layout);
+    }
+}
+
+IDescriptorSet* CDX12RenderContext::AllocateDescriptorSet(IDescriptorSetLayout* layout) {
+    return m_descriptorSetAllocator ? m_descriptorSetAllocator->AllocateSet(layout) : nullptr;
+}
+
+void CDX12RenderContext::FreeDescriptorSet(IDescriptorSet* set) {
+    if (m_descriptorSetAllocator && set) {
+        m_descriptorSetAllocator->FreeSet(set);
+    }
 }
 
 ID3D12Device* CDX12RenderContext::GetDevice() const {

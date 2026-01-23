@@ -4,6 +4,7 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
@@ -60,6 +61,19 @@ void CAntiAliasingPass::Shutdown() {
     // FXAA resources
     m_fxaaPS.reset();
     m_fxaaPSO.reset();
+    if (m_fxaaDescSet || m_fxaaLayout) {
+        auto* renderCtx = CRHIManager::Instance().GetRenderContext();
+        if (renderCtx) {
+            if (m_fxaaDescSet) {
+                renderCtx->FreeDescriptorSet(m_fxaaDescSet);
+                m_fxaaDescSet = nullptr;
+            }
+            if (m_fxaaLayout) {
+                renderCtx->DestroyDescriptorSetLayout(m_fxaaLayout);
+                m_fxaaLayout = nullptr;
+            }
+        }
+    }
 
     // SMAA resources
     m_smaaEdgeVS.reset();
@@ -145,10 +159,23 @@ void CAntiAliasingPass::renderFXAA(ICommandList* cmdList,
     // Set vertex buffer
     cmdList->SetVertexBuffer(0, m_fullscreenQuadVB.get(), sizeof(FullscreenVertex), 0);
 
-    // Set resources
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_FXAA));
-    cmdList->SetShaderResource(EShaderStage::Pixel, 0, input);
-    cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
+    // Use descriptor set binding if available (DX12), else fall back to legacy
+    if (m_fxaaDescSet) {
+        // Update bindings on the persistent descriptor set
+        m_fxaaDescSet->Bind({
+            BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_FXAA)),
+            BindingSetItem::Texture_SRV(0, input),
+            BindingSetItem::Sampler(0, m_linearSampler.get())
+        });
+
+        // Bind descriptor set to pipeline (Set 1 = PerPass)
+        cmdList->BindDescriptorSet(1, m_fxaaDescSet);
+    } else {
+        // Legacy binding (DX11 fallback)
+        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_FXAA));
+        cmdList->SetShaderResource(EShaderStage::Pixel, 0, input);
+        cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
+    }
 
     // Draw fullscreen quad
     cmdList->Draw(4, 0);
@@ -309,8 +336,23 @@ void CAntiAliasingPass::createFXAAResources() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx || !m_fullscreenVS) return;
 
+    // Create descriptor set layout for FXAA (PerPass = Set 1 = space1)
+    // Layout: VolatileCBV(b0), Texture_SRV(t0), Sampler(s0)
+    m_fxaaLayout = ctx->CreateDescriptorSetLayout(
+        BindingLayoutDesc("FXAA_PerPass")
+            .AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_FXAA)))
+            .AddItem(BindingLayoutItem::Texture_SRV(0))
+            .AddItem(BindingLayoutItem::Sampler(0))
+    );
+
+    // Allocate persistent descriptor set
+    if (m_fxaaLayout) {
+        m_fxaaDescSet = ctx->AllocateDescriptorSet(m_fxaaLayout);
+    }
+
+    // Compile shader with SM 5.1 for register spaces
     std::string psPath = FFPath::GetSourceDir() + "/Shader/FXAA.ps.hlsl";
-    SCompiledShader psCompiled = CompileShaderFromFile(psPath, "main", "ps_5_0", nullptr, kDebugShaders);
+    SCompiledShader psCompiled = CompileShaderFromFile(psPath, "main", "ps_5_1", nullptr, kDebugShaders);
     if (!psCompiled.success) {
         CFFLog::Error("[AntiAliasing] Failed to compile FXAA.ps.hlsl: %s", psCompiled.errorMessage.c_str());
         return;
@@ -322,10 +364,16 @@ void CAntiAliasingPass::createFXAAResources() {
     psDesc.bytecodeSize = psCompiled.bytecode.size();
     m_fxaaPS.reset(ctx->CreateShader(psDesc));
 
-    // Create FXAA PSO
+    // Create FXAA PSO with descriptor set layout
     PipelineStateDesc psoDesc;
     psoDesc.vertexShader = m_fullscreenVS.get();
     psoDesc.pixelShader = m_fxaaPS.get();
+
+    // Set descriptor set layouts (Set 1 = PerPass)
+    psoDesc.setLayouts[0] = nullptr;        // Set 0: PerFrame (not used)
+    psoDesc.setLayouts[1] = m_fxaaLayout;   // Set 1: PerPass (FXAA bindings)
+    psoDesc.setLayouts[2] = nullptr;        // Set 2: PerMaterial (not used)
+    psoDesc.setLayouts[3] = nullptr;        // Set 3: PerDraw (not used)
 
     psoDesc.inputLayout = {
         { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
@@ -349,7 +397,7 @@ void CAntiAliasingPass::createFXAAResources() {
     m_fxaaPSO.reset(ctx->CreatePipelineState(psoDesc));
 
     if (m_fxaaPSO) {
-        CFFLog::Info("[AntiAliasing] FXAA resources created");
+        CFFLog::Info("[AntiAliasing] FXAA resources created (descriptor set binding)");
     }
 }
 

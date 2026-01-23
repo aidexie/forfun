@@ -21,7 +21,9 @@ struct ShaderBindingTableDesc;
 struct AccelerationStructurePrebuildInfo;
 
 // Forward declaration for descriptor sets
-class IDescriptorSetAllocator;
+class IDescriptorSetLayout;
+class IDescriptorSet;
+class BindingLayoutDesc;
 
 class IRenderContext {
 public:
@@ -151,12 +153,22 @@ public:
     virtual void ExecuteAndWait() = 0;
 
     // ============================================
-    // Descriptor Set Allocator (DX12/Vulkan only)
+    // Descriptor Set API (DX12/Vulkan only)
     // ============================================
+    // These methods return nullptr/no-op on DX11 (descriptor sets not supported).
+    // Use legacy SetShaderResource/SetConstantBuffer for DX11 fallback.
 
-    // Get the descriptor set allocator for this context
-    // Returns nullptr on DX11 (descriptor sets not supported)
-    virtual IDescriptorSetAllocator* GetDescriptorSetAllocator() = 0;
+    // Create a descriptor set layout from binding descriptions
+    virtual IDescriptorSetLayout* CreateDescriptorSetLayout(const BindingLayoutDesc& desc) = 0;
+
+    // Destroy a layout created by CreateDescriptorSetLayout
+    virtual void DestroyDescriptorSetLayout(IDescriptorSetLayout* layout) = 0;
+
+    // Allocate a descriptor set from a layout (user manages lifetime)
+    virtual IDescriptorSet* AllocateDescriptorSet(IDescriptorSetLayout* layout) = 0;
+
+    // Free a descriptor set
+    virtual void FreeDescriptorSet(IDescriptorSet* set) = 0;
 
     // ============================================
     // Ray Tracing (DXR)
