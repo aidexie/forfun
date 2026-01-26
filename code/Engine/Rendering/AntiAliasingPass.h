@@ -4,6 +4,11 @@
 #include "RHI/ICommandList.h"
 #include <cstdint>
 
+// Forward declarations
+namespace RHI {
+class IDescriptorSetLayout;
+}
+
 struct SAntiAliasingSettings;
 enum class EAntiAliasingMode : int;
 
@@ -50,6 +55,8 @@ private:
     // FXAA resources
     RHI::ShaderPtr m_fxaaPS;
     RHI::PipelineStatePtr m_fxaaPSO;
+    RHI::IDescriptorSetLayout* m_fxaaLayout = nullptr;  // Owned by allocator
+    RHI::IDescriptorSet* m_fxaaDescSet = nullptr;       // Owned by allocator
 
     // SMAA resources (3-pass) - each pass has its own VS for pre-calculated offsets
     RHI::ShaderPtr m_smaaEdgeVS;

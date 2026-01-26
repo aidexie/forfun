@@ -204,15 +204,11 @@ public:
     // Destroy a layout created by CreateLayout
     virtual void DestroyLayout(IDescriptorSetLayout* layout) = 0;
 
-    // Allocate sets
-    virtual IDescriptorSet* AllocatePersistentSet(IDescriptorSetLayout* layout) = 0;
-    virtual IDescriptorSet* AllocateTransientSet(IDescriptorSetLayout* layout) = 0;
+    // Allocate descriptor set (user manages lifetime)
+    virtual IDescriptorSet* AllocateSet(IDescriptorSetLayout* layout) = 0;
 
-    // Free persistent set (transient sets auto-freed at frame end)
-    virtual void FreePersistentSet(IDescriptorSet* set) = 0;
-
-    // Frame boundary - resets transient allocations
-    virtual void BeginFrame(uint32_t frameIndex) = 0;
+    // Free a descriptor set
+    virtual void FreeSet(IDescriptorSet* set) = 0;
 };
 
 } // namespace RHI

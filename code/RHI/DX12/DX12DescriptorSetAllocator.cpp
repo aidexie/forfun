@@ -14,13 +14,8 @@ bool CDX12DescriptorSetAllocator::Initialize(ID3D12Device* device) {
 }
 
 void CDX12DescriptorSetAllocator::Shutdown() {
-    // Clear all transient sets
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        m_transientSets[i].clear();
-    }
-
-    // Clear persistent sets
-    m_persistentSets.clear();
+    // Clear all sets
+    m_sets.clear();
 
     // Clear layouts
     m_layouts.clear();
@@ -49,51 +44,31 @@ void CDX12DescriptorSetAllocator::DestroyLayout(IDescriptorSetLayout* layout) {
     CFFLog::Warning("DestroyLayout: Layout not found in allocator");
 }
 
-IDescriptorSet* CDX12DescriptorSetAllocator::AllocatePersistentSet(IDescriptorSetLayout* layout) {
+IDescriptorSet* CDX12DescriptorSetAllocator::AllocateSet(IDescriptorSetLayout* layout) {
     if (!layout) {
-        CFFLog::Error("AllocatePersistentSet: layout is null");
+        CFFLog::Error("AllocateSet: layout is null");
         return nullptr;
     }
 
     auto* dx12Layout = static_cast<CDX12DescriptorSetLayout*>(layout);
     auto set = std::make_unique<CDX12DescriptorSet>(dx12Layout, true);
     IDescriptorSet* ptr = set.get();
-    m_persistentSets.push_back(std::move(set));
+    m_sets.push_back(std::move(set));
     return ptr;
 }
 
-IDescriptorSet* CDX12DescriptorSetAllocator::AllocateTransientSet(IDescriptorSetLayout* layout) {
-    if (!layout) {
-        CFFLog::Error("AllocateTransientSet: layout is null");
-        return nullptr;
-    }
-
-    auto* dx12Layout = static_cast<CDX12DescriptorSetLayout*>(layout);
-    auto set = std::make_unique<CDX12DescriptorSet>(dx12Layout, false);
-    IDescriptorSet* ptr = set.get();
-    m_transientSets[m_currentFrameIndex].push_back(std::move(set));
-    return ptr;
-}
-
-void CDX12DescriptorSetAllocator::FreePersistentSet(IDescriptorSet* set) {
+void CDX12DescriptorSetAllocator::FreeSet(IDescriptorSet* set) {
     if (!set) return;
 
     // Find and remove the set
-    for (auto it = m_persistentSets.begin(); it != m_persistentSets.end(); ++it) {
+    for (auto it = m_sets.begin(); it != m_sets.end(); ++it) {
         if (it->get() == set) {
-            m_persistentSets.erase(it);
+            m_sets.erase(it);
             return;
         }
     }
 
-    CFFLog::Warning("FreePersistentSet: Set not found in allocator");
-}
-
-void CDX12DescriptorSetAllocator::BeginFrame(uint32_t frameIndex) {
-    m_currentFrameIndex = frameIndex % MAX_FRAMES_IN_FLIGHT;
-
-    // Clear transient sets from this frame slot (they were used 3 frames ago)
-    m_transientSets[m_currentFrameIndex].clear();
+    CFFLog::Warning("FreeSet: Set not found in allocator");
 }
 
 } // namespace DX12

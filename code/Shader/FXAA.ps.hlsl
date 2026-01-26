@@ -1,8 +1,11 @@
 // FXAA 3.11 - Fast Approximate Anti-Aliasing
 // Single-pass algorithm detecting edges via local contrast and applying directional blur.
 // Reference: Timothy Lottes (NVIDIA, 2009)
+//
+// SM 5.1 with register spaces for descriptor set binding
+// Uses space1 (PerPass) for all bindings
 
-cbuffer CB_FXAA : register(b0) {
+cbuffer CB_FXAA : register(b0, space1) {
     float2 gRcpFrame;           // 1.0 / resolution
     float gSubpixelQuality;     // Subpixel AA quality (0.0 = off, 1.0 = max blur)
     float gEdgeThreshold;       // Edge detection threshold (0.063 - 0.333)
@@ -10,8 +13,8 @@ cbuffer CB_FXAA : register(b0) {
     float3 _pad;
 };
 
-Texture2D<float4> gInputTexture : register(t0);
-SamplerState gLinearSampler : register(s0);
+Texture2D<float4> gInputTexture : register(t0, space1);
+SamplerState gLinearSampler : register(s0, space1);
 
 float RGBToLuma(float3 rgb) {
     return dot(rgb, float3(0.299, 0.587, 0.114));

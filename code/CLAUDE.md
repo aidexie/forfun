@@ -23,6 +23,29 @@ Edit(file_path: "E:/forfun/source/code/file.cpp", ...)  // ❌ WRONG
 
 ---
 
+## Development Environment: Claude Code CLI + VS Code on Windows
+
+**Platform**: Windows with VS Code
+
+**Setup**:
+1. Install Claude Code CLI globally via npm: `npm install -g @anthropic-ai/claude-code`
+2. Open VS Code integrated terminal (`` Ctrl+` ``)
+3. Navigate to project directory and run `claude`
+
+**Recommended VS Code Shortcuts** (add to `keybindings.json`):
+```json
+[
+  { "key": "ctrl+shift+c", "command": "workbench.action.terminal.sendSequence", "args": { "text": "claude\n" } }
+]
+```
+
+**Tips**:
+- Use VS Code's integrated terminal for seamless file navigation
+- Claude Code respects `.gitignore` and project structure
+- Terminal output supports clickable file paths for quick navigation
+
+---
+
 ## Core Working Principles
 
 ### **TOP 0: E:\forfun Path Permission**
@@ -323,4 +346,4 @@ CFFLog::Error("Buffer creation failed");      // Errors
 
 ---
 
-**Last Updated**: 2025-12-17
+**Last Updated**: 2026-01-26

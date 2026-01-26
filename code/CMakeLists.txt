@@ -300,6 +300,7 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestAntiAliasing.cpp
     ${CODE_PATH}/Tests/TestRDGBasic.cpp
     ${CODE_PATH}/Tests/TestDeferredStress.cpp
+    ${CODE_PATH}/Tests/TestDescriptorSet.cpp
 )
 
 add_executable(forfun WIN32
@@ -505,6 +506,9 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/DoFBlurH.ps.hlsl
     ${CODE_PATH}/Shader/DoFBlurV.ps.hlsl
     ${CODE_PATH}/Shader/DoFComposite.ps.hlsl
+    # SM 5.1 shaders (descriptor sets with register spaces)
+    ${CODE_PATH}/Shader/TestDescriptorSet.vs.hlsl
+    ${CODE_PATH}/Shader/TestDescriptorSet.ps.hlsl
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})
@@ -550,7 +554,6 @@ if (MSVC)
         ${CODE_PATH}/Shader/EquirectToCubemap.ps.hlsl
         ${CODE_PATH}/Shader/DebugLine.ps.hlsl
         ${CODE_PATH}/Shader/Grid.ps.hlsl
-        ${CODE_PATH}/Shader/FXAA.ps.hlsl
         ${CODE_PATH}/Shader/SMAAEdgeDetection.ps.hlsl
         ${CODE_PATH}/Shader/SMAABlendingWeight.ps.hlsl
         ${CODE_PATH}/Shader/SMAANeighborhoodBlend.ps.hlsl
@@ -562,6 +565,25 @@ if (MSVC)
         PROPERTIES
         VS_SHADER_TYPE Pixel
         VS_SHADER_MODEL 5.0
+        VS_SHADER_ENTRYPOINT main
+    )
+
+    # SM 5.1 Vertex Shaders (descriptor sets with register spaces)
+    set_source_files_properties(
+        ${CODE_PATH}/Shader/TestDescriptorSet.vs.hlsl
+        PROPERTIES
+        VS_SHADER_TYPE Vertex
+        VS_SHADER_MODEL 5.1
+        VS_SHADER_ENTRYPOINT main
+    )
+
+    # SM 5.1 Pixel Shaders (descriptor sets with register spaces)
+    set_source_files_properties(
+        ${CODE_PATH}/Shader/TestDescriptorSet.ps.hlsl
+        ${CODE_PATH}/Shader/FXAA.ps.hlsl
+        PROPERTIES
+        VS_SHADER_TYPE Pixel
+        VS_SHADER_MODEL 5.1
         VS_SHADER_ENTRYPOINT main
     )
 endif()
