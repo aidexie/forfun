@@ -7,6 +7,8 @@
 #include "RHI/RHIDescriptors.h"
 #include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
+#include "RHI/PerFrameSlots.h"
+#include "RHI/PerPassSlots.h"
 #include <DirectXMath.h>
 
 using namespace DirectX;

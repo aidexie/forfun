@@ -177,6 +177,10 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/RHIManager.cpp
     ${CODE_PATH}/RHI/RHIManager.h
     ${CODE_PATH}/RHI/RHIPointers.h
+    ${CODE_PATH}/RHI/PerFrameSlots.h
+    ${CODE_PATH}/RHI/PerPassSlots.h
+    ${CODE_PATH}/RHI/PerMaterialSlots.h
+    ${CODE_PATH}/RHI/PerDrawSlots.h
     # DX11 Backend (implemented in Phase 0.3)
     ${CODE_PATH}/RHI/DX11/DX11CommandList.cpp
     ${CODE_PATH}/RHI/DX11/DX11CommandList.h
@@ -440,6 +444,8 @@ set(ENGINE_SOURCES
     ${CODE_PATH}/Engine/Rendering/GridPass.h
     ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.h
     ${CODE_PATH}/Engine/Rendering/ClusteredLightingPass.cpp
+    ${CODE_PATH}/Engine/Rendering/IPerFrameContributor.h
+    ${CODE_PATH}/Engine/Rendering/PassLayouts.h
     ${CODE_PATH}/Engine/Rendering/SSAOPass.h
     ${CODE_PATH}/Engine/Rendering/SSAOPass.cpp
     ${CODE_PATH}/Engine/Rendering/HiZPass.h
@@ -507,6 +513,7 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/DoFBlurV.ps.hlsl
     ${CODE_PATH}/Shader/DoFComposite.ps.hlsl
     # SM 5.1 shaders (descriptor sets with register spaces)
+    ${CODE_PATH}/Shader/Common.hlsli
     ${CODE_PATH}/Shader/TestDescriptorSet.vs.hlsl
     ${CODE_PATH}/Shader/TestDescriptorSet.ps.hlsl
 )
