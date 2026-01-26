@@ -1,5 +1,6 @@
 #pragma once
 #include "RHI/RHIPointers.h"
+#include "IPerFrameContributor.h"
 #include <DirectXMath.h>
 #include <vector>
 #include <array>
@@ -12,6 +13,7 @@
 // Forward declarations
 namespace RHI {
     class ICommandList;
+    class IDescriptorSet;
 }
 
 class CScene;
@@ -204,7 +206,7 @@ struct CB_VolumetricLightmap
 // ============================================
 // CVolumetricLightmap - 主管理类
 // ============================================
-class CVolumetricLightmap
+class CVolumetricLightmap : public IPerFrameContributor
 {
 public:
     // ============================================
@@ -271,6 +273,9 @@ public:
 
     // 解绑
     void Unbind(RHI::ICommandList* cmdList);
+
+    // IPerFrameContributor implementation
+    void PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet) override;
 
     // ============================================
     // 序列化

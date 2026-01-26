@@ -3,13 +3,18 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
+#include "RHI/PerFrameSlots.h"
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
+#include "Core/RenderConfig.h"
 #include "Engine/Scene.h"
 #include "Engine/GameObject.h"
 #include "Engine/Camera.h"
 #include "Engine/Components/DirectionalLight.h"
+#include "Engine/Rendering/VolumetricLightmap.h"
+#include "Engine/Rendering/ReflectionProbeManager.h"
 
 using namespace DirectX;
 using namespace RHI;
@@ -184,6 +189,9 @@ bool CDeferredRenderPipeline::Initialize()
     // Initialize debug visualization
     initDebugVisualization();
 
+    // Create PerFrame descriptor set for descriptor set-based passes
+    createPerFrameDescriptorSet();
+
     CFFLog::Info("DeferredRenderPipeline initialized");
     return true;
 }
@@ -215,6 +223,24 @@ void CDeferredRenderPipeline::Shutdown()
     m_debugVS.reset();
     m_debugPS.reset();
     m_debugSampler.reset();
+
+    // Cleanup PerFrame descriptor set
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perFrameSet) {
+            ctx->FreeDescriptorSet(m_perFrameSet);
+            m_perFrameSet = nullptr;
+        }
+        if (m_perFrameLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perFrameLayout);
+            m_perFrameLayout = nullptr;
+        }
+    }
+    m_linearClampSampler.reset();
+    m_linearWrapSampler.reset();
+    m_pointClampSampler.reset();
+    m_shadowCmpSampler.reset();
+    m_anisoSampler.reset();
 
     m_offHDR.reset();
     m_offLDR.reset();
@@ -400,11 +426,23 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
         bool runLighting = (debugMode == EGBufferDebugMode::None || isSSRDebug);
 
         if (runLighting) {
-            // Full deferred lighting
-            m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
-                                  m_offHDR.get(), ctx.width, ctx.height,
-                                  &m_shadowPass, &m_clusteredLighting,
-                                  ssaoTexture);
+            // Use descriptor set API if available (DX12), otherwise fall back to legacy
+            if (m_perFrameSet && m_lightingPass.IsDescriptorSetModeAvailable()) {
+                // Populate PerFrame set with current frame data
+                populatePerFrameSet(ctx, shadowData);
+
+                // Full deferred lighting with descriptor sets
+                m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
+                                      m_offHDR.get(), ctx.width, ctx.height,
+                                      &m_shadowPass, m_perFrameSet,
+                                      ssaoTexture);
+            } else {
+                // Legacy path (DX11 or fallback)
+                m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
+                                      m_offHDR.get(), ctx.width, ctx.height,
+                                      &m_shadowPass, &m_clusteredLighting,
+                                      ssaoTexture);
+            }
         } else {
             // Non-SSR debug modes: clear HDR to black
             ITexture* hdrRT = m_offHDR.get();
@@ -765,4 +803,163 @@ void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
         desc.clearColor[3] = 1.0f;
         m_offLDR_PreAA.reset(rhiCtx->CreateTexture(desc, nullptr));
     }
+}
+
+void CDeferredRenderPipeline::createPerFrameDescriptorSet()
+{
+    using namespace PerFrameSlots;
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[DeferredRenderPipeline] DX11 mode - descriptor sets not supported, skipping PerFrame set");
+        return;
+    }
+
+    // Create samplers for PerFrame set
+    {
+        SamplerDesc desc;
+        desc.filter = EFilter::MinMagMipLinear;
+        desc.addressU = ETextureAddressMode::Clamp;
+        desc.addressV = ETextureAddressMode::Clamp;
+        desc.addressW = ETextureAddressMode::Clamp;
+        m_linearClampSampler.reset(ctx->CreateSampler(desc));
+    }
+    {
+        SamplerDesc desc;
+        desc.filter = EFilter::MinMagMipLinear;
+        desc.addressU = ETextureAddressMode::Wrap;
+        desc.addressV = ETextureAddressMode::Wrap;
+        desc.addressW = ETextureAddressMode::Wrap;
+        m_linearWrapSampler.reset(ctx->CreateSampler(desc));
+    }
+    {
+        SamplerDesc desc;
+        desc.filter = EFilter::MinMagMipPoint;
+        desc.addressU = ETextureAddressMode::Clamp;
+        desc.addressV = ETextureAddressMode::Clamp;
+        m_pointClampSampler.reset(ctx->CreateSampler(desc));
+    }
+    {
+        SamplerDesc desc;
+        desc.filter = EFilter::ComparisonMinMagMipLinear;
+        desc.addressU = ETextureAddressMode::Border;
+        desc.addressV = ETextureAddressMode::Border;
+        desc.addressW = ETextureAddressMode::Border;
+        desc.borderColor[0] = 1.0f;
+        desc.borderColor[1] = 1.0f;
+        desc.borderColor[2] = 1.0f;
+        desc.borderColor[3] = 1.0f;
+        desc.comparisonFunc = EComparisonFunc::LessEqual;
+        m_shadowCmpSampler.reset(ctx->CreateSampler(desc));
+    }
+    {
+        SamplerDesc desc;
+        desc.filter = EFilter::Anisotropic;
+        desc.maxAnisotropy = 16;
+        desc.addressU = ETextureAddressMode::Wrap;
+        desc.addressV = ETextureAddressMode::Wrap;
+        desc.addressW = ETextureAddressMode::Wrap;
+        m_anisoSampler.reset(ctx->CreateSampler(desc));
+    }
+
+    // Create PerFrame layout matching PerFrameSlots.h
+    BindingLayoutDesc layoutDesc("PerFrame");
+
+    // Constant buffers (b0-b3)
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(CB::PerFrame, sizeof(RHI::CB_PerFrame)));
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(CB::Clustered, 64));  // CB_ClusteredParams
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(CB::Volumetric, sizeof(CB_VolumetricLightmap)));
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(CB::ReflectionProbe, sizeof(CReflectionProbeManager::CB_Probes)));
+
+    // Global textures (t0-t3)
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::ShadowMapArray));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::BrdfLUT));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::IrradianceArray));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::PrefilteredArray));
+
+    // Clustered lighting (t4-t6)
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightIndexList));
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightGrid));
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightData));
+
+    // Volumetric lightmap (t8-t11)
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_SH_R));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_SH_G));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_SH_B));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_Octree));
+
+    // Reflection probes (t13-t14)
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::ReflectionProbe_Array));
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::ReflectionProbe_Indices));
+
+    // Samplers (s0-s4)
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(Samp::LinearClamp));
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(Samp::LinearWrap));
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(Samp::PointClamp));
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(Samp::ShadowCmp));
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(Samp::Aniso));
+
+    m_perFrameLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+    if (!m_perFrameLayout) {
+        CFFLog::Error("[DeferredRenderPipeline] Failed to create PerFrame layout");
+        return;
+    }
+
+    m_perFrameSet = ctx->AllocateDescriptorSet(m_perFrameLayout);
+    if (!m_perFrameSet) {
+        CFFLog::Error("[DeferredRenderPipeline] Failed to allocate PerFrame set");
+        return;
+    }
+
+    // Bind static samplers
+    m_perFrameSet->Bind({
+        BindingSetItem::Sampler(Samp::LinearClamp, m_linearClampSampler.get()),
+        BindingSetItem::Sampler(Samp::LinearWrap, m_linearWrapSampler.get()),
+        BindingSetItem::Sampler(Samp::PointClamp, m_pointClampSampler.get()),
+        BindingSetItem::Sampler(Samp::ShadowCmp, m_shadowCmpSampler.get()),
+        BindingSetItem::Sampler(Samp::Aniso, m_anisoSampler.get())
+    });
+
+    CFFLog::Info("[DeferredRenderPipeline] PerFrame descriptor set created");
+}
+
+void CDeferredRenderPipeline::populatePerFrameSet(const RenderContext& ctx, const CShadowPass::Output* shadowData)
+{
+    using namespace PerFrameSlots;
+
+    if (!m_perFrameSet) return;
+
+    // Build CB_PerFrame
+    RHI::CB_PerFrame cb = {};
+
+    XMMATRIX view = ctx.camera.GetViewMatrix();
+    XMMATRIX proj = ctx.camera.GetProjectionMatrix();
+    XMMATRIX viewProj = XMMatrixMultiply(view, proj);
+
+    cb.view = XMMatrixTranspose(view);
+    cb.proj = XMMatrixTranspose(proj);
+    cb.viewProj = XMMatrixTranspose(viewProj);
+    cb.invView = XMMatrixTranspose(XMMatrixInverse(nullptr, view));
+    cb.invProj = XMMatrixTranspose(XMMatrixInverse(nullptr, proj));
+    cb.invViewProj = XMMatrixTranspose(XMMatrixInverse(nullptr, viewProj));
+    cb.cameraPos = ctx.camera.position;
+    cb.time = 0.0f;  // TODO: Get from time manager
+    cb.screenSize = { (float)ctx.width, (float)ctx.height };
+    cb.nearZ = ctx.camera.nearZ;
+    cb.farZ = ctx.camera.farZ;
+
+    m_perFrameSet->Bind(BindingSetItem::VolatileCBV(CB::PerFrame, &cb, sizeof(cb)));
+
+    // Bind shadow map
+    if (shadowData && shadowData->shadowMapArray) {
+        m_perFrameSet->Bind(BindingSetItem::Texture_SRV(Tex::ShadowMapArray, shadowData->shadowMapArray));
+    }
+
+    // Let subsystems populate their bindings
+    m_clusteredLighting.PopulatePerFrameSet(m_perFrameSet);
+    ctx.scene.GetVolumetricLightmap().PopulatePerFrameSet(m_perFrameSet);
+    ctx.scene.GetProbeManager().PopulatePerFrameSet(m_perFrameSet);
 }

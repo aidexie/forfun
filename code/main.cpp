@@ -53,11 +53,11 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 // Set this to a test name to auto-run that test on startup (bypasses command line)
 // Set to nullptr or empty string "" to disable and use normal command line parsing
 // Examples:
-//    static const char* CODE_TEST_NAME = nullptr;            // Normal mode
+   static const char* CODE_TEST_NAME = nullptr;            // Normal mode
  //static const char* CODE_TEST_NAME = "TestDXRReadback";
    // static const char* CODE_TEST_NAME = "TestDXRCubemapBaker";
     // static const char* CODE_TEST_NAME = "TestSSAO";
-   static const char* CODE_TEST_NAME = "TestSSR";            // Normal mode
+//    static const char* CODE_TEST_NAME = "TestSSR";            // Normal mode
 
 // -----------------------------------------------------------------------------
 // 全局
@@ -507,10 +507,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
         // Load default scene (deferred for both backends)
         if (!defaultSceneLoaded && !activeTest) {
-            //  std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
+             std::string scenePath = FFPath::GetAbsolutePath("scenes/simple_test_dx12.scene");
             //std::string scenePath = FFPath::GetAbsolutePath("scenes/2d_lightmap_test.scene");
             // std::string scenePath = FFPath::GetAbsolutePath("scenes/volumetric_lightmap_test.scene");
-             std::string scenePath = FFPath::GetAbsolutePath("scenes/ssao_test.scene");
+            //  std::string scenePath = FFPath::GetAbsolutePath("scenes/ssao_test.scene");
             CScene::Instance().LoadFromFile(scenePath);
             defaultSceneLoaded = true;
         }

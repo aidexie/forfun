@@ -23,7 +23,14 @@
 #include "Engine/Rendering/AntiAliasingPass.h"
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIHelpers.h"
+#include "RHI/CB_PerFrame.h"
 #include <DirectXMath.h>
+
+// Forward declarations
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
 
 // ============================================
 // CDeferredRenderPipeline - Deferred Rendering Pipeline
@@ -139,6 +146,21 @@ private:
     RHI::PipelineStatePtr m_debugPSO;
     RHI::SamplerPtr m_debugSampler;
 
+    // ============================================
+    // PerFrame Descriptor Set (Set 0, space0)
+    // ============================================
+    RHI::IDescriptorSetLayout* m_perFrameLayout = nullptr;
+    RHI::IDescriptorSet* m_perFrameSet = nullptr;
+
+    // Samplers for PerFrame set
+    RHI::SamplerPtr m_linearClampSampler;
+    RHI::SamplerPtr m_linearWrapSampler;
+    RHI::SamplerPtr m_pointClampSampler;
+    RHI::SamplerPtr m_shadowCmpSampler;
+    RHI::SamplerPtr m_anisoSampler;
+
     void initDebugVisualization();
     void renderDebugVisualization(uint32_t width, uint32_t height);
+    void createPerFrameDescriptorSet();
+    void populatePerFrameSet(const RenderContext& ctx, const CShadowPass::Output* shadowData);
 };

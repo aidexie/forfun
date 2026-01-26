@@ -1,5 +1,6 @@
 #pragma once
 #include "RHI/RHIPointers.h"
+#include "IPerFrameContributor.h"
 #include <DirectXMath.h>
 #include <string>
 #include <vector>
@@ -8,6 +9,7 @@
 // Forward declarations
 namespace RHI {
     class ICommandList;
+    class IDescriptorSet;
 }
 
 class CScene;
@@ -28,7 +30,7 @@ class CScene;
 // - t4: PrefilteredArray (TextureCubeArray, 128x128, 8 slices)
 // - t5: BRDF LUT (2D texture, 512x512)
 // ============================================
-class CReflectionProbeManager
+class CReflectionProbeManager : public IPerFrameContributor
 {
 public:
     // ============================================
@@ -79,6 +81,9 @@ public:
     // slot 4: PrefilteredArray
     // slot 4 (CB): CB_Probes
     void Bind(RHI::ICommandList* cmdList);
+
+    // IPerFrameContributor implementation
+    void PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet) override;
 
     // 加载/重载全局 Probe（index 0）
     bool LoadGlobalProbe(const std::string& irrPath, const std::string& prefPath);

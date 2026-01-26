@@ -181,6 +181,7 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/PerPassSlots.h
     ${CODE_PATH}/RHI/PerMaterialSlots.h
     ${CODE_PATH}/RHI/PerDrawSlots.h
+    ${CODE_PATH}/RHI/CB_PerFrame.h
     # DX11 Backend (implemented in Phase 0.3)
     ${CODE_PATH}/RHI/DX11/DX11CommandList.cpp
     ${CODE_PATH}/RHI/DX11/DX11CommandList.h

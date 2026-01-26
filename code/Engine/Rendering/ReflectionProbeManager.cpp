@@ -9,6 +9,8 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
+#include "RHI/PerFrameSlots.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <DirectXPackedVector.h>
@@ -147,6 +149,21 @@ void CReflectionProbeManager::Bind(RHI::ICommandList* cmdList)
 
     // b4: CB_Probes (use SetConstantBufferData for DX12 compatibility)
     cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 4, &m_probeData, sizeof(CB_Probes));
+}
+
+void CReflectionProbeManager::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet)
+{
+    using namespace PerFrameSlots;
+
+    if (!perFrameSet || !m_initialized) return;
+
+    // Bind textures to PerFrame set using PerFrameSlots constants
+    perFrameSet->Bind({
+        RHI::BindingSetItem::Texture_SRV(Tex::BrdfLUT, m_brdfLutTexture.get()),
+        RHI::BindingSetItem::Texture_SRV(Tex::IrradianceArray, m_irradianceArray.get()),
+        RHI::BindingSetItem::Texture_SRV(Tex::PrefilteredArray, m_prefilteredArray.get()),
+        RHI::BindingSetItem::VolatileCBV(CB::ReflectionProbe, &m_probeData, sizeof(CB_Probes))
+    });
 }
 
 int CReflectionProbeManager::SelectProbeForPosition(const DirectX::XMFLOAT3& worldPos) const

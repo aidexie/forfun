@@ -9,6 +9,8 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
+#include "RHI/PerFrameSlots.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include <DirectXPackedVector.h>
@@ -1186,6 +1188,52 @@ void CVolumetricLightmap::Unbind(RHI::ICommandList* cmdList)
     cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 14, nullptr);
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, nullptr);
     // Note: SetConstantBufferData uses per-frame ring buffer, no need to unbind
+}
+
+void CVolumetricLightmap::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet)
+{
+    using namespace PerFrameSlots;
+
+    if (!perFrameSet) return;
+
+    // Build CB data
+    CB_VolumetricLightmap cb = {};
+
+    if (m_enabled && m_gpuResourcesCreated && !m_bricks.empty()) {
+        cb.volumeMin = m_config.volumeMin;
+        cb.volumeMax = m_config.volumeMax;
+
+        float invSizeX = 1.0f / (m_config.volumeMax.x - m_config.volumeMin.x);
+        float invSizeY = 1.0f / (m_config.volumeMax.y - m_config.volumeMin.y);
+        float invSizeZ = 1.0f / (m_config.volumeMax.z - m_config.volumeMin.z);
+        cb.volumeInvSize = {invSizeX, invSizeY, invSizeZ};
+
+        float indirInv = 1.0f / m_derived.indirectionResolution;
+        cb.indirectionInvSize = {indirInv, indirInv, indirInv};
+
+        float atlasInv = 1.0f / m_derived.brickAtlasSize;
+        cb.brickAtlasInvSize = {atlasInv, atlasInv, atlasInv};
+
+        cb.indirectionResolution = m_derived.indirectionResolution;
+        cb.brickAtlasSize = m_derived.brickAtlasSize;
+        cb.maxLevel = m_derived.maxLevel;
+        cb.enabled = 1;
+        cb.brickCount = (int)m_bricks.size();
+
+        // Bind textures to PerFrame set using PerFrameSlots constants
+        perFrameSet->Bind({
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_R, m_brickAtlasTexture[0].get()),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_G, m_brickAtlasTexture[1].get()),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_B, m_brickAtlasTexture[2].get()),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_Octree, m_indirectionTexture.get()),
+            RHI::BindingSetItem::VolatileCBV(CB::Volumetric, &cb, sizeof(cb))
+        });
+    } else {
+        // Disabled state - still bind CB with enabled=0
+        cb.enabled = 0;
+        cb.brickCount = 0;
+        perFrameSet->Bind(RHI::BindingSetItem::VolatileCBV(CB::Volumetric, &cb, sizeof(cb)));
+    }
 }
 
 // ============================================
