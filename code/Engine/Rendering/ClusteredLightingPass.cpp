@@ -3,6 +3,7 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
@@ -444,4 +445,17 @@ void CClusteredLightingPass::RenderDebug(ICommandList* cmdList) {
     (void)cmdList;  // Unused for now
     // TODO: Implement debug visualization
     // Will be implemented after basic functionality works
+}
+
+void CClusteredLightingPass::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet) {
+    using namespace PerFrameSlots;
+
+    if (!perFrameSet) return;
+
+    // Bind clustered lighting buffers to PerFrame set
+    perFrameSet->Bind({
+        BindingSetItem::Buffer_SRV(Tex::Clustered_LightGrid, m_clusterDataBuffer.get()),
+        BindingSetItem::Buffer_SRV(Tex::Clustered_LightIndexList, m_compactLightListBuffer.get()),
+        BindingSetItem::Buffer_SRV(Tex::Clustered_LightData, m_pointLightBuffer.get()),
+    });
 }

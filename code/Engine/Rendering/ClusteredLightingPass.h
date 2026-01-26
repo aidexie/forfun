@@ -1,5 +1,7 @@
 #pragma once
 #include "RHI/RHIPointers.h"
+#include "IPerFrameContributor.h"
+#include "RHI/PerFrameSlots.h"
 #include <DirectXMath.h>
 #include <vector>
 #include <cstdint>
@@ -71,7 +73,7 @@ struct alignas(16) CB_ClusteredParams {
 // 2. Cull lights into clusters
 // 3. Provide cluster data to MainPass
 // 4. Debug visualization (optional)
-class CClusteredLightingPass {
+class CClusteredLightingPass : public IPerFrameContributor {
 public:
     CClusteredLightingPass();
     ~CClusteredLightingPass();
@@ -105,6 +107,9 @@ public:
     };
     void SetDebugMode(EDebugMode mode) { m_debugMode = mode; }
     void RenderDebug(RHI::ICommandList* cmdList);
+
+    // IPerFrameContributor implementation
+    void PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet) override;
 
     // Get current cluster grid dimensions
     uint32_t GetNumClustersX() const { return m_numClustersX; }
