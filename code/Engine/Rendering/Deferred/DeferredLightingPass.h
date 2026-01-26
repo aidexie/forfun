@@ -92,10 +92,13 @@ public:
     );
 
     // Check if descriptor set mode is available (DX12 only)
-    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr; }
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
 
     // Get PerPass layout for pipeline creation
     RHI::IDescriptorSetLayout* GetPerPassLayout() const { return m_perPassLayout; }
+
+    // Create PSO with descriptor set layouts (called after PerFrame layout is available)
+    void CreatePSOWithLayouts(RHI::IDescriptorSetLayout* perFrameLayout);
 
 private:
     void initDescriptorSets();

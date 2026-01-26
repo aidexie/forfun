@@ -924,6 +924,9 @@ void CDeferredRenderPipeline::createPerFrameDescriptorSet()
     });
 
     CFFLog::Info("[DeferredRenderPipeline] PerFrame descriptor set created");
+
+    // Now that PerFrame layout is available, create PSOs for passes that need both layouts
+    m_lightingPass.CreatePSOWithLayouts(m_perFrameLayout);
 }
 
 void CDeferredRenderPipeline::populatePerFrameSet(const RenderContext& ctx, const CShadowPass::Output* shadowData)

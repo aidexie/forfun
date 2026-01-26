@@ -2,9 +2,9 @@
 // Deferred Lighting Pixel Shader with Descriptor Sets (SM 5.1)
 // Uses register spaces for clean separation of binding frequencies
 
-#include "Common.hlsli"           // PerFrame bindings (space0)
-#include "ClusteredShading.hlsl"  // Clustered point/spot lights
-#include "VolumetricLightmap.hlsl"
+#include "Common.hlsli"              // PerFrame bindings (space0)
+#include "ClusteredShading_DS.hlsli" // Clustered point/spot lights (DS version)
+#include "VolumetricLightmap_DS.hlsli" // Volumetric lightmap (DS version)
 
 //==============================================
 // Set 1: PerPass (space1) - G-Buffer and pass-specific resources

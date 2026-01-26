@@ -207,9 +207,7 @@ CDX12DescriptorSetLayout::CDX12DescriptorSetLayout(const BindingLayoutDesc& desc
                 m_samplerCount += binding.count;
                 break;
             case EDescriptorType::VolatileCBV:
-                m_hasVolatileCBV = true;
-                m_volatileCBVSize = binding.size;
-                m_volatileCBVSlot = binding.slot;
+                m_volatileCBVs.push_back({binding.slot, binding.size});
                 break;
             case EDescriptorType::ConstantBuffer:
                 m_hasConstantBuffer = true;
@@ -314,9 +312,15 @@ CDX12DescriptorSet::CDX12DescriptorSet(CDX12DescriptorSetLayout* layout, bool is
         for (auto& h : m_samplerHandles) { h.ptr = 0; }
     }
 
-    // Initialize volatile CBV storage
+    // Initialize volatile CBV storage for each CBV in layout
     if (layout->HasVolatileCBV()) {
-        m_volatileCBVData.resize(layout->GetVolatileCBVSize(), 0);
+        const auto& cbvInfos = layout->GetVolatileCBVs();
+        m_volatileCBVs.resize(cbvInfos.size());
+        for (size_t i = 0; i < cbvInfos.size(); ++i) {
+            m_volatileCBVs[i].slot = cbvInfos[i].slot;
+            m_volatileCBVs[i].data.resize(cbvInfos[i].size, 0);
+            m_volatileCBVs[i].bound = false;
+        }
     }
 
     // Initialize push constant storage
@@ -405,9 +409,15 @@ void CDX12DescriptorSet::Bind(const BindingSetItem& item) {
         }
         case EDescriptorType::VolatileCBV: {
             if (item.volatileData && item.volatileDataSize > 0) {
-                size_t copySize = (std::min)(static_cast<size_t>(item.volatileDataSize), m_volatileCBVData.size());
-                std::memcpy(m_volatileCBVData.data(), item.volatileData, copySize);
-                m_volatileCBVBound = true;
+                // Find the CBV entry for this slot
+                for (auto& cbv : m_volatileCBVs) {
+                    if (cbv.slot == item.slot) {
+                        size_t copySize = (std::min)(static_cast<size_t>(item.volatileDataSize), cbv.data.size());
+                        std::memcpy(cbv.data.data(), item.volatileData, copySize);
+                        cbv.bound = true;
+                        break;
+                    }
+                }
             }
             break;
         }
@@ -448,7 +458,11 @@ bool CDX12DescriptorSet::IsComplete() const {
     }
     // Check CBV if required
     if (m_layout->HasConstantBuffer() && !m_constantBufferBound) return false;
-    if (m_layout->HasVolatileCBV() && !m_volatileCBVBound) return false;
+    if (m_layout->HasVolatileCBV()) {
+        for (const auto& cbv : m_volatileCBVs) {
+            if (!cbv.bound) return false;
+        }
+    }
     if (m_layout->HasPushConstants() && !m_pushConstantBound) return false;
 
     return true;
@@ -523,22 +537,35 @@ D3D12_GPU_DESCRIPTOR_HANDLE CDX12DescriptorSet::CopySamplersToStaging(
     return stagingHandle.gpuHandle;
 }
 
-D3D12_GPU_VIRTUAL_ADDRESS CDX12DescriptorSet::AllocateVolatileCBV(CDX12DynamicBufferRing& bufferRing) {
-    if (m_volatileCBVData.empty()) {
-        return 0;
+D3D12_GPU_VIRTUAL_ADDRESS CDX12DescriptorSet::AllocateVolatileCBV(CDX12DynamicBufferRing& bufferRing, uint32_t slot) {
+    // Find CBV entry for this slot
+    for (const auto& cbv : m_volatileCBVs) {
+        if (cbv.slot == slot && !cbv.data.empty()) {
+            // Allocate from ring buffer
+            SDynamicAllocation alloc = bufferRing.Allocate(cbv.data.size());
+            if (!alloc.IsValid()) {
+                assert(false && "Dynamic buffer ring overflow");
+                return 0;
+            }
+
+            // Copy data
+            std::memcpy(alloc.cpuAddress, cbv.data.data(), cbv.data.size());
+
+            return alloc.gpuAddress;
+        }
     }
+    return 0;
+}
 
-    // Allocate from ring buffer
-    SDynamicAllocation alloc = bufferRing.Allocate(m_volatileCBVData.size());
-    if (!alloc.IsValid()) {
-        assert(false && "Dynamic buffer ring overflow");
-        return 0;
+uint32_t CDX12DescriptorSet::GetVolatileCBVCount() const {
+    return static_cast<uint32_t>(m_volatileCBVs.size());
+}
+
+uint32_t CDX12DescriptorSet::GetVolatileCBVSlot(uint32_t index) const {
+    if (index < m_volatileCBVs.size()) {
+        return m_volatileCBVs[index].slot;
     }
-
-    // Copy data
-    std::memcpy(alloc.cpuAddress, m_volatileCBVData.data(), m_volatileCBVData.size());
-
-    return alloc.gpuAddress;
+    return UINT32_MAX;
 }
 
 } // namespace DX12

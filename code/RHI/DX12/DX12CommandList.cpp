@@ -591,17 +591,23 @@ void CDX12CommandList::BindDescriptorSet(uint32_t setIndex, IDescriptorSet* set)
         }
     }
 
-    // Bind Volatile CBV if present (root CBV)
-    if (bindingInfo.volatileCBVRootParam != UINT32_MAX && dx12Set->HasVolatileCBV()) {
+    // Bind Volatile CBVs if present (multiple root CBVs supported)
+    if (bindingInfo.volatileCBVCount > 0 && dx12Set->HasVolatileCBV()) {
         if (!m_dynamicBuffer) {
             CFFLog::Error("[DX12CommandList] BindDescriptorSet: No dynamic buffer ring for volatile CBV");
         } else {
-            D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = dx12Set->AllocateVolatileCBV(*m_dynamicBuffer);
-            if (gpuAddress != 0) {
-                if (isCompute) {
-                    m_commandList->SetComputeRootConstantBufferView(bindingInfo.volatileCBVRootParam, gpuAddress);
-                } else {
-                    m_commandList->SetGraphicsRootConstantBufferView(bindingInfo.volatileCBVRootParam, gpuAddress);
+            for (uint32_t i = 0; i < bindingInfo.volatileCBVCount && i < SSetRootParamInfo::MAX_VOLATILE_CBVS; ++i) {
+                uint32_t rootParam = bindingInfo.volatileCBVRootParams[i];
+                uint32_t slot = bindingInfo.volatileCBVSlots[i];
+                if (rootParam != UINT32_MAX) {
+                    D3D12_GPU_VIRTUAL_ADDRESS gpuAddress = dx12Set->AllocateVolatileCBV(*m_dynamicBuffer, slot);
+                    if (gpuAddress != 0) {
+                        if (isCompute) {
+                            m_commandList->SetComputeRootConstantBufferView(rootParam, gpuAddress);
+                        } else {
+                            m_commandList->SetGraphicsRootConstantBufferView(rootParam, gpuAddress);
+                        }
+                    }
                 }
             }
         }

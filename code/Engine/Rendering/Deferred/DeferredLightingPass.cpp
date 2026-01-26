@@ -278,6 +278,41 @@ void CDeferredLightingPass::initDescriptorSets()
     CFFLog::Info("[DeferredLightingPass] Descriptor set resources initialized");
 }
 
+void CDeferredLightingPass::CreatePSOWithLayouts(IDescriptorSetLayout* perFrameLayout)
+{
+    if (!m_perPassLayout || !perFrameLayout || !m_vs || !m_ps_ds) {
+        CFFLog::Warning("[DeferredLightingPass] Cannot create PSO with layouts - missing resources");
+        return;
+    }
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs.get();
+    psoDesc.pixelShader = m_ps_ds.get();
+    psoDesc.inputLayout = {};
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.depthStencil.depthEnable = false;
+    psoDesc.blend.blendEnable = false;
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+    psoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+    psoDesc.depthStencilFormat = ETextureFormat::Unknown;
+    psoDesc.debugName = "DeferredLighting_DS_PSO";
+
+    // Set descriptor set layouts
+    psoDesc.setLayouts[0] = perFrameLayout;  // Set 0: PerFrame (space0)
+    psoDesc.setLayouts[1] = m_perPassLayout; // Set 1: PerPass (space1)
+
+    m_pso_ds.reset(ctx->CreatePipelineState(psoDesc));
+
+    if (m_pso_ds) {
+        CFFLog::Info("[DeferredLightingPass] PSO with descriptor set layouts created");
+    } else {
+        CFFLog::Error("[DeferredLightingPass] Failed to create PSO with descriptor set layouts");
+    }
+}
+
 void CDeferredLightingPass::Shutdown()
 {
     m_pso.reset();

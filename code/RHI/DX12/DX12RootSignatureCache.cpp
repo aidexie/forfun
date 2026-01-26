@@ -112,18 +112,24 @@ CDX12RootSignatureCache::CacheEntry CDX12RootSignatureCache::BuildRootSignature(
             rootParams.push_back(param);
         }
 
-        // Add Volatile CBV (root CBV) - second priority
+        // Add Volatile CBVs (root CBVs) - multiple supported
         if (dx12Layout->HasVolatileCBV()) {
-            entry.setBindings[setIndex].volatileCBVSize = dx12Layout->GetVolatileCBVSize();
-            entry.setBindings[setIndex].volatileCBVRootParam = static_cast<uint32_t>(rootParams.size());
+            const auto& volatileCBVs = dx12Layout->GetVolatileCBVs();
+            entry.setBindings[setIndex].volatileCBVCount = static_cast<uint32_t>(volatileCBVs.size());
 
-            D3D12_ROOT_PARAMETER1 param = {};
-            param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-            param.Descriptor.ShaderRegister = dx12Layout->GetVolatileCBVSlot();
-            param.Descriptor.RegisterSpace = setIndex;
-            param.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
-            param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-            rootParams.push_back(param);
+            for (uint32_t i = 0; i < volatileCBVs.size() && i < SSetRootParamInfo::MAX_VOLATILE_CBVS; ++i) {
+                entry.setBindings[setIndex].volatileCBVSlots[i] = volatileCBVs[i].slot;
+                entry.setBindings[setIndex].volatileCBVSizes[i] = volatileCBVs[i].size;
+                entry.setBindings[setIndex].volatileCBVRootParams[i] = static_cast<uint32_t>(rootParams.size());
+
+                D3D12_ROOT_PARAMETER1 param = {};
+                param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+                param.Descriptor.ShaderRegister = volatileCBVs[i].slot;
+                param.Descriptor.RegisterSpace = setIndex;
+                param.Descriptor.Flags = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+                param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+                rootParams.push_back(param);
+            }
         }
 
         // Add Static Constant Buffer (root CBV)
