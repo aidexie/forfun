@@ -1,4 +1,5 @@
 #include "AntiAliasingPass.h"
+#include "PassLayouts.h"
 #include "SMAALookupTextures.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
@@ -337,13 +338,8 @@ void CAntiAliasingPass::createFXAAResources() {
     if (!ctx || !m_fullscreenVS) return;
 
     // Create descriptor set layout for FXAA (PerPass = Set 1 = space1)
-    // Layout: VolatileCBV(b0), Texture_SRV(t0), Sampler(s0)
-    m_fxaaLayout = ctx->CreateDescriptorSetLayout(
-        BindingLayoutDesc("FXAA_PerPass")
-            .AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_FXAA)))
-            .AddItem(BindingLayoutItem::Texture_SRV(0))
-            .AddItem(BindingLayoutItem::Sampler(0))
-    );
+    // Uses PassLayouts factory with PerPassSlots constants
+    m_fxaaLayout = PassLayouts::CreateFXAALayout(ctx, sizeof(CB_FXAA));
 
     // Allocate persistent descriptor set
     if (m_fxaaLayout) {
