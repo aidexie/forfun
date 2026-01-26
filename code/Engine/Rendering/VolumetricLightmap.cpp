@@ -13,6 +13,7 @@
 #include "RHI/PerFrameSlots.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
+#include "Core/TextureManager.h"
 #include <DirectXPackedVector.h>
 #include <cmath>
 #include <cfloat>
@@ -1229,10 +1230,19 @@ void CVolumetricLightmap::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet)
             RHI::BindingSetItem::VolatileCBV(CB::Volumetric, &cb, sizeof(cb))
         });
     } else {
-        // Disabled state - still bind CB with enabled=0
+        // Disabled state - still bind CB with enabled=0 and fallback textures
         cb.enabled = 0;
         cb.brickCount = 0;
-        perFrameSet->Bind(RHI::BindingSetItem::VolatileCBV(CB::Volumetric, &cb, sizeof(cb)));
+
+        // Bind black textures as fallback to ensure all slots are valid
+        auto* blackTex = CTextureManager::Instance().GetDefaultBlack().get();
+        perFrameSet->Bind({
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_R, blackTex),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_G, blackTex),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_B, blackTex),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_Octree, blackTex),
+            RHI::BindingSetItem::VolatileCBV(CB::Volumetric, &cb, sizeof(cb))
+        });
     }
 }
 

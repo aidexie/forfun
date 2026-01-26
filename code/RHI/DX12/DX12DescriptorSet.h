@@ -5,6 +5,7 @@
 #include "../IDescriptorSet.h"
 #include <vector>
 #include <cstring>
+#include <unordered_map>
 
 // ============================================
 // DX12 Descriptor Set Implementation
@@ -108,6 +109,17 @@ private:
     uint32_t m_constantBufferSlot = 0;
     uint32_t m_pushConstantSize = 0;
     uint32_t m_pushConstantSlot = 0;
+
+    // Slot-to-descriptor-index mapping (computed from range offsets)
+    std::unordered_map<uint32_t, uint32_t> m_srvSlotToIndex;
+    std::unordered_map<uint32_t, uint32_t> m_uavSlotToIndex;
+    std::unordered_map<uint32_t, uint32_t> m_samplerSlotToIndex;
+
+public:
+    // Get descriptor array index for a slot. Returns false if slot not in layout.
+    bool GetSRVIndex(uint32_t slot, uint32_t& outIndex) const;
+    bool GetUAVIndex(uint32_t slot, uint32_t& outIndex) const;
+    bool GetSamplerIndex(uint32_t slot, uint32_t& outIndex) const;
 };
 
 // ============================================

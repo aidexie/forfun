@@ -891,9 +891,9 @@ void CDeferredRenderPipeline::createPerFrameDescriptorSet()
     layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_SH_B));
     layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_Octree));
 
-    // Reflection probes (t13-t14)
-    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::ReflectionProbe_Array));
-    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::ReflectionProbe_Indices));
+    // Note: ReflectionProbe_Array (t13) and ReflectionProbe_Indices (t14) are reserved
+    // for future per-object probe selection but not yet implemented.
+    // They are intentionally omitted from the layout to avoid null descriptor handles.
 
     // Samplers (s0-s4)
     layoutDesc.AddItem(BindingLayoutItem::Sampler(Samp::LinearClamp));

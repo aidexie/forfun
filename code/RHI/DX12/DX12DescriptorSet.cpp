@@ -220,6 +220,64 @@ CDX12DescriptorSetLayout::CDX12DescriptorSetLayout(const BindingLayoutDesc& desc
                 break;
         }
     }
+
+    // Build slot-to-index mappings using NVRHI pattern:
+    // Each binding gets a contiguous offset based on declaration order
+    uint32_t srvOffset = 0;
+    uint32_t uavOffset = 0;
+    uint32_t samplerOffset = 0;
+
+    for (const auto& binding : m_bindings) {
+        switch (binding.type) {
+            case EDescriptorType::Texture_SRV:
+            case EDescriptorType::Buffer_SRV:
+            case EDescriptorType::AccelerationStructure:
+                for (uint32_t i = 0; i < binding.count; ++i) {
+                    m_srvSlotToIndex[binding.slot + i] = srvOffset++;
+                }
+                break;
+            case EDescriptorType::Texture_UAV:
+            case EDescriptorType::Buffer_UAV:
+                for (uint32_t i = 0; i < binding.count; ++i) {
+                    m_uavSlotToIndex[binding.slot + i] = uavOffset++;
+                }
+                break;
+            case EDescriptorType::Sampler:
+                for (uint32_t i = 0; i < binding.count; ++i) {
+                    m_samplerSlotToIndex[binding.slot + i] = samplerOffset++;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+bool CDX12DescriptorSetLayout::GetSRVIndex(uint32_t slot, uint32_t& outIndex) const {
+    auto it = m_srvSlotToIndex.find(slot);
+    if (it != m_srvSlotToIndex.end()) {
+        outIndex = it->second;
+        return true;
+    }
+    return false;
+}
+
+bool CDX12DescriptorSetLayout::GetUAVIndex(uint32_t slot, uint32_t& outIndex) const {
+    auto it = m_uavSlotToIndex.find(slot);
+    if (it != m_uavSlotToIndex.end()) {
+        outIndex = it->second;
+        return true;
+    }
+    return false;
+}
+
+bool CDX12DescriptorSetLayout::GetSamplerIndex(uint32_t slot, uint32_t& outIndex) const {
+    auto it = m_samplerSlotToIndex.find(slot);
+    if (it != m_samplerSlotToIndex.end()) {
+        outIndex = it->second;
+        return true;
+    }
+    return false;
 }
 
 uint32_t CDX12DescriptorSetLayout::PopulateSRVRanges(D3D12_DESCRIPTOR_RANGE1* ranges, uint32_t registerSpace) const {
@@ -344,9 +402,10 @@ void CDX12DescriptorSet::Bind(const BindingSetItem& item) {
                 } else {
                     handle = dx12Tex->GetOrCreateSRV();
                 }
-                if (item.slot < m_srvHandles.size()) {
-                    m_srvHandles[item.slot] = handle.cpuHandle;
-                    m_srvBound[item.slot] = true;
+                uint32_t index;
+                if (m_layout->GetSRVIndex(item.slot, index)) {
+                    m_srvHandles[index] = handle.cpuHandle;
+                    m_srvBound[index] = true;
                 }
             }
             break;
@@ -355,9 +414,10 @@ void CDX12DescriptorSet::Bind(const BindingSetItem& item) {
             if (item.buffer) {
                 auto* dx12Buf = static_cast<CDX12Buffer*>(item.buffer);
                 SDescriptorHandle handle = dx12Buf->GetSRV();
-                if (item.slot < m_srvHandles.size()) {
-                    m_srvHandles[item.slot] = handle.cpuHandle;
-                    m_srvBound[item.slot] = true;
+                uint32_t index;
+                if (m_layout->GetSRVIndex(item.slot, index)) {
+                    m_srvHandles[index] = handle.cpuHandle;
+                    m_srvBound[index] = true;
                 }
             }
             break;
@@ -371,9 +431,10 @@ void CDX12DescriptorSet::Bind(const BindingSetItem& item) {
                 } else {
                     handle = dx12Tex->GetOrCreateUAV();
                 }
-                if (item.slot < m_uavHandles.size()) {
-                    m_uavHandles[item.slot] = handle.cpuHandle;
-                    m_uavBound[item.slot] = true;
+                uint32_t index;
+                if (m_layout->GetUAVIndex(item.slot, index)) {
+                    m_uavHandles[index] = handle.cpuHandle;
+                    m_uavBound[index] = true;
                 }
             }
             break;
@@ -382,9 +443,10 @@ void CDX12DescriptorSet::Bind(const BindingSetItem& item) {
             if (item.buffer) {
                 auto* dx12Buf = static_cast<CDX12Buffer*>(item.buffer);
                 SDescriptorHandle handle = dx12Buf->GetUAV();
-                if (item.slot < m_uavHandles.size()) {
-                    m_uavHandles[item.slot] = handle.cpuHandle;
-                    m_uavBound[item.slot] = true;
+                uint32_t index;
+                if (m_layout->GetUAVIndex(item.slot, index)) {
+                    m_uavHandles[index] = handle.cpuHandle;
+                    m_uavBound[index] = true;
                 }
             }
             break;
@@ -392,9 +454,10 @@ void CDX12DescriptorSet::Bind(const BindingSetItem& item) {
         case EDescriptorType::Sampler: {
             if (item.sampler) {
                 auto* dx12Sampler = static_cast<CDX12Sampler*>(item.sampler);
-                if (item.slot < m_samplerHandles.size()) {
-                    m_samplerHandles[item.slot] = dx12Sampler->GetCPUHandle();
-                    m_samplerBound[item.slot] = true;
+                uint32_t index;
+                if (m_layout->GetSamplerIndex(item.slot, index)) {
+                    m_samplerHandles[index] = dx12Sampler->GetCPUHandle();
+                    m_samplerBound[index] = true;
                 }
             }
             break;
