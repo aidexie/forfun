@@ -401,6 +401,23 @@ void CDeferredLightingPass::Render(
     // Update PerPass bindings
     using namespace PerPassSlots;
 
+    // Transition G-Buffer textures from RenderTarget to ShaderResource
+    // This is required for descriptor set path since it doesn't auto-transition like legacy SetShaderResource()
+    cmdList->Barrier(gbuffer.GetAlbedoAO(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetNormalRoughness(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetWorldPosMetallic(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetEmissiveMaterialID(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetVelocity(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetDepthBuffer(), EResourceState::DepthWrite, EResourceState::ShaderResource);
+
+    // Transition shadow map from DepthWrite to ShaderResource (bound via PerFrame set)
+    if (shadowPass) {
+        const CShadowPass::Output& shadowOutput = shadowPass->GetOutput();
+        if (shadowOutput.shadowMapArray) {
+            cmdList->Barrier(shadowOutput.shadowMapArray, EResourceState::DepthWrite, EResourceState::ShaderResource);
+        }
+    }
+
     // Rebind G-Buffer (in case of resize)
     m_perPassSet->Bind({
         BindingSetItem::Texture_SRV(Tex::GBuffer_Albedo, gbuffer.GetAlbedoAO()),
