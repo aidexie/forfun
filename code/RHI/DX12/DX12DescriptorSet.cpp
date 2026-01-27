@@ -293,7 +293,11 @@ uint32_t CDX12DescriptorSetLayout::PopulateSRVRanges(D3D12_DESCRIPTOR_RANGE1* ra
             range.NumDescriptors = binding.count;
             range.BaseShaderRegister = binding.slot;
             range.RegisterSpace = registerSpace;
-            range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            // Use DATA_VOLATILE to avoid resource state validation at bind time.
+            // This matches NVRHI's approach: "We don't know how apps will use resources
+            // referenced in a binding set. They may bind a buffer to the command list
+            // and then copy data into it."
+            range.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
             range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
         }
     }
