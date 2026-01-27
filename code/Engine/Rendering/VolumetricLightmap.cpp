@@ -1234,13 +1234,14 @@ void CVolumetricLightmap::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet)
         cb.enabled = 0;
         cb.brickCount = 0;
 
-        // Bind black textures as fallback to ensure all slots are valid
-        auto* blackTex = CTextureManager::Instance().GetDefaultBlack().get();
+        // Bind 3D black textures as fallback to ensure all slots are valid
+        // VolumetricLightmap textures are Texture3D, so we must use a 3D fallback
+        auto* blackTex3D = CTextureManager::Instance().GetDefaultBlack3D().get();
         perFrameSet->Bind({
-            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_R, blackTex),
-            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_G, blackTex),
-            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_B, blackTex),
-            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_Octree, blackTex),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_R, blackTex3D),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_G, blackTex3D),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_SH_B, blackTex3D),
+            RHI::BindingSetItem::Texture_SRV(Tex::Volumetric_Octree, blackTex3D),
             RHI::BindingSetItem::VolatileCBV(CB::Volumetric, &cb, sizeof(cb))
         });
     }

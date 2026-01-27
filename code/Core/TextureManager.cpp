@@ -180,6 +180,10 @@ RHI::TextureSharedPtr CTextureManager::GetDefaultBlack() {
     return m_defaultBlack;
 }
 
+RHI::TextureSharedPtr CTextureManager::GetDefaultBlack3D() {
+    return m_defaultBlack3D;
+}
+
 RHI::TextureSharedPtr CTextureManager::GetPlaceholder() {
     return m_placeholder;
 }
@@ -213,6 +217,7 @@ void CTextureManager::Shutdown() {
     m_defaultWhite.reset();
     m_defaultNormal.reset();
     m_defaultBlack.reset();
+    m_defaultBlack3D.reset();
     m_placeholder.reset();
     CFFLog::Info("TextureManager shutdown complete");
 }
@@ -245,7 +250,22 @@ void CTextureManager::CreateDefaultTextures() {
     m_defaultNormal = RHI::TextureSharedPtr(MakeSolidTexture(128, 128, 255, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
     m_defaultBlack = RHI::TextureSharedPtr(MakeSolidTexture(0, 0, 0, 255, RHI::ETextureFormat::R8G8B8A8_UNORM));
 
-    CFFLog::Info("Created default textures (white, normal, black)");
+    // Create 1x1x1 3D black texture for volumetric fallbacks (VolumetricLightmap, etc.)
+    {
+        uint32_t blackVoxel = 0xFF000000; // RGBA: (0,0,0,255)
+        RHI::TextureDesc desc3D;
+        desc3D.width = 1;
+        desc3D.height = 1;
+        desc3D.depth = 1;
+        desc3D.mipLevels = 1;
+        desc3D.format = RHI::ETextureFormat::R8G8B8A8_UNORM;
+        desc3D.usage = RHI::ETextureUsage::ShaderResource;
+        desc3D.dimension = RHI::ETextureDimension::Tex3D;
+        desc3D.debugName = "DefaultBlack3D";
+        m_defaultBlack3D = RHI::TextureSharedPtr(rhiCtx->CreateTexture(desc3D, &blackVoxel));
+    }
+
+    CFFLog::Info("Created default textures (white, normal, black, black3D)");
 }
 
 void CTextureManager::CreatePlaceholderTexture() {

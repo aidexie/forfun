@@ -99,6 +99,12 @@ public:
     RHI::TextureSharedPtr GetDefaultBlack();
 
     /**
+     * Get default black 3D texture (1x1x1 black voxel, linear)
+     * Used as fallback for volumetric textures like VolumetricLightmap
+     */
+    RHI::TextureSharedPtr GetDefaultBlack3D();
+
+    /**
      * Get placeholder texture (used during async loading)
      */
     RHI::TextureSharedPtr GetPlaceholder();
@@ -150,6 +156,7 @@ private:
     RHI::TextureSharedPtr m_defaultWhite;
     RHI::TextureSharedPtr m_defaultNormal;
     RHI::TextureSharedPtr m_defaultBlack;
+    RHI::TextureSharedPtr m_defaultBlack3D;  // 1x1x1 3D black texture for volumetric fallbacks
     RHI::TextureSharedPtr m_placeholder;  // Checkerboard pattern for loading indication
 
     void CreateDefaultTextures();
