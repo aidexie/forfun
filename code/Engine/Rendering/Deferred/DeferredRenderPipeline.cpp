@@ -881,9 +881,9 @@ void CDeferredRenderPipeline::createPerFrameDescriptorSet()
     layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::PrefilteredArray));
 
     // Clustered lighting (t4-t6)
-    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightIndexList));
-    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightGrid));
-    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightData));
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightGrid));      // t4
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightIndexList)); // t5
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(Tex::Clustered_LightData));      // t6
 
     // Volumetric lightmap (t8-t11)
     layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(Tex::Volumetric_SH_R));

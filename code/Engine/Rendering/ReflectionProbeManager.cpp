@@ -48,6 +48,11 @@ bool CReflectionProbeManager::Initialize()
     // 更新常量缓冲区
     updateConstantBuffer();
 
+    // Note: Don't add barriers here - LoadGlobalProbe() or LoadLocalProbesFromScene()
+    // will be called during scene loading and will transition to ShaderResource state.
+    // Adding barriers here would cause duplicate barrier warnings when those functions
+    // do their copy operations (which transition back to CopyDest).
+
     m_initialized = true;
     CFFLog::Info("[ReflectionProbeManager] Initialized (max %d probes, default fallback IBL set)", MAX_PROBES);
     return true;
@@ -130,6 +135,12 @@ void CReflectionProbeManager::LoadLocalProbesFromScene(CScene& scene)
     // 更新常量缓冲区
     m_probeData.probeCount = m_probeCount;
     updateConstantBuffer();
+
+    // Transition arrays from CopyDest to ShaderResource for consumers
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
+    cmdList->Barrier(m_irradianceArray.get(), RHI::EResourceState::CopyDest, RHI::EResourceState::ShaderResource);
+    cmdList->Barrier(m_prefilteredArray.get(), RHI::EResourceState::CopyDest, RHI::EResourceState::ShaderResource);
 
     CFFLog::Info("[ReflectionProbeManager] Total probes loaded: %d", m_probeCount);
 }
@@ -219,6 +230,12 @@ bool CReflectionProbeManager::LoadGlobalProbe(const std::string& irrPath, const 
 
     // Update constant buffer
     updateConstantBuffer();
+
+    // Transition arrays from CopyDest to ShaderResource for consumers
+    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
+    auto* cmdList = renderContext->GetCommandList();
+    cmdList->Barrier(m_irradianceArray.get(), RHI::EResourceState::CopyDest, RHI::EResourceState::ShaderResource);
+    cmdList->Barrier(m_prefilteredArray.get(), RHI::EResourceState::CopyDest, RHI::EResourceState::ShaderResource);
 
     CFFLog::Info("[ReflectionProbeManager] Global probe (index 0) reloaded");
     return true;

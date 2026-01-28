@@ -421,6 +421,10 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
     cmdList->SetUnorderedAccess(1, nullptr);
     cmdList->SetUnorderedAccess(2, nullptr);
     cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 2);
+
+    // Transition buffers from UAV to SRV for consumers (deferred lighting pass)
+    cmdList->Barrier(m_clusterDataBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+    cmdList->Barrier(m_compactLightListBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
 }
 
 void CClusteredLightingPass::BindToMainPass(ICommandList* cmdList) {
@@ -459,3 +463,4 @@ void CClusteredLightingPass::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSe
         BindingSetItem::Buffer_SRV(Tex::Clustered_LightData, m_pointLightBuffer.get()),
     });
 }
+

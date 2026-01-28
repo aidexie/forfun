@@ -485,6 +485,9 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     // Unbind DSV to allow reading as SRV in MainPass
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 
+    // Transition shadow map to SRV state for consumers (deferred lighting, transparent pass, etc.)
+    cmdList->Barrier(m_shadowMapArray.get(), EResourceState::DepthWrite, EResourceState::ShaderResource);
+
     // Update output bundle
     m_output.cascadeCount = cascadeCount;
     m_output.shadowMapArray = m_shadowMapArray.get();

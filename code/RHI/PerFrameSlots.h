@@ -28,8 +28,9 @@ namespace Tex {
     constexpr uint32_t PrefilteredArray = 3;
 
     // ClusteredLighting (t4-t7)
-    constexpr uint32_t Clustered_LightIndexList = 4;
-    constexpr uint32_t Clustered_LightGrid      = 5;
+    // t4 = g_clusterData (ClusterData structs), t5 = g_compactLightList (uint indices)
+    constexpr uint32_t Clustered_LightGrid      = 4;  // ClusterData array
+    constexpr uint32_t Clustered_LightIndexList = 5;  // Compact light index list
     constexpr uint32_t Clustered_LightData      = 6;
     constexpr uint32_t Clustered_Reserved       = 7;
 

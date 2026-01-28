@@ -330,4 +330,15 @@ void CGBufferPass::Render(
             cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
         }
     }
+
+    // Unbind render targets before transitioning
+    cmdList->SetRenderTargets(0, nullptr, nullptr);
+
+    // Transition G-Buffer textures from RenderTarget to ShaderResource for consumers
+    cmdList->Barrier(gbuffer.GetAlbedoAO(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetNormalRoughness(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetWorldPosMetallic(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetEmissiveMaterialID(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetVelocity(), EResourceState::RenderTarget, EResourceState::ShaderResource);
+    cmdList->Barrier(gbuffer.GetDepthBuffer(), EResourceState::DepthWrite, EResourceState::ShaderResource);
 }
