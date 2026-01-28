@@ -5,6 +5,11 @@
 
 struct SBloomSettings;
 
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // CBloomPass: HDR Bloom post-processing effect using Dual Kawase Blur
 // Creates a soft glow effect from bright pixels in the HDR buffer
 //
@@ -74,4 +79,27 @@ private:
     void createShaders();
     void createPSOs();
     void createBlackTexture();
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_fullscreenVS_ds;
+    RHI::ShaderPtr m_thresholdPS_ds;
+    RHI::ShaderPtr m_downsamplePS_ds;
+    RHI::ShaderPtr m_upsamplePS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_thresholdPSO_ds;
+    RHI::PipelineStatePtr m_downsamplePSO_ds;
+    RHI::PipelineStatePtr m_upsamplePSO_ds;
+    RHI::PipelineStatePtr m_upsampleBlendPSO_ds;
+
+    // Descriptor set layout and set
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_thresholdPSO_ds != nullptr; }
 };

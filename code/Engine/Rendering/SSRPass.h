@@ -7,6 +7,8 @@
 namespace RHI {
     class ICommandList;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -278,4 +280,23 @@ private:
     bool m_initialized = false;
     uint32_t m_frameIndex = 0;
     DirectX::XMMATRIX m_prevViewProj = DirectX::XMMatrixIdentity();
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_ssrCS_ds;
+    RHI::ShaderPtr m_compositeCS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_ssrPSO_ds;
+    RHI::PipelineStatePtr m_compositePSO_ds;
+
+    // Unified compute layout (shared across all compute passes)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_ssrPSO_ds != nullptr; }
 };

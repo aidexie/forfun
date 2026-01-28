@@ -3,10 +3,12 @@
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ICommandList.h"
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include <algorithm>
 
 using namespace RHI;
@@ -199,6 +201,8 @@ bool CBloomPass::Initialize() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     m_linearSampler.reset(ctx->CreateSampler(samplerDesc));
 
+    initDescriptorSets();
+
     m_initialized = true;
     CFFLog::Info("[BloomPass] Initialized");
     return true;
@@ -224,6 +228,29 @@ void CBloomPass::Shutdown() {
     m_vertexBuffer.reset();
     m_linearSampler.reset();
     m_blackTexture.reset();
+
+    // Cleanup DS resources
+    m_fullscreenVS_ds.reset();
+    m_thresholdPS_ds.reset();
+    m_downsamplePS_ds.reset();
+    m_upsamplePS_ds.reset();
+
+    m_thresholdPSO_ds.reset();
+    m_downsamplePSO_ds.reset();
+    m_upsamplePSO_ds.reset();
+    m_upsampleBlendPSO_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+    }
 
     m_cachedWidth = 0;
     m_cachedHeight = 0;
@@ -565,4 +592,174 @@ void CBloomPass::createBlackTexture() {
     // Initialize with black pixel (4 floats = 16 bytes)
     float blackPixel[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     m_blackTexture.reset(ctx->CreateTexture(desc, blackPixel));
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CBloomPass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[BloomPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/Bloom_DS.ps.hlsl";
+
+    // Create PerPass layout for Bloom
+    // Bloom uses: CB (b0), Input texture (t0), Sampler (s0)
+    BindingLayoutDesc layoutDesc("Bloom_PerPass");
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, 32));  // CB_Bloom (32 bytes max)
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(0));      // Input texture
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(0));          // Linear sampler
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[BloomPass] Failed to create PerPass layout");
+        return;
+    }
+
+    m_perPassSet = ctx->AllocateDescriptorSet(m_perPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[BloomPass] Failed to allocate PerPass set");
+        return;
+    }
+
+    // Bind static sampler
+    m_perPassSet->Bind(BindingSetItem::Sampler(0, m_linearSampler.get()));
+
+    // Compile SM 5.1 shaders
+    // Vertex shader (same for all passes)
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "VSMain", "vs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[BloomPass] VSMain (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc desc;
+        desc.type = EShaderType::Vertex;
+        desc.bytecode = compiled.bytecode.data();
+        desc.bytecodeSize = compiled.bytecode.size();
+        desc.debugName = "Bloom_DS_VS";
+        m_fullscreenVS_ds.reset(ctx->CreateShader(desc));
+    }
+
+    // Threshold pixel shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "PSThreshold", "ps_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[BloomPass] PSThreshold (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc desc;
+        desc.type = EShaderType::Pixel;
+        desc.bytecode = compiled.bytecode.data();
+        desc.bytecodeSize = compiled.bytecode.size();
+        desc.debugName = "Bloom_DS_Threshold_PS";
+        m_thresholdPS_ds.reset(ctx->CreateShader(desc));
+    }
+
+    // Downsample pixel shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "PSDownsample", "ps_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[BloomPass] PSDownsample (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc desc;
+        desc.type = EShaderType::Pixel;
+        desc.bytecode = compiled.bytecode.data();
+        desc.bytecodeSize = compiled.bytecode.size();
+        desc.debugName = "Bloom_DS_Downsample_PS";
+        m_downsamplePS_ds.reset(ctx->CreateShader(desc));
+    }
+
+    // Upsample pixel shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "PSUpsample", "ps_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[BloomPass] PSUpsample (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc desc;
+        desc.type = EShaderType::Pixel;
+        desc.bytecode = compiled.bytecode.data();
+        desc.bytecodeSize = compiled.bytecode.size();
+        desc.debugName = "Bloom_DS_Upsample_PS";
+        m_upsamplePS_ds.reset(ctx->CreateShader(desc));
+    }
+
+    // Create PSOs with descriptor set layouts
+    PipelineStateDesc basePsoDesc;
+    basePsoDesc.vertexShader = m_fullscreenVS_ds.get();
+    basePsoDesc.inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 8, 0 }
+    };
+    basePsoDesc.rasterizer.cullMode = ECullMode::None;
+    basePsoDesc.rasterizer.fillMode = EFillMode::Solid;
+    basePsoDesc.rasterizer.depthClipEnable = false;
+    basePsoDesc.depthStencil.depthEnable = false;
+    basePsoDesc.depthStencil.depthWriteEnable = false;
+    basePsoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
+    basePsoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+    basePsoDesc.depthStencilFormat = ETextureFormat::Unknown;
+    basePsoDesc.setLayouts[1] = m_perPassLayout;  // Set 1: PerPass (space1)
+
+    // Threshold PSO
+    {
+        PipelineStateDesc psoDesc = basePsoDesc;
+        psoDesc.pixelShader = m_thresholdPS_ds.get();
+        psoDesc.blend.blendEnable = false;
+        psoDesc.debugName = "Bloom_DS_Threshold_PSO";
+        m_thresholdPSO_ds.reset(ctx->CreatePipelineState(psoDesc));
+    }
+
+    // Downsample PSO
+    {
+        PipelineStateDesc psoDesc = basePsoDesc;
+        psoDesc.pixelShader = m_downsamplePS_ds.get();
+        psoDesc.blend.blendEnable = false;
+        psoDesc.debugName = "Bloom_DS_Downsample_PSO";
+        m_downsamplePSO_ds.reset(ctx->CreatePipelineState(psoDesc));
+    }
+
+    // Upsample PSO (no blend)
+    {
+        PipelineStateDesc psoDesc = basePsoDesc;
+        psoDesc.pixelShader = m_upsamplePS_ds.get();
+        psoDesc.blend.blendEnable = false;
+        psoDesc.debugName = "Bloom_DS_Upsample_PSO";
+        m_upsamplePSO_ds.reset(ctx->CreatePipelineState(psoDesc));
+    }
+
+    // Upsample PSO with additive blending
+    {
+        PipelineStateDesc psoDesc = basePsoDesc;
+        psoDesc.pixelShader = m_upsamplePS_ds.get();
+        psoDesc.blend.blendEnable = true;
+        psoDesc.blend.srcBlend = EBlendFactor::One;
+        psoDesc.blend.dstBlend = EBlendFactor::One;
+        psoDesc.blend.blendOp = EBlendOp::Add;
+        psoDesc.blend.srcBlendAlpha = EBlendFactor::One;
+        psoDesc.blend.dstBlendAlpha = EBlendFactor::One;
+        psoDesc.blend.blendOpAlpha = EBlendOp::Add;
+        psoDesc.debugName = "Bloom_DS_UpsampleBlend_PSO";
+        m_upsampleBlendPSO_ds.reset(ctx->CreatePipelineState(psoDesc));
+    }
+
+    CFFLog::Info("[BloomPass] Descriptor set resources initialized");
 }

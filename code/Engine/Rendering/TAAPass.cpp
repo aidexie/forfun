@@ -1,8 +1,10 @@
 #include "TAAPass.h"
+#include "ComputePassLayout.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
@@ -71,6 +73,8 @@ bool CTAAPass::Initialize() {
         m_point_sampler.reset(ctx->CreateSampler(desc));
     }
 
+    initDescriptorSets();
+
     m_initialized = true;
     CFFLog::Info("[TAAPass] Initialized");
     return true;
@@ -89,6 +93,24 @@ void CTAAPass::Shutdown() {
 
     m_linear_sampler.reset();
     m_point_sampler.reset();
+
+    // Cleanup DS resources
+    m_taa_cs_ds.reset();
+    m_sharpen_cs_ds.reset();
+    m_taa_pso_ds.reset();
+    m_sharpen_pso_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_computePerPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_computePerPassLayout);
+            m_computePerPassLayout = nullptr;
+        }
+    }
 
     m_width = 0;
     m_height = 0;
@@ -257,4 +279,90 @@ void CTAAPass::Render(ICommandList* cmd_list,
     m_history_index = 1 - m_history_index;
     m_history_valid = true;
     m_frame_index++;
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CTAAPass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[TAAPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Create unified compute layout
+    m_computePerPassLayout = ComputePassLayout::CreateComputePerPassLayout(ctx);
+    if (!m_computePerPassLayout) {
+        CFFLog::Error("[TAAPass] Failed to create compute PerPass layout");
+        return;
+    }
+
+    // Allocate descriptor set
+    m_perPassSet = ctx->AllocateDescriptorSet(m_computePerPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[TAAPass] Failed to allocate PerPass descriptor set");
+        return;
+    }
+
+    // Bind static samplers
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Point, m_point_sampler.get()));
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Linear, m_linear_sampler.get()));
+
+    // Compile SM 5.1 TAA shader
+    {
+        std::string shaderPath = FFPath::GetSourceDir() + "/Shader/TAA_DS.cs.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSMain", "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[TAAPass] CSMain (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc shaderDesc;
+        shaderDesc.type = EShaderType::Compute;
+        shaderDesc.bytecode = compiled.bytecode.data();
+        shaderDesc.bytecodeSize = compiled.bytecode.size();
+        shaderDesc.debugName = "TAA_DS_CS";
+        m_taa_cs_ds.reset(ctx->CreateShader(shaderDesc));
+
+        ComputePipelineDesc psoDesc;
+        psoDesc.computeShader = m_taa_cs_ds.get();
+        psoDesc.setLayouts[1] = m_computePerPassLayout;  // Set 1: PerPass (space1)
+        psoDesc.debugName = "TAA_DS_PSO";
+        m_taa_pso_ds.reset(ctx->CreateComputePipelineState(psoDesc));
+    }
+
+    // Compile SM 5.1 Sharpen shader
+    {
+        std::string shaderPath = FFPath::GetSourceDir() + "/Shader/TAASharpen_DS.cs.hlsl";
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSMain", "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Warning("[TAAPass] Sharpen (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            // Sharpen is optional, continue without it
+        } else {
+            ShaderDesc shaderDesc;
+            shaderDesc.type = EShaderType::Compute;
+            shaderDesc.bytecode = compiled.bytecode.data();
+            shaderDesc.bytecodeSize = compiled.bytecode.size();
+            shaderDesc.debugName = "TAASharpen_DS_CS";
+            m_sharpen_cs_ds.reset(ctx->CreateShader(shaderDesc));
+
+            ComputePipelineDesc psoDesc;
+            psoDesc.computeShader = m_sharpen_cs_ds.get();
+            psoDesc.setLayouts[1] = m_computePerPassLayout;
+            psoDesc.debugName = "TAASharpen_DS_PSO";
+            m_sharpen_pso_ds.reset(ctx->CreateComputePipelineState(psoDesc));
+        }
+    }
+
+    CFFLog::Info("[TAAPass] Descriptor set resources initialized");
 }

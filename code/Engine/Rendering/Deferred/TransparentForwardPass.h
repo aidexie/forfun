@@ -8,6 +8,11 @@ class CCamera;
 class CScene;
 class CClusteredLightingPass;
 
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // ============================================
 // CTransparentForwardPass - Forward rendering for transparent objects
 // ============================================
@@ -60,4 +65,22 @@ private:
     // Samplers
     RHI::SamplerPtr m_linearSampler;
     RHI::SamplerPtr m_shadowSampler;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_vs_ds;
+    RHI::ShaderPtr m_ps_ds;
+
+    // SM 5.1 PSO
+    RHI::PipelineStatePtr m_pso_ds;
+
+    // Descriptor set layout and set for PerPass
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
 };

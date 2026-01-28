@@ -2,9 +2,11 @@
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ICommandList.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include "Core/Loader/LUTLoader.h"
 #include "Engine/SceneLightSettings.h"
 #include <cstring>
@@ -75,6 +77,8 @@ bool CPostProcessPass::Initialize() {
     float dummyExposure = 1.0f;
     m_dummyExposureBuffer.reset(ctx->CreateBuffer(dummyDesc, &dummyExposure));
 
+    initDescriptorSets();
+
     m_initialized = true;
     return true;
 }
@@ -90,6 +94,24 @@ void CPostProcessPass::Shutdown() {
     m_neutralLUT.reset();
     m_customLUT.reset();
     m_cachedLUTPath.clear();
+
+    // Cleanup DS resources
+    m_vs_ds.reset();
+    m_ps_ds.reset();
+    m_pso_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+    }
+
     m_initialized = false;
 }
 
@@ -537,4 +559,108 @@ bool CPostProcessPass::loadLUT(const std::string& cubePath) {
         CFFLog::Error("[PostProcess] Failed to create custom LUT texture");
         return false;
     }
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CPostProcessPass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[PostProcessPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/PostProcess_DS.hlsl";
+
+    // Create PerPass layout for PostProcess
+    // PostProcess uses: CB (b0), HDR input (t0), Bloom (t1), LUT (t2), Exposure buffer (t3), Sampler (s0)
+    BindingLayoutDesc layoutDesc("PostProcess_PerPass");
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_PostProcess)));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(0));      // HDR input
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(1));      // Bloom
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(2));      // LUT (3D)
+    layoutDesc.AddItem(BindingLayoutItem::Buffer_SRV(3));       // Exposure buffer
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(0));          // Linear sampler
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[PostProcessPass] Failed to create PerPass layout");
+        return;
+    }
+
+    m_perPassSet = ctx->AllocateDescriptorSet(m_perPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[PostProcessPass] Failed to allocate PerPass set");
+        return;
+    }
+
+    // Bind static sampler
+    m_perPassSet->Bind(BindingSetItem::Sampler(0, m_sampler.get()));
+
+    // Compile SM 5.1 shaders
+    // Vertex shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "VSMain", "vs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[PostProcessPass] VSMain (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc desc;
+        desc.type = EShaderType::Vertex;
+        desc.bytecode = compiled.bytecode.data();
+        desc.bytecodeSize = compiled.bytecode.size();
+        desc.debugName = "PostProcess_DS_VS";
+        m_vs_ds.reset(ctx->CreateShader(desc));
+    }
+
+    // Pixel shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "PSMain", "ps_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[PostProcessPass] PSMain (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc desc;
+        desc.type = EShaderType::Pixel;
+        desc.bytecode = compiled.bytecode.data();
+        desc.bytecodeSize = compiled.bytecode.size();
+        desc.debugName = "PostProcess_DS_PS";
+        m_ps_ds.reset(ctx->CreateShader(desc));
+    }
+
+    // Create PSO with descriptor set layout
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs_ds.get();
+    psoDesc.pixelShader = m_ps_ds.get();
+    psoDesc.inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 8, 0 }
+    };
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.depthClipEnable = false;
+    psoDesc.depthStencil.depthEnable = false;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.blend.blendEnable = false;
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
+    psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
+    psoDesc.depthStencilFormat = ETextureFormat::Unknown;
+    psoDesc.setLayouts[1] = m_perPassLayout;  // Set 1: PerPass (space1)
+    psoDesc.debugName = "PostProcess_DS_PSO";
+
+    m_pso_ds.reset(ctx->CreatePipelineState(psoDesc));
+
+    CFFLog::Info("[PostProcessPass] Descriptor set resources initialized");
 }

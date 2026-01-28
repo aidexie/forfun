@@ -6,6 +6,11 @@
 
 struct SColorGradingSettings;
 
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // CPostProcessPass: Handles tone mapping, color grading, and gamma correction
 // Converts HDR linear space to LDR sRGB space
 class CPostProcessPass {
@@ -61,4 +66,22 @@ private:
     std::string m_cachedLUTPath;        // Track LUT changes
 
     bool m_initialized = false;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_vs_ds;
+    RHI::ShaderPtr m_ps_ds;
+
+    // SM 5.1 PSO
+    RHI::PipelineStatePtr m_pso_ds;
+
+    // Descriptor set layout and set
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
 };

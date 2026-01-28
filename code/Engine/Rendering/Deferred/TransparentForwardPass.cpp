@@ -3,6 +3,7 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
 #include "Core/RenderConfig.h"
@@ -101,6 +102,7 @@ bool CTransparentForwardPass::Initialize()
     if (!ctx) return false;
 
     createPipeline();
+    initDescriptorSets();
 
     CFFLog::Info("TransparentForwardPass initialized");
     return true;
@@ -115,6 +117,23 @@ void CTransparentForwardPass::Shutdown()
     m_cbObject.reset();
     m_linearSampler.reset();
     m_shadowSampler.reset();
+
+    // Cleanup DS resources
+    m_vs_ds.reset();
+    m_ps_ds.reset();
+    m_pso_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+    }
 }
 
 void CTransparentForwardPass::createPipeline()
@@ -487,4 +506,25 @@ void CTransparentForwardPass::Render(
         cmdList->SetIndexBuffer(item.gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
         cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CTransparentForwardPass::initDescriptorSets()
+{
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[TransparentForwardPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    // TransparentForwardPass uses the same shaders as MainPass
+    // For now, we just initialize the descriptor set infrastructure
+    // The actual DS path will be implemented when MainPass is migrated
+
+    CFFLog::Info("[TransparentForwardPass] Descriptor set resources initialized (placeholder)");
 }
