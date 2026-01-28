@@ -6,6 +6,8 @@
 namespace RHI {
     class ICommandList;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -132,4 +134,19 @@ private:
     uint32_t m_height = 0;
     uint32_t m_mipCount = 0;
     bool m_initialized = false;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    RHI::ShaderPtr m_copyDepthCS_ds;
+    RHI::ShaderPtr m_buildMipCS_ds;
+    RHI::PipelineStatePtr m_copyDepthPSO_ds;
+    RHI::PipelineStatePtr m_buildMipPSO_ds;
+
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_copyDepthPSO_ds != nullptr; }
 };

@@ -8,6 +8,8 @@ namespace RHI {
     class ICommandList;
     class IPipelineState;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // GTAO configuration constants
@@ -220,4 +222,29 @@ private:
     uint32_t m_halfWidth = 0;
     uint32_t m_halfHeight = 0;
     bool m_initialized = false;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_ssaoCS_ds;
+    RHI::ShaderPtr m_blurHCS_ds;
+    RHI::ShaderPtr m_blurVCS_ds;
+    RHI::ShaderPtr m_upsampleCS_ds;
+    RHI::ShaderPtr m_downsampleCS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_ssaoPSO_ds;
+    RHI::PipelineStatePtr m_blurHPSO_ds;
+    RHI::PipelineStatePtr m_blurVPSO_ds;
+    RHI::PipelineStatePtr m_upsamplePSO_ds;
+    RHI::PipelineStatePtr m_downsamplePSO_ds;
+
+    // Unified compute layout (shared across all compute passes)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_ssaoPSO_ds != nullptr; }
 };

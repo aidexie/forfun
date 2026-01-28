@@ -1,8 +1,10 @@
 #include "SSAOPass.h"
+#include "ComputePassLayout.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
@@ -82,6 +84,7 @@ bool CSSAOPass::Initialize() {
     createSamplers();
     createNoiseTexture();
     createWhiteFallbackTexture();
+    initDescriptorSets();
 
     m_initialized = true;
     CFFLog::Info("[SSAOPass] Initialized successfully");
@@ -110,6 +113,31 @@ void CSSAOPass::Shutdown() {
     m_noiseTexture.reset();
     m_pointSampler.reset();
     m_linearSampler.reset();
+
+    // Cleanup DS resources
+    m_ssaoCS_ds.reset();
+    m_blurHCS_ds.reset();
+    m_blurVCS_ds.reset();
+    m_upsampleCS_ds.reset();
+    m_downsampleCS_ds.reset();
+
+    m_ssaoPSO_ds.reset();
+    m_blurHPSO_ds.reset();
+    m_blurVPSO_ds.reset();
+    m_upsamplePSO_ds.reset();
+    m_downsamplePSO_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_computePerPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_computePerPassLayout);
+            m_computePerPassLayout = nullptr;
+        }
+    }
 
     m_fullWidth = 0;
     m_fullHeight = 0;
@@ -454,4 +482,84 @@ void CSSAOPass::dispatchUpsample(ICommandList* cmdList, ITexture* depthFullRes) 
 
     cmdList->SetUnorderedAccessTexture(0, nullptr);
     cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 3);
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CSSAOPass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[SSAOPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSAO_DS.cs.hlsl";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Create unified compute layout
+    m_computePerPassLayout = ComputePassLayout::CreateComputePerPassLayout(ctx);
+    if (!m_computePerPassLayout) {
+        CFFLog::Error("[SSAOPass] Failed to create compute PerPass layout");
+        return;
+    }
+
+    // Allocate descriptor set
+    m_perPassSet = ctx->AllocateDescriptorSet(m_computePerPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[SSAOPass] Failed to allocate PerPass descriptor set");
+        return;
+    }
+
+    // Bind static samplers
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Point, m_pointSampler.get()));
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Linear, m_linearSampler.get()));
+
+    // Compile SM 5.1 shaders
+    struct ShaderDef {
+        const char* entryPoint;
+        const char* shaderName;
+        const char* psoName;
+        ShaderPtr* shader;
+        PipelineStatePtr* pso;
+    };
+
+    ShaderDef shaders[] = {
+        {"CSMain",              "SSAO_DS_CSMain",              "SSAO_DS_Main_PSO",              &m_ssaoCS_ds,       &m_ssaoPSO_ds},
+        {"CSBlurH",             "SSAO_DS_CSBlurH",             "SSAO_DS_BlurH_PSO",             &m_blurHCS_ds,      &m_blurHPSO_ds},
+        {"CSBlurV",             "SSAO_DS_CSBlurV",             "SSAO_DS_BlurV_PSO",             &m_blurVCS_ds,      &m_blurVPSO_ds},
+        {"CSBilateralUpsample", "SSAO_DS_CSBilateralUpsample", "SSAO_DS_BilateralUpsample_PSO", &m_upsampleCS_ds,   &m_upsamplePSO_ds},
+        {"CSDownsampleDepth",   "SSAO_DS_CSDownsampleDepth",   "SSAO_DS_DepthDownsample_PSO",   &m_downsampleCS_ds, &m_downsamplePSO_ds},
+    };
+
+    for (const auto& def : shaders) {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, def.entryPoint, "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[SSAOPass] %s (SM 5.1) compilation failed: %s", def.entryPoint, compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc shaderDesc;
+        shaderDesc.type = EShaderType::Compute;
+        shaderDesc.bytecode = compiled.bytecode.data();
+        shaderDesc.bytecodeSize = compiled.bytecode.size();
+        shaderDesc.debugName = def.shaderName;
+        def.shader->reset(ctx->CreateShader(shaderDesc));
+
+        ComputePipelineDesc psoDesc;
+        psoDesc.computeShader = def.shader->get();
+        psoDesc.setLayouts[1] = m_computePerPassLayout;  // Set 1: PerPass (space1)
+        psoDesc.debugName = def.psoName;
+        def.pso->reset(ctx->CreateComputePipelineState(psoDesc));
+    }
+
+    CFFLog::Info("[SSAOPass] Descriptor set resources initialized");
 }

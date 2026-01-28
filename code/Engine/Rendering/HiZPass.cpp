@@ -1,8 +1,10 @@
 #include "HiZPass.h"
+#include "ComputePassLayout.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
@@ -23,6 +25,7 @@ bool CHiZPass::Initialize() {
 
     createShaders();
     createSamplers();
+    initDescriptorSets();
 
     m_initialized = true;
     CFFLog::Info("[HiZPass] Initialized successfully");
@@ -36,6 +39,24 @@ void CHiZPass::Shutdown() {
     m_buildMipPSO.reset();
     m_hiZTexture.reset();
     m_pointSampler.reset();
+
+    // Cleanup DS resources
+    m_copyDepthCS_ds.reset();
+    m_buildMipCS_ds.reset();
+    m_copyDepthPSO_ds.reset();
+    m_buildMipPSO_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_computePerPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_computePerPassLayout);
+            m_computePerPassLayout = nullptr;
+        }
+    }
 
     m_width = 0;
     m_height = 0;
@@ -290,4 +311,79 @@ void CHiZPass::dispatchBuildMip(ICommandList* cmdList, uint32_t mipLevel) {
 
     // UAV barrier before next mip level reads this one
     //cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CHiZPass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[HiZPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/HiZ_DS.cs.hlsl";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Create unified compute layout
+    m_computePerPassLayout = ComputePassLayout::CreateComputePerPassLayout(ctx);
+    if (!m_computePerPassLayout) {
+        CFFLog::Error("[HiZPass] Failed to create compute PerPass layout");
+        return;
+    }
+
+    // Allocate descriptor set
+    m_perPassSet = ctx->AllocateDescriptorSet(m_computePerPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[HiZPass] Failed to allocate PerPass descriptor set");
+        return;
+    }
+
+    // Bind static sampler
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Point, m_pointSampler.get()));
+
+    // Compile SM 5.1 shaders
+    struct ShaderDef {
+        const char* entryPoint;
+        const char* shaderName;
+        const char* psoName;
+        ShaderPtr* shader;
+        PipelineStatePtr* pso;
+    };
+
+    ShaderDef shaders[] = {
+        {"CSCopyDepth", "HiZ_DS_CSCopyDepth", "HiZ_DS_CopyDepth_PSO", &m_copyDepthCS_ds, &m_copyDepthPSO_ds},
+        {"CSBuildMip",  "HiZ_DS_CSBuildMip",  "HiZ_DS_BuildMip_PSO",  &m_buildMipCS_ds,  &m_buildMipPSO_ds},
+    };
+
+    for (const auto& def : shaders) {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, def.entryPoint, "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[HiZPass] %s (SM 5.1) compilation failed: %s", def.entryPoint, compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc shaderDesc;
+        shaderDesc.type = EShaderType::Compute;
+        shaderDesc.bytecode = compiled.bytecode.data();
+        shaderDesc.bytecodeSize = compiled.bytecode.size();
+        shaderDesc.debugName = def.shaderName;
+        def.shader->reset(ctx->CreateShader(shaderDesc));
+
+        ComputePipelineDesc psoDesc;
+        psoDesc.computeShader = def.shader->get();
+        psoDesc.setLayouts[1] = m_computePerPassLayout;
+        psoDesc.debugName = def.psoName;
+        def.pso->reset(ctx->CreateComputePipelineState(psoDesc));
+    }
+
+    CFFLog::Info("[HiZPass] Descriptor set resources initialized");
 }

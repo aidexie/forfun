@@ -935,6 +935,8 @@ void CDeferredRenderPipeline::createPerFrameDescriptorSet()
     // Now that PerFrame layout is available, create PSOs for passes that need both layouts
     m_lightingPass.CreatePSOWithLayouts(m_perFrameLayout);
     m_gbufferPass.CreatePSOWithLayouts(m_perFrameLayout);
+    m_shadowPass.CreatePSOWithLayouts(m_perFrameLayout);
+    m_depthPrePass.CreatePSOWithLayouts(m_perFrameLayout);
 }
 
 void CDeferredRenderPipeline::populatePerFrameSet(const RenderContext& ctx, const CShadowPass::Output* shadowData)
