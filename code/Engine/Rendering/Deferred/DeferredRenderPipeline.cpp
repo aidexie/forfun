@@ -350,7 +350,14 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // 3. G-Buffer Pass
     // ============================================
     {
-        m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev, ctx.width, ctx.height);
+        // Use descriptor set API if available (DX12), otherwise fall back to legacy
+        if (m_perFrameSet && m_gbufferPass.IsDescriptorSetModeAvailable()) {
+            m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev,
+                                 ctx.width, ctx.height, m_perFrameSet);
+        } else {
+            m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev,
+                                 ctx.width, ctx.height);
+        }
     }
 
     // Advance jitter for next frame (if TAA enabled)
@@ -927,6 +934,7 @@ void CDeferredRenderPipeline::createPerFrameDescriptorSet()
 
     // Now that PerFrame layout is available, create PSOs for passes that need both layouts
     m_lightingPass.CreatePSOWithLayouts(m_perFrameLayout);
+    m_gbufferPass.CreatePSOWithLayouts(m_perFrameLayout);
 }
 
 void CDeferredRenderPipeline::populatePerFrameSet(const RenderContext& ctx, const CShadowPass::Output* shadowData)
