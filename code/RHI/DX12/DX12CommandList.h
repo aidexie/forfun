@@ -188,6 +188,13 @@ private:
     void SetPendingUAV(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
         if (slot < MAX_UAV_SLOTS) { m_pendingUAVCpuHandles[slot] = handle; m_uavDirty = true; }
     }
+    void SetPendingSampler(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
+        if (slot < MAX_SAMPLER_SLOTS) { m_pendingSamplerCpuHandles[slot] = handle; m_samplerDirty = true; }
+    }
+    void SetPendingCBV(uint32_t slot, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress) {
+        if (slot < MAX_CBV_SLOTS) { m_pendingCBVs[slot] = gpuAddress; m_cbvDirty = true; }
+    }
+    CDX12DynamicBufferRing* GetDynamicBufferRing() { return m_dynamicBuffer; }
 
 public:
     // Set dynamic buffer ring (called by RenderContext)
