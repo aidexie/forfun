@@ -5,6 +5,7 @@
 #include "RHI/RHIManager.h"
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ICommandList.h"
+#include "RHI/IDescriptorSet.h"
 #include <fstream>
 #include <filesystem>
 
@@ -34,10 +35,40 @@ RHI::ITexture* CLightmap2DManager::GetAtlasTexture() const {
 }
 
 // ============================================
-// Bind
+// Bind (Descriptor Set API)
 // ============================================
 
+void CLightmap2DManager::BindToDescriptorSet(RHI::IDescriptorSet* descriptorSet, uint32_t atlasSlot, uint32_t scaleOffsetSlot) {
+    if (!m_isLoaded || !descriptorSet) {
+        return;
+    }
+
+    // Bind atlas texture to specified SRV slot
+    RHI::ITexture* atlas = GetAtlasTexture();
+    if (atlas) {
+        descriptorSet->Bind(RHI::BindingSetItem::Texture_SRV(atlasSlot, atlas));
+    }
+
+    // Bind scaleOffset structured buffer to specified SRV slot
+    if (m_scaleOffsetBuffer) {
+        descriptorSet->Bind(RHI::BindingSetItem::Buffer_SRV(scaleOffsetSlot, m_scaleOffsetBuffer.get()));
+    }
+}
+
+// ============================================
+// Bind (Legacy API)
+// ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
+
 void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
+    // WARNING: Legacy binding path - will be removed in future versions
+    // Migrate to BindToDescriptorSet() for DX12 descriptor set architecture
+    static bool s_warnedOnce = false;
+    if (!s_warnedOnce) {
+        CFFLog::Warning("[Lightmap2DManager] Using legacy Bind() - migrate to BindToDescriptorSet() for descriptor set architecture");
+        s_warnedOnce = true;
+    }
+
     if (!m_isLoaded || !cmdList) {
         return;
     }
@@ -48,6 +79,15 @@ void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
     // Bind t17: ScaleOffset structured buffer
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
 }
+
+#else // FF_LEGACY_BINDING_DISABLED
+
+void CLightmap2DManager::Bind(RHI::ICommandList* /*cmdList*/) {
+    // Legacy binding is disabled - use BindToDescriptorSet() instead
+    CFFLog::Error("[Lightmap2DManager] Legacy Bind() called but FF_LEGACY_BINDING_DISABLED is defined. Use BindToDescriptorSet() instead.");
+}
+
+#endif // FF_LEGACY_BINDING_DISABLED
 
 // ============================================
 // Direct Data Transfer

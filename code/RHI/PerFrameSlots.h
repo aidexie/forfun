@@ -13,7 +13,8 @@ namespace CB {
     constexpr uint32_t Clustered       = 1;  // Cluster grid params
     constexpr uint32_t Volumetric      = 2;  // Lightmap params
     constexpr uint32_t ReflectionProbe = 3;  // Probe selection data
-    // b4-b7: Reserved for future
+    constexpr uint32_t LightProbe      = 4;  // Light probe params (count, blend settings)
+    // b5-b7: Reserved for future
 }
 
 //==============================================
@@ -41,12 +42,15 @@ namespace Tex {
     constexpr uint32_t Volumetric_Octree   = 11;
     constexpr uint32_t Volumetric_Reserved = 12;
 
-    // ReflectionProbes (t13-t15)
+    // ReflectionProbes (t13-t14)
     constexpr uint32_t ReflectionProbe_Array    = 13;
     constexpr uint32_t ReflectionProbe_Indices  = 14;
-    constexpr uint32_t ReflectionProbe_Reserved = 15;
 
-    // t16-t31: Reserved for future (DDGI, RTGI, etc.)
+    // LightProbes (t15-t16)
+    constexpr uint32_t LightProbe_Buffer   = 15;  // StructuredBuffer<LightProbeData>
+    constexpr uint32_t LightProbe_Reserved = 16;
+
+    // t17-t31: Reserved for future (DDGI, RTGI, etc.)
 }
 
 //==============================================

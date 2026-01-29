@@ -233,6 +233,9 @@ void CDebugLinePass::UpdateVertexBuffer() {
 
 void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
                             unsigned int viewportWidth, unsigned int viewportHeight) {
+#ifndef FF_LEGACY_BINDING_DISABLED
+    CFFLog::Warning("DebugLinePass::Render() uses legacy binding - descriptor set migration pending");
+
     if (!m_initialized || m_dynamicLines.empty() || !m_pso) return;
 
     IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
@@ -268,4 +271,5 @@ void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
 
     unsigned int vertexCount = static_cast<unsigned int>(m_dynamicLines.size());
     cmdList->Draw(vertexCount, 0);
+#endif // FF_LEGACY_BINDING_DISABLED
 }

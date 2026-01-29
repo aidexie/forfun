@@ -6,6 +6,7 @@
 #include "../RayTracing/SceneGeometryExport.h"
 #include "RHI/RHIDescriptors.h"
 #include "RHI/RHIPointers.h"
+#include "RHI/IDescriptorSet.h"
 #include <memory>
 #include <functional>
 #include <vector>
@@ -218,11 +219,20 @@ private:
     // Dispatch batched ray tracing
     void DispatchBake(const SLightmap2DGPUBakeConfig& config);
 
+    // Dispatch batched ray tracing (Descriptor Set path)
+    void DispatchBake_DS(const SLightmap2DGPUBakeConfig& config);
+
     // Finalize: normalize accumulation and write to atlas
     void FinalizeAtlas();
 
+    // Finalize: normalize accumulation and write to atlas (Descriptor Set path)
+    void FinalizeAtlas_DS();
+
     // Optional: Dilation pass
     void DilateLightmap(int radius);
+
+    // Optional: Dilation pass (Descriptor Set path)
+    void DilateLightmap_DS(int radius);
 
     // Optional: OIDN denoising (requires GPU readback and upload)
     void DenoiseLightmap();
@@ -235,6 +245,16 @@ private:
 
     // Progress reporting
     void ReportProgress(float progress, const char* stage);
+
+    // ============================================
+    // Descriptor Set Support
+    // ============================================
+
+    // Initialize descriptor sets (DX12 only)
+    void InitDescriptorSets();
+
+    // Check if descriptor set mode is available
+    bool IsDescriptorSetModeAvailable() const;
 
 private:
     bool m_isReady = false;
@@ -302,4 +322,20 @@ private:
     std::unique_ptr<CLightmapDenoiser> m_denoiser;
     bool m_enableDenoiser = true;
     bool m_debugExportImages = false;
+
+    // ============================================
+    // Descriptor Set Resources (DX12 only)
+    // ============================================
+
+    // Descriptor set layout for compute passes (finalize, dilate)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+
+    // Descriptor set for compute passes
+    RHI::IDescriptorSet* m_computePerPassSet = nullptr;
+
+    // Descriptor set shaders and PSOs (SM 5.1)
+    RHI::ShaderPtr m_finalizeShader_ds;
+    RHI::PipelineStatePtr m_finalizePipeline_ds;
+    RHI::ShaderPtr m_dilateShader_ds;
+    RHI::PipelineStatePtr m_dilatePipeline_ds;
 };

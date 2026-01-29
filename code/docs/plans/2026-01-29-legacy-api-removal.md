@@ -20,7 +20,7 @@
 | 3. Guard DX12CommandList | ✅ DONE | Header and implementation guarded |
 | 4. Guard DX11CommandList | ✅ DONE | Header and implementation guarded |
 
-### Phase 1: Render Pass Migration - IN PROGRESS
+### Phase 1: Render Pass Migration - MOSTLY COMPLETE
 | Pass | Status | Notes |
 |------|--------|-------|
 | ShadowPass | ✅ DONE | DS-only, legacy path removed |
@@ -37,33 +37,29 @@
 | ClusteredLightingPass | ✅ DONE | Legacy guarded |
 | ForwardRenderPipeline | ✅ DONE | UnbindShaderResources removed |
 | SceneRenderer | ✅ DONE | Legacy guarded |
+| AntiAliasingPass | ✅ DONE | Legacy guarded |
+| MotionBlurPass | ✅ DONE | Legacy guarded |
+| GridPass | ✅ DONE | Legacy guarded |
+| DebugLinePass | ✅ DONE | Legacy guarded |
+| IBLGenerator | ✅ DONE | DS path added, legacy guarded |
+| ReflectionProbeManager | ✅ DONE | Legacy guarded |
+| LightProbeManager | ✅ DONE | Legacy guarded |
+| VolumetricLightmap | ✅ DONE | Legacy guarded |
+| DXRCubemapBaker | ✅ DONE | Legacy guarded |
+| Lightmap2DManager | ✅ DONE | Legacy guarded |
 
-### Phase 1: Remaining Passes - TODO
+### Phase 1: Remaining Passes - IN PROGRESS
 | Pass | Status | Notes |
 |------|--------|-------|
-| TAAPass | ❌ TODO | Needs DS migration |
-| AntiAliasingPass | ❌ TODO | Needs DS migration |
+| TAAPass | ⚠️ PARTIAL | Some legacy calls remain |
 | AutoExposurePass | ❌ TODO | Needs DS migration |
-| MotionBlurPass | ❌ TODO | Needs DS migration |
 | DepthOfFieldPass | ❌ TODO | Needs DS migration |
-| GridPass | ❌ TODO | Needs DS migration |
-| DebugLinePass | ❌ TODO | Needs DS migration |
 | DeferredRenderPipeline | ❌ TODO | Needs legacy calls removed |
-
-### Phase 2: Utilities & Baking - TODO
-| File | Status | Notes |
-|------|--------|-------|
-| IBLGenerator | ❌ TODO | 9 legacy calls |
 | Lightmap2DGPUBaker | ❌ TODO | 19 legacy calls |
-| Lightmap2DManager | ❌ TODO | 2 legacy calls |
-| ReflectionProbeManager | ❌ TODO | 5 legacy calls |
-| LightProbeManager | ❌ TODO | 3 legacy calls |
-| VolumetricLightmap | ❌ TODO | 21 legacy calls |
-| DXRCubemapBaker | ❌ TODO | 10 legacy calls |
 
 ### Build Status
-- **Current Errors:** 151 (down from 306)
-- **Files Remaining:** 15
+- **Current Errors:** 68 (down from 306)
+- **Files Remaining:** 5
 
 ---
 

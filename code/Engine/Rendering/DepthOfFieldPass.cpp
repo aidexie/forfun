@@ -136,6 +136,7 @@ ITexture* CDepthOfFieldPass::Render(ITexture* hdrInput,
                                      float cameraNearZ, float cameraFarZ,
                                      uint32_t width, uint32_t height,
                                      const SDepthOfFieldSettings& settings) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (!m_initialized || !hdrInput || !depthBuffer || width == 0 || height == 0) {
         return hdrInput;
     }
@@ -170,6 +171,10 @@ ITexture* CDepthOfFieldPass::Render(ITexture* hdrInput,
     renderCompositePass(cmdList, hdrInput, width, height);
 
     return m_outputHDR.get();
+#else
+    CFFLog::Warning("[DepthOfFieldPass] Legacy binding disabled - descriptor set path not implemented");
+    return hdrInput;
+#endif
 }
 
 // ============================================

@@ -155,6 +155,7 @@ void CGridPass::CreatePipelineState() {
 }
 
 void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (!m_initialized || !m_enabled || !m_pso) return;
 
     IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
@@ -185,4 +186,7 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
 
     // Draw full-screen quad (4 vertices, triangle strip)
     cmdList->Draw(4, 0);
+#else
+    CFFLog::Warning("GridPass::Render() - Legacy binding disabled, descriptor set path not implemented");
+#endif
 }

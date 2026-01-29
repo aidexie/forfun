@@ -149,6 +149,8 @@ void CReflectionProbeManager::Bind(RHI::ICommandList* cmdList)
 {
     if (!m_initialized || !cmdList) return;
 
+#ifndef FF_LEGACY_BINDING_DISABLED
+    // Legacy binding path - use descriptor sets via PopulatePerFrameSet() instead
     // t5: IrradianceArray
     cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 5, m_irradianceArray.get());
 
@@ -160,6 +162,9 @@ void CReflectionProbeManager::Bind(RHI::ICommandList* cmdList)
 
     // b4: CB_Probes (use SetConstantBufferData for DX12 compatibility)
     cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 4, &m_probeData, sizeof(CB_Probes));
+#else
+    CFFLog::Warning("[ReflectionProbeManager] Bind() called but legacy binding is disabled. Use PopulatePerFrameSet() with descriptor sets instead.");
+#endif
 }
 
 void CReflectionProbeManager::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet)

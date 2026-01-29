@@ -179,6 +179,9 @@ ITexture* CMotionBlurPass::Render(ITexture* hdrInput,
                                    ITexture* velocityBuffer,
                                    uint32_t width, uint32_t height,
                                    const SMotionBlurSettings& settings) {
+#ifndef FF_LEGACY_BINDING_DISABLED
+    CFFLog::Warning("[MotionBlurPass] Using legacy binding path - descriptor set migration pending");
+
     if (!m_initialized || !hdrInput || !velocityBuffer || width == 0 || height == 0) {
         return hdrInput;  // Return input unchanged on error
     }
@@ -234,6 +237,14 @@ ITexture* CMotionBlurPass::Render(ITexture* hdrInput,
     cmdList->UnbindRenderTargets();
 
     return m_outputHDR.get();
+#else
+    // Descriptor set path not yet implemented
+    (void)velocityBuffer;
+    (void)width;
+    (void)height;
+    (void)settings;
+    return hdrInput;
+#endif
 }
 
 // ============================================

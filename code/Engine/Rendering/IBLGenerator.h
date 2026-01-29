@@ -1,5 +1,6 @@
 #pragma once
 #include "RHI/RHIPointers.h"
+#include "RHI/IDescriptorSet.h"
 #include <DirectXMath.h>
 #include <string>
 #include <memory>
@@ -76,16 +77,33 @@ public:
 
 private:
     void createShaders();
+    void initDescriptorSets();
+
+    // Check if descriptor set mode is available (DX12 only)
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_irradiancePSO_ds != nullptr; }
 
 private:
     // Rendering resources (RHI abstractions)
+#ifndef FF_LEGACY_BINDING_DISABLED
     RHI::ShaderPtr m_fullscreenVS;
     RHI::ShaderPtr m_irradiancePS;
     RHI::ShaderPtr m_prefilterPS;
     RHI::ShaderPtr m_brdfLutPS;
+#endif
     RHI::SamplerPtr m_sampler;
     RHI::BufferPtr m_cbFaceIndex;
     RHI::BufferPtr m_cbRoughness;
+
+    // Descriptor set resources (DX12)
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+    RHI::ShaderPtr m_fullscreenVS_ds;
+    RHI::ShaderPtr m_irradiancePS_ds;
+    RHI::ShaderPtr m_prefilterPS_ds;
+    RHI::ShaderPtr m_brdfLutPS_ds;
+    RHI::PipelineStatePtr m_irradiancePSO_ds;
+    RHI::PipelineStatePtr m_prefilterPSO_ds;
+    RHI::PipelineStatePtr m_brdfLutPSO_ds;
 
     // Generated/loaded irradiance map
     RHI::TexturePtr m_irradianceTexture;

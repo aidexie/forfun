@@ -218,7 +218,7 @@ void CTAAPass::Render(ICommandList* cmd_list,
 
     ensureTextures(width, height);
 
-    // Use descriptor set path if available (DX12)
+    // Descriptor set path (DX12)
     if (IsDescriptorSetModeAvailable()) {
         if (!m_taa_pso_ds || !m_output || !current_color || !velocity_buffer || !depth_buffer) return;
 
@@ -364,7 +364,7 @@ void CTAAPass::Render(ICommandList* cmd_list,
     m_history_valid = true;
     m_frame_index++;
 #else
-    CFFLog::Warning("[TAAPass] Legacy binding disabled but descriptor set mode not available");
+    CFFLog::Warning("[TAAPass] Legacy binding disabled and descriptor set mode not available");
 #endif
 }
 

@@ -327,6 +327,7 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
                                 uint32_t width, uint32_t height,
                                 float deltaTime,
                                 const SAutoExposureSettings& settings) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (!m_initialized || !cmdList || !hdrInput || width == 0 || height == 0) {
         m_currentExposure = 1.0f;
         return;
@@ -360,6 +361,11 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
         cmdList->CopyBuffer(m_histogramReadback.get(), 0, m_histogramBuffer.get(), 0,
                             AutoExposureConfig::HISTOGRAM_BINS * sizeof(uint32_t));
     }
+#else
+    CFFLog::Warning("[AutoExposurePass] Render() skipped - descriptor set path not implemented");
+    m_currentExposure = 1.0f;
+    (void)cmdList; (void)hdrInput; (void)width; (void)height; (void)deltaTime; (void)settings;
+#endif
 }
 
 void CAutoExposurePass::dispatchHistogram(ICommandList* cmdList,
@@ -441,6 +447,7 @@ void CAutoExposurePass::readbackHistogram(ICommandList* /*cmdList*/) {
 void CAutoExposurePass::RenderDebugOverlay(ICommandList* cmdList,
                                            ITexture* renderTarget,
                                            uint32_t width, uint32_t height) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (!m_initialized || !m_debugPSO || !cmdList || !renderTarget) return;
 
     // Set render target
@@ -473,4 +480,8 @@ void CAutoExposurePass::RenderDebugOverlay(ICommandList* cmdList,
 
     // Unbind
     cmdList->UnbindShaderResources(EShaderStage::Pixel, 0, 2);
+#else
+    CFFLog::Warning("[AutoExposurePass] RenderDebugOverlay() skipped - descriptor set path not implemented");
+    (void)cmdList; (void)renderTarget; (void)width; (void)height;
+#endif
 }

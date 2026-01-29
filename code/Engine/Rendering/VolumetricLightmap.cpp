@@ -1125,8 +1125,19 @@ void CVolumetricLightmap::UploadToGPU()
     // 这个函数保留用于将来的动态更新
 }
 
+// ============================================
+// Legacy Binding (DX11 compatibility)
+// ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
+
 void CVolumetricLightmap::Bind(RHI::ICommandList* cmdList)
 {
+    static bool s_warnedLegacy = false;
+    if (!s_warnedLegacy) {
+        CFFLog::Warning("[VolumetricLightmap] Using legacy binding path. Consider migrating to descriptor sets.");
+        s_warnedLegacy = true;
+    }
+
     // 如果未启用或未烘焙，绑定禁用状态的 CB 和空 SRV
     if (!m_enabled || !m_gpuResourcesCreated || m_bricks.empty()) {
         // Must still bind CB with enabled=0 so shader can check the flag
@@ -1190,6 +1201,20 @@ void CVolumetricLightmap::Unbind(RHI::ICommandList* cmdList)
     cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, nullptr);
     // Note: SetConstantBufferData uses per-frame ring buffer, no need to unbind
 }
+
+#else // FF_LEGACY_BINDING_DISABLED
+
+void CVolumetricLightmap::Bind(RHI::ICommandList* /*cmdList*/)
+{
+    CFFLog::Warning("[VolumetricLightmap] Legacy Bind() called but FF_LEGACY_BINDING_DISABLED is defined. Use PopulatePerFrameSet() instead.");
+}
+
+void CVolumetricLightmap::Unbind(RHI::ICommandList* /*cmdList*/)
+{
+    // No-op when legacy binding is disabled
+}
+
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CVolumetricLightmap::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSet)
 {

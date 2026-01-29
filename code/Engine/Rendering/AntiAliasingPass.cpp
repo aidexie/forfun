@@ -160,23 +160,16 @@ void CAntiAliasingPass::renderFXAA(ICommandList* cmdList,
     // Set vertex buffer
     cmdList->SetVertexBuffer(0, m_fullscreenQuadVB.get(), sizeof(FullscreenVertex), 0);
 
-    // Use descriptor set binding if available (DX12), else fall back to legacy
-    if (m_fxaaDescSet) {
-        // Update bindings on the persistent descriptor set
-        m_fxaaDescSet->Bind({
-            BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_FXAA)),
-            BindingSetItem::Texture_SRV(0, input),
-            BindingSetItem::Sampler(0, m_linearSampler.get())
-        });
+    // Descriptor set binding (DX12)
+    // Update bindings on the persistent descriptor set
+    m_fxaaDescSet->Bind({
+        BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_FXAA)),
+        BindingSetItem::Texture_SRV(0, input),
+        BindingSetItem::Sampler(0, m_linearSampler.get())
+    });
 
-        // Bind descriptor set to pipeline (Set 1 = PerPass)
-        cmdList->BindDescriptorSet(1, m_fxaaDescSet);
-    } else {
-        // Legacy binding (DX11 fallback)
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_FXAA));
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, input);
-        cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
-    }
+    // Bind descriptor set to pipeline (Set 1 = PerPass)
+    cmdList->BindDescriptorSet(1, m_fxaaDescSet);
 
     // Draw fullscreen quad
     cmdList->Draw(4, 0);
@@ -189,6 +182,7 @@ void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
                                    ITexture* input, ITexture* output,
                                    uint32_t width, uint32_t height,
                                    const SAntiAliasingSettings& settings) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (!m_smaaEdgePSO || !m_smaaBlendPSO || !m_smaaNeighborPSO) return;
 
     // Ensure intermediate textures are allocated
@@ -283,6 +277,9 @@ void CAntiAliasingPass::renderSMAA(ICommandList* cmdList,
         cmdList->Draw(4, 0);
         cmdList->SetRenderTargets(0, nullptr, nullptr);
     }
+#else
+    CFFLog::Warning("[AntiAliasing] SMAA uses legacy binding and is disabled when FF_LEGACY_BINDING_DISABLED is defined");
+#endif
 }
 
 void CAntiAliasingPass::createSharedResources() {

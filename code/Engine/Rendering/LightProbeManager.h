@@ -1,5 +1,6 @@
 #pragma once
 #include "RHI/RHIPointers.h"
+#include "RHI/IDescriptorSet.h"
 #include <DirectXMath.h>
 #include <string>
 #include <vector>
@@ -7,6 +8,8 @@
 // Forward declarations
 namespace RHI {
     class ICommandList;
+    class IDescriptorSet;
+    class IDescriptorSetLayout;
 }
 class CScene;
 
@@ -78,6 +81,19 @@ public:
     // 从场景加载所有 Light Probe
     void LoadProbesFromScene(CScene& scene);
 
+    // ============================================
+    // Descriptor Set Binding (New API - DX12)
+    // ============================================
+    // Bind light probe resources to a PerFrame descriptor set
+    // This is the preferred method for DX12 descriptor set architecture
+    void BindToDescriptorSet(RHI::IDescriptorSet* perFrameSet);
+
+    // Check if descriptor set mode is available
+    bool IsDescriptorSetModeAvailable() const { return m_initialized; }
+
+    // ============================================
+    // Legacy Binding (DX11 compatibility)
+    // ============================================
     // 绑定资源到 Shader（每帧调用一次）
     // slot 15: LightProbeBuffer (StructuredBuffer)
     // slot 5 (CB): CB_LightProbeParams

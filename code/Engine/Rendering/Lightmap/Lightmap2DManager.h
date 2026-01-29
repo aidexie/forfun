@@ -8,6 +8,7 @@
 // Forward declarations
 namespace RHI {
     class ICommandList;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -49,7 +50,13 @@ public:
     // Bind to command list (called in SceneRenderer)
     // ============================================
 
-    // Bind lightmap resources to shader (t16, t17)
+    // Bind lightmap resources to descriptor set (DX12 descriptor set architecture)
+    // atlasSlot: SRV slot for atlas texture
+    // scaleOffsetSlot: SRV slot for scaleOffset structured buffer
+    void BindToDescriptorSet(RHI::IDescriptorSet* descriptorSet, uint32_t atlasSlot, uint32_t scaleOffsetSlot);
+
+    // Legacy: Bind lightmap resources to shader (t16, t17)
+    // DEPRECATED: Use BindToDescriptorSet() for descriptor set architecture
     void Bind(RHI::ICommandList* cmdList);
 
     // ============================================
