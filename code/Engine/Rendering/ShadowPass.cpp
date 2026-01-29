@@ -463,11 +463,8 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     auto splits = calculateCascadeSplits(cascadeCount, cameraNear, shadowDistance,
                                          std::clamp(light->cascade_split_lambda, 0.0f, 1.0f));
 
-    // Choose DS or legacy path
-    const bool useDescriptorSets = IsDescriptorSetModeAvailable();
-
-    // Set pipeline state via RHI
-    cmdList->SetPipelineState(useDescriptorSets ? m_pso_ds.get() : m_pso.get());
+    // Set pipeline state via RHI (descriptor set path only)
+    cmdList->SetPipelineState(m_pso_ds.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
 
     // Set viewport and scissor rect (DX12 requires both)
@@ -491,76 +488,43 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
         // Clear depth for this cascade via RHI
         cmdList->ClearDepthStencilSlice(m_shadowMapArray.get(), cascadeIndex, true, 1.0f, false, 0);
 
-        if (useDescriptorSets) {
-            // === Descriptor Set Path ===
-            // Bind PerPass set (Set 1) with light space matrix
-            CB_ShadowPass passCB;
-            passCB.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
-            passCB.cascadeIndex = cascadeIndex;
+        // Bind PerPass set (Set 1) with light space matrix
+        CB_ShadowPass passCB;
+        passCB.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
+        passCB.cascadeIndex = cascadeIndex;
 
-            m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &passCB, sizeof(passCB)));
-            cmdList->BindDescriptorSet(1, m_perPassSet);
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &passCB, sizeof(passCB)));
+        cmdList->BindDescriptorSet(1, m_perPassSet);
 
-            // Render all objects to this cascade
-            for (auto& objPtr : scene.GetWorld().Objects()) {
-                auto* obj = objPtr.get();
-                auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
-                auto* transform = obj->GetComponent<STransform>();
+        // Render all objects to this cascade
+        for (auto& objPtr : scene.GetWorld().Objects()) {
+            auto* obj = objPtr.get();
+            auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+            auto* transform = obj->GetComponent<STransform>();
 
-                if (!meshRenderer || !transform) continue;
+            if (!meshRenderer || !transform) continue;
 
-                meshRenderer->EnsureUploaded();
-                if (meshRenderer->meshes.empty()) continue;
+            meshRenderer->EnsureUploaded();
+            if (meshRenderer->meshes.empty()) continue;
 
-                XMMATRIX worldMatrix = transform->WorldMatrix();
+            XMMATRIX worldMatrix = transform->WorldMatrix();
 
-                // Bind PerDraw set (Set 3) with world matrix
-                PerDrawSlots::CB_PerDraw perDraw;
-                XMStoreFloat4x4(&perDraw.World, XMMatrixTranspose(worldMatrix));
-                XMStoreFloat4x4(&perDraw.WorldPrev, XMMatrixTranspose(worldMatrix));
-                perDraw.lightmapIndex = -1;  // Not used in shadow pass
-                perDraw.objectID = 0;
+            // Bind PerDraw set (Set 3) with world matrix
+            PerDrawSlots::CB_PerDraw perDraw;
+            XMStoreFloat4x4(&perDraw.World, XMMatrixTranspose(worldMatrix));
+            XMStoreFloat4x4(&perDraw.WorldPrev, XMMatrixTranspose(worldMatrix));
+            perDraw.lightmapIndex = -1;  // Not used in shadow pass
+            perDraw.objectID = 0;
 
-                m_perDrawSet->Bind(BindingSetItem::VolatileCBV(0, &perDraw, sizeof(perDraw)));
-                cmdList->BindDescriptorSet(3, m_perDrawSet);
+            m_perDrawSet->Bind(BindingSetItem::VolatileCBV(0, &perDraw, sizeof(perDraw)));
+            cmdList->BindDescriptorSet(3, m_perDrawSet);
 
-                for (auto& gpuMesh : meshRenderer->meshes) {
-                    if (!gpuMesh) continue;
+            for (auto& gpuMesh : meshRenderer->meshes) {
+                if (!gpuMesh) continue;
 
-                    cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
-                    cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
-                    cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
-                }
-            }
-        } else {
-            // === Legacy Path ===
-            CB_LightSpace cbLight;
-            cbLight.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
-            cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cbLight, sizeof(CB_LightSpace));
-
-            for (auto& objPtr : scene.GetWorld().Objects()) {
-                auto* obj = objPtr.get();
-                auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
-                auto* transform = obj->GetComponent<STransform>();
-
-                if (!meshRenderer || !transform) continue;
-
-                meshRenderer->EnsureUploaded();
-                if (meshRenderer->meshes.empty()) continue;
-
-                XMMATRIX worldMatrix = transform->WorldMatrix();
-
-                for (auto& gpuMesh : meshRenderer->meshes) {
-                    if (!gpuMesh) continue;
-
-                    CB_Object cbObj;
-                    cbObj.world = XMMatrixTranspose(worldMatrix);
-                    cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &cbObj, sizeof(CB_Object));
-
-                    cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
-                    cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
-                    cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
-                }
+                cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
+                cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
+                cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
             }
         }
 

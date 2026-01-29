@@ -234,11 +234,8 @@ void CDepthPrePass::Render(
     float clearDepth = UseReversedZ() ? 0.0f : 1.0f;
     cmdList->ClearDepthStencil(depthTarget, true, clearDepth, false, 0);
 
-    // Choose DS or legacy path
-    const bool useDescriptorSets = IsDescriptorSetModeAvailable();
-
     // Set pipeline state
-    cmdList->SetPipelineState(useDescriptorSets ? m_pso_ds.get() : m_pso.get());
+    cmdList->SetPipelineState(m_pso_ds.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
 
     // Update frame constants (ViewProj matrix)
@@ -247,102 +244,55 @@ void CDepthPrePass::Render(
     XMMATRIX proj = camera.GetJitteredProjectionMatrix(width, height);
     XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 
-    if (useDescriptorSets) {
-        // === Descriptor Set Path ===
-        // Bind PerPass set (Set 1) with viewProj matrix
-        CB_DepthPrePass passCB;
-        passCB.viewProj = XMMatrixTranspose(viewProj);
+    // Bind PerPass set (Set 1) with viewProj matrix
+    CB_DepthPrePass passCB;
+    passCB.viewProj = XMMatrixTranspose(viewProj);
 
-        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &passCB, sizeof(passCB)));
-        cmdList->BindDescriptorSet(1, m_perPassSet);
+    m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &passCB, sizeof(passCB)));
+    cmdList->BindDescriptorSet(1, m_perPassSet);
 
-        // Render all opaque objects
-        for (auto& objPtr : scene.GetWorld().Objects()) {
-            auto* obj = objPtr.get();
-            auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
-            auto* transform = obj->GetComponent<STransform>();
+    // Render all opaque objects
+    for (auto& objPtr : scene.GetWorld().Objects()) {
+        auto* obj = objPtr.get();
+        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+        auto* transform = obj->GetComponent<STransform>();
 
-            if (!meshRenderer || !transform) continue;
+        if (!meshRenderer || !transform) continue;
 
-            meshRenderer->EnsureUploaded();
-            if (meshRenderer->meshes.empty()) continue;
+        meshRenderer->EnsureUploaded();
+        if (meshRenderer->meshes.empty()) continue;
 
-            // Get material for alpha mode check
-            CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
-            if (!meshRenderer->materialPath.empty()) {
-                material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
-            }
-
-            // Skip transparent and alpha-tested objects
-            if (material && (material->alphaMode == EAlphaMode::Blend ||
-                             material->alphaMode == EAlphaMode::Mask)) {
-                continue;
-            }
-
-            XMMATRIX worldMatrix = transform->WorldMatrix();
-
-            // Bind PerDraw set (Set 3) with world matrix
-            PerDrawSlots::CB_PerDraw perDraw;
-            XMStoreFloat4x4(&perDraw.World, XMMatrixTranspose(worldMatrix));
-            XMStoreFloat4x4(&perDraw.WorldPrev, XMMatrixTranspose(worldMatrix));
-            perDraw.lightmapIndex = -1;  // Not used in depth pre-pass
-            perDraw.objectID = 0;
-
-            m_perDrawSet->Bind(BindingSetItem::VolatileCBV(0, &perDraw, sizeof(perDraw)));
-            cmdList->BindDescriptorSet(3, m_perDrawSet);
-
-            // Draw all meshes
-            for (auto& gpuMesh : meshRenderer->meshes) {
-                if (!gpuMesh) continue;
-
-                cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
-                cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
-                cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
-            }
+        // Get material for alpha mode check
+        CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
+        if (!meshRenderer->materialPath.empty()) {
+            material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
         }
-    } else {
-        // === Legacy Path ===
-        CB_DepthFrame frameData;
-        frameData.viewProj = XMMatrixTranspose(viewProj);
-        cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &frameData, sizeof(frameData));
 
-        // Render all opaque objects
-        for (auto& objPtr : scene.GetWorld().Objects()) {
-            auto* obj = objPtr.get();
-            auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
-            auto* transform = obj->GetComponent<STransform>();
+        // Skip transparent and alpha-tested objects
+        if (material && (material->alphaMode == EAlphaMode::Blend ||
+                         material->alphaMode == EAlphaMode::Mask)) {
+            continue;
+        }
 
-            if (!meshRenderer || !transform) continue;
+        XMMATRIX worldMatrix = transform->WorldMatrix();
 
-            meshRenderer->EnsureUploaded();
-            if (meshRenderer->meshes.empty()) continue;
+        // Bind PerDraw set (Set 3) with world matrix
+        PerDrawSlots::CB_PerDraw perDraw;
+        XMStoreFloat4x4(&perDraw.World, XMMatrixTranspose(worldMatrix));
+        XMStoreFloat4x4(&perDraw.WorldPrev, XMMatrixTranspose(worldMatrix));
+        perDraw.lightmapIndex = -1;  // Not used in depth pre-pass
+        perDraw.objectID = 0;
 
-            // Get material for alpha mode check
-            CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
-            if (!meshRenderer->materialPath.empty()) {
-                material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
-            }
+        m_perDrawSet->Bind(BindingSetItem::VolatileCBV(0, &perDraw, sizeof(perDraw)));
+        cmdList->BindDescriptorSet(3, m_perDrawSet);
 
-            // Skip transparent and alpha-tested objects
-            if (material && (material->alphaMode == EAlphaMode::Blend ||
-                             material->alphaMode == EAlphaMode::Mask)) {
-                continue;
-            }
+        // Draw all meshes
+        for (auto& gpuMesh : meshRenderer->meshes) {
+            if (!gpuMesh) continue;
 
-            // Update object constants (World matrix)
-            XMMATRIX worldMatrix = transform->WorldMatrix();
-            CB_DepthObject objData;
-            objData.world = XMMatrixTranspose(worldMatrix);
-            cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &objData, sizeof(objData));
-
-            // Draw all meshes
-            for (auto& gpuMesh : meshRenderer->meshes) {
-                if (!gpuMesh) continue;
-
-                cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
-                cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
-                cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
-            }
+            cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
+            cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
+            cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
         }
     }
 }

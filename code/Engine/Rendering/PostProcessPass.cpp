@@ -124,7 +124,7 @@ void CPostProcessPass::Render(ITexture* hdrInput,
                               float bloomIntensity,
                               const SColorGradingSettings* colorGrading,
                               bool colorGradingEnabled) {
-    if (!m_initialized || !hdrInput || !ldrOutput || !m_pso) return;
+    if (!m_initialized || !hdrInput || !ldrOutput) return;
 
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
@@ -174,43 +174,59 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     cmdList->SetViewport(0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f);
     cmdList->SetScissorRect(0, 0, width, height);
 
-    // Set pipeline state (includes rasterizer, depth stencil, blend states)
-    cmdList->SetPipelineState(m_pso.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-
-    // Set vertex buffer
-    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
-
-    // Set constant buffer and resources
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_PostProcess));
-    cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
-    if (bloomTexture) {
-        cmdList->SetShaderResource(EShaderStage::Pixel, 1, bloomTexture);
-    }
-
-    // Bind LUT texture (use custom if available, otherwise neutral)
+    // Determine LUT texture (use custom if available, otherwise neutral)
     ITexture* lutTexture = (cb.lutContribution > 0.0f && m_customLUT) ? m_customLUT.get() : m_neutralLUT.get();
-    if (lutTexture) {
-        cmdList->SetShaderResource(EShaderStage::Pixel, 2, lutTexture);
-    }
 
-    // Bind exposure buffer for GPU-only auto exposure path
-    // Always bind a valid buffer to t3 to satisfy DX12 GPU validation
-    if (exposureBuffer) {
-        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, exposureBuffer);
+    // Determine exposure buffer (use dummy if none provided)
+    IBuffer* expBuffer = exposureBuffer ? exposureBuffer : m_dummyExposureBuffer.get();
+
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        cmdList->SetPipelineState(m_pso_ds.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
+
+        // Bind PerPass descriptor set
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_PostProcess)));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, hdrInput));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, bloomTexture ? bloomTexture : hdrInput));  // Use hdrInput as dummy if no bloom
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, lutTexture));
+        m_perPassSet->Bind(BindingSetItem::Buffer_SRV(3, expBuffer));
+        cmdList->BindDescriptorSet(1, m_perPassSet);
+
+        // Draw fullscreen quad
+        cmdList->Draw(4, 0);
     } else {
-        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, m_dummyExposureBuffer.get());
+        // Legacy path for DX11
+        if (!m_pso) return;
+
+        cmdList->SetPipelineState(m_pso.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
+
+        // Set constant buffer and resources
+        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_PostProcess));
+        cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
+        if (bloomTexture) {
+            cmdList->SetShaderResource(EShaderStage::Pixel, 1, bloomTexture);
+        }
+
+        if (lutTexture) {
+            cmdList->SetShaderResource(EShaderStage::Pixel, 2, lutTexture);
+        }
+
+        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, expBuffer);
+        cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
+
+        // Draw fullscreen quad
+        cmdList->Draw(4, 0);
+
+        // Unbind resources to prevent hazards
+        if (exposureBuffer) {
+            cmdList->UnbindShaderResources(EShaderStage::Pixel, 3, 1);
+        }
     }
 
-    cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
-
-    // Draw fullscreen quad
-    cmdList->Draw(4, 0);
-
-    // Unbind resources to prevent hazards
-    if (exposureBuffer) {
-        cmdList->UnbindShaderResources(EShaderStage::Pixel, 3, 1);
-    }
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 }
 
