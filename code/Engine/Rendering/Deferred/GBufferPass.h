@@ -64,20 +64,6 @@ public:
         RHI::IDescriptorSet* perFrameSet
     );
 
-    // ============================================
-    // Legacy Rendering (DX11 / fallback)
-    // ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-    void Render(
-        const CCamera& camera,
-        CScene& scene,
-        CGBuffer& gbuffer,
-        const DirectX::XMMATRIX& viewProjPrev,
-        uint32_t width,
-        uint32_t height
-    );
-#endif // FF_LEGACY_BINDING_DISABLED
-
     // Check if descriptor set mode is available (DX12 only)
     bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
 

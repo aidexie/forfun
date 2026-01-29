@@ -1,0 +1,23 @@
+// Equirectangular to Cubemap Conversion - Vertex Shader (Descriptor Set version)
+// Used during initialization to convert HDR equirectangular map to cubemap
+// SM 5.1 with explicit register spaces
+
+cbuffer CB : register(b0, space1) {
+    float4x4 viewProj;
+}
+
+struct VSIn {
+    float3 pos : POSITION;
+};
+
+struct VSOut {
+    float4 posH : SV_Position;
+    float3 localPos : TEXCOORD0;
+};
+
+VSOut main(VSIn input) {
+    VSOut output;
+    output.localPos = input.pos;
+    output.posH = mul(float4(input.pos, 1.0), viewProj);
+    return output;
+}

@@ -84,12 +84,6 @@ private:
 
 private:
     // Rendering resources (RHI abstractions)
-#ifndef FF_LEGACY_BINDING_DISABLED
-    RHI::ShaderPtr m_fullscreenVS;
-    RHI::ShaderPtr m_irradiancePS;
-    RHI::ShaderPtr m_prefilterPS;
-    RHI::ShaderPtr m_brdfLutPS;
-#endif
     RHI::SamplerPtr m_sampler;
     RHI::BufferPtr m_cbFaceIndex;
     RHI::BufferPtr m_cbRoughness;

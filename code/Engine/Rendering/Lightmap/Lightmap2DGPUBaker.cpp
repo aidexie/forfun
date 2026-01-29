@@ -91,6 +91,17 @@ void CLightmap2DGPUBaker::Shutdown() {
 
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     if (ctx) {
+        // Cleanup DXR descriptor set
+        if (m_dxrPerPassSet) {
+            ctx->FreeDescriptorSet(m_dxrPerPassSet);
+            m_dxrPerPassSet = nullptr;
+        }
+        if (m_dxrPerPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_dxrPerPassLayout);
+            m_dxrPerPassLayout = nullptr;
+        }
+
+        // Cleanup compute descriptor set
         if (m_computePerPassSet) {
             ctx->FreeDescriptorSet(m_computePerPassSet);
             m_computePerPassSet = nullptr;
@@ -637,226 +648,6 @@ bool CLightmap2DGPUBaker::CreateOutputTexture(uint32_t atlasWidth, uint32_t atla
     return m_outputTexture != nullptr;
 }
 
-// ============================================
-// Baking (Legacy Binding Path)
-// ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-
-void CLightmap2DGPUBaker::DispatchBake(const SLightmap2DGPUBakeConfig& config) {
-    CFFLog::Warning("[Lightmap2DGPUBaker] Using legacy binding path for DispatchBake - consider migrating to descriptor sets");
-
-    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-    auto* cmdList = ctx->GetCommandList();
-    if (!cmdList) return;
-
-    // Calculate number of batches
-    uint32_t numBatches = (m_validTexelCount + BATCH_SIZE - 1) / BATCH_SIZE;
-
-    CFFLog::Info("[Lightmap2DGPUBaker] Dispatching %u batches (%u texels, %u samples/texel)",
-                 numBatches, m_validTexelCount, config.samplesPerTexel);
-
-    // Set pipeline
-    cmdList->SetRayTracingPipelineState(m_rtPipeline.get());
-
-    // Bind TLAS (t0 is handled by SetAccelerationStructure)
-    cmdList->SetAccelerationStructure(0, m_asManager->GetTLAS());
-
-    // Bind SRVs using SetShaderResource/SetShaderResourceBuffer
-    // t1=Skybox, t2=Materials, t3=Lights, t4=Instances, t5=Vertices, t6=Indices, t7=TexelData
-    if (m_skyboxTexture) {
-        cmdList->SetShaderResource(RHI::EShaderStage::Compute, 1, m_skyboxTexture);
-    }
-    if (m_materialBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 2, m_materialBuffer.get());
-    }
-    if (m_lightBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 3, m_lightBuffer.get());
-    }
-    if (m_instanceBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 4, m_instanceBuffer.get());
-    }
-    if (m_vertexBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 5, m_vertexBuffer.get());
-    }
-    if (m_indexBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 6, m_indexBuffer.get());
-    }
-    if (m_texelBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 7, m_texelBuffer.get());
-    }
-
-    // Bind UAV: u0=Accumulation
-    cmdList->SetUnorderedAccess(0, m_accumulationBuffer.get());
-
-    // Bind sampler
-    if (m_skyboxSampler) {
-        cmdList->SetSampler(RHI::EShaderStage::Compute, 0, m_skyboxSampler);
-    }
-
-    // Process each batch
-    for (uint32_t batch = 0; batch < numBatches; batch++) {
-        uint32_t batchOffset = batch * BATCH_SIZE;
-        uint32_t batchSize = std::min(BATCH_SIZE, m_validTexelCount - batchOffset);
-
-        // Update constant buffer
-        CB_Lightmap2DBakeParams cbData = {};
-        cbData.totalTexels = m_validTexelCount;
-        cbData.samplesPerTexel = config.samplesPerTexel;
-        cbData.maxBounces = config.maxBounces;
-        cbData.skyIntensity = config.skyIntensity;
-        cbData.atlasWidth = m_atlasWidth;
-        cbData.atlasHeight = m_atlasHeight;
-        cbData.batchOffset = batchOffset;
-        cbData.batchSize = batchSize;
-        cbData.frameIndex = batch;  // Use batch index for RNG variation
-        cbData.numLights = m_numLights;
-
-        // Use SetConstantBufferData for inline CB update
-        cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &cbData, sizeof(cbData));
-
-        // Dispatch rays
-        // Dispatch (batchSize, samplesPerTexel, 1)
-        RHI::DispatchRaysDesc dispatchDesc = {};
-        dispatchDesc.width = batchSize;
-        dispatchDesc.height = config.samplesPerTexel;
-        dispatchDesc.depth = 1;
-        dispatchDesc.shaderBindingTable = m_sbt.get();
-
-        cmdList->DispatchRays(dispatchDesc);
-
-        // Report progress
-        float progress = static_cast<float>(batch + 1) / numBatches * 0.8f;  // 80% for baking
-        ReportProgress(progress, "Baking");
-    }
-}
-
-void CLightmap2DGPUBaker::FinalizeAtlas() {
-    CFFLog::Warning("[Lightmap2DGPUBaker] Using legacy binding path for FinalizeAtlas - consider migrating to descriptor sets");
-
-    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-    auto* cmdList = ctx->GetCommandList();
-    if (!cmdList) return;
-
-    ReportProgress(0.85f, "Finalizing atlas");
-
-    // Set compute pipeline
-    cmdList->SetPipelineState(m_finalizePipeline.get());
-
-    // Bind resources
-    // SRV: t0=Accumulation buffer
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 0, m_accumulationBuffer.get());
-
-    // UAV: u0=Output texture
-    cmdList->SetUnorderedAccessTexture(0, m_outputTexture.get());
-
-    // Update constant buffer with atlas dimensions
-    CB_Lightmap2DBakeParams cbData = {};
-    cbData.atlasWidth = m_atlasWidth;
-    cbData.atlasHeight = m_atlasHeight;
-
-    // Use SetConstantBufferData for inline CB update
-    cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &cbData, sizeof(cbData));
-
-    // Dispatch compute shader
-    // Thread groups: (atlasWidth/8, atlasHeight/8, 1)
-    uint32_t groupsX = (m_atlasWidth + 7) / 8;
-    uint32_t groupsY = (m_atlasHeight + 7) / 8;
-
-    cmdList->Dispatch(groupsX, groupsY, 1);
-
-    ReportProgress(0.95f, "Finalize complete");
-}
-
-void CLightmap2DGPUBaker::DilateLightmap(int radius) {
-    if (radius <= 0) {
-        ReportProgress(0.98f, "Dilation skipped");
-        return;
-    }
-
-    CFFLog::Warning("[Lightmap2DGPUBaker] Using legacy binding path for DilateLightmap - consider migrating to descriptor sets");
-
-    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
-    if (!ctx || !m_dilatePipeline || !m_outputTexture) {
-        ReportProgress(0.98f, "Dilation skipped (no resources)");
-        return;
-    }
-
-    auto* cmdList = ctx->GetCommandList();
-    if (!cmdList) return;
-
-    // Create temp texture for ping-pong if needed
-    if (!m_dilateTemp) {
-        RHI::TextureDesc texDesc;
-        texDesc.width = m_atlasWidth;
-        texDesc.height = m_atlasHeight;
-        texDesc.format = RHI::ETextureFormat::R16G16B16A16_FLOAT;
-        texDesc.usage = RHI::ETextureUsage::UnorderedAccess | RHI::ETextureUsage::ShaderResource;
-        texDesc.debugName = "Lightmap2D_DilateTemp";
-
-        m_dilateTemp.reset(ctx->CreateTexture(texDesc, nullptr));
-        if (!m_dilateTemp) {
-            CFFLog::Error("[Lightmap2DGPUBaker] Failed to create dilate temp texture");
-            return;
-        }
-    }
-
-    CFFLog::Info("[Lightmap2DGPUBaker] Running %d dilation passes", radius);
-
-    // Constant buffer for dilation params
-    struct CB_DilateParams {
-        uint32_t atlasWidth;
-        uint32_t atlasHeight;
-        uint32_t searchRadius;
-        uint32_t padding;
-    };
-
-    CB_DilateParams cbData;
-    cbData.atlasWidth = m_atlasWidth;
-    cbData.atlasHeight = m_atlasHeight;
-    cbData.searchRadius = 1;  // Search 1 pixel per pass
-    cbData.padding = 0;
-
-    uint32_t groupsX = (m_atlasWidth + 7) / 8;
-    uint32_t groupsY = (m_atlasHeight + 7) / 8;
-
-    // Ping-pong dilation passes
-    // Pass 0: output -> temp
-    // Pass 1: temp -> output
-    // ...
-    for (int pass = 0; pass < radius; pass++) {
-        bool evenPass = (pass % 2) == 0;
-        RHI::ITexture* inputTex = evenPass ? m_outputTexture.get() : m_dilateTemp.get();
-        RHI::ITexture* outputTex = evenPass ? m_dilateTemp.get() : m_outputTexture.get();
-
-        // Set pipeline
-        cmdList->SetPipelineState(m_dilatePipeline.get());
-
-        // Bind resources
-        cmdList->SetShaderResource(RHI::EShaderStage::Compute, 0, inputTex);
-        cmdList->SetUnorderedAccessTexture(0, outputTex);
-        cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &cbData, sizeof(cbData));
-
-        // Dispatch
-        cmdList->Dispatch(groupsX, groupsY, 1);
-
-        // Barrier between passes
-        cmdList->UAVBarrier(outputTex);
-    }
-
-    // If we ended on an odd pass, the result is in temp - copy back to output
-    if ((radius % 2) == 1) {
-        cmdList->CopyTexture(m_outputTexture.get(), m_dilateTemp.get());
-    }
-
-    ReportProgress(0.98f, "Dilation complete");
-}
-
-#endif // FF_LEGACY_BINDING_DISABLED
-
 void CLightmap2DGPUBaker::DenoiseLightmap() {
     if (!m_enableDenoiser) {
         ReportProgress(0.99f, "Denoising skipped (disabled)");
@@ -1223,47 +1014,26 @@ RHI::TexturePtr CLightmap2DGPUBaker::BakeLightmap(
     ReportProgress(0.15f, "Baking");
     if (IsDescriptorSetModeAvailable()) {
         DispatchBake_DS(config);
-    }
-#ifndef FF_LEGACY_BINDING_DISABLED
-    else {
-        DispatchBake(config);
-    }
-#else
-    else {
+    } else {
         CFFLog::Error("[Lightmap2DGPUBaker] Legacy binding disabled and descriptor sets not available for ray tracing");
         return nullptr;
     }
-#endif
 
     // Phase 7: Finalize atlas
     if (IsDescriptorSetModeAvailable()) {
         FinalizeAtlas_DS();
-    }
-#ifndef FF_LEGACY_BINDING_DISABLED
-    else {
-        FinalizeAtlas();
-    }
-#else
-    else {
+    } else {
         CFFLog::Error("[Lightmap2DGPUBaker] Legacy binding disabled and descriptor sets not available for finalize");
         return nullptr;
     }
-#endif
 
     // Phase 8: Dilation (optional)
     if (IsDescriptorSetModeAvailable()) {
         DilateLightmap_DS(4);
-    }
-#ifndef FF_LEGACY_BINDING_DISABLED
-    else {
-        DilateLightmap(4);
-    }
-#else
-    else {
+    } else {
         CFFLog::Error("[Lightmap2DGPUBaker] Legacy binding disabled and descriptor sets not available for dilation");
         return nullptr;
     }
-#endif
 
     // Phase 9: OIDN Denoising (optional)
     DenoiseLightmap();
@@ -1288,7 +1058,10 @@ bool CLightmap2DGPUBaker::IsDescriptorSetModeAvailable() const {
     if (!ctx) return false;
 
     // Descriptor sets are only supported on DX12
-    return ctx->GetBackend() == RHI::EBackend::DX12 && m_computePerPassSet != nullptr;
+    // Check both DXR and compute descriptor sets are available
+    return ctx->GetBackend() == RHI::EBackend::DX12 &&
+           m_dxrPerPassSet != nullptr &&
+           m_computePerPassSet != nullptr;
 }
 
 void CLightmap2DGPUBaker::InitDescriptorSets() {
@@ -1301,7 +1074,50 @@ void CLightmap2DGPUBaker::InitDescriptorSets() {
         return;
     }
 
-    // Create unified compute layout
+    // ============================================
+    // Create DXR-specific descriptor set layout for ray tracing
+    // ============================================
+    // Layout:
+    //   b0: VolatileCBV (CB_Lightmap2DBakeParams)
+    //   t0: AccelerationStructure (TLAS)
+    //   t1: Texture_SRV (Skybox)
+    //   t2-t4: Buffer_SRV (Materials, Lights, Instances)
+    //   t5-t6: Buffer_SRV (Vertices, Indices)
+    //   t7: Buffer_SRV (TexelData)
+    //   u0: Buffer_UAV (Accumulation)
+    //   s0: Sampler (SkyboxSampler)
+    {
+        RHI::BindingLayoutDesc layoutDesc("Lightmap2D_DXR_PerPass");
+        layoutDesc.AddItem(RHI::BindingLayoutItem::VolatileCBV(0, sizeof(CB_Lightmap2DBakeParams)));
+        layoutDesc.AddItem(RHI::BindingLayoutItem::AccelerationStructure(0));  // t0: TLAS
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Texture_SRV(1));            // t1: Skybox
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(2));             // t2: Materials
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(3));             // t3: Lights
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(4));             // t4: Instances
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(5));             // t5: Vertices
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(6));             // t6: Indices
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(7));             // t7: TexelData
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_UAV(0));             // u0: Accumulation
+        layoutDesc.AddItem(RHI::BindingLayoutItem::Sampler(0));                // s0: SkyboxSampler
+
+        m_dxrPerPassLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+        if (!m_dxrPerPassLayout) {
+            CFFLog::Error("[Lightmap2DGPUBaker] Failed to create DXR PerPass layout");
+            return;
+        }
+
+        m_dxrPerPassSet = ctx->AllocateDescriptorSet(m_dxrPerPassLayout);
+        if (!m_dxrPerPassSet) {
+            CFFLog::Error("[Lightmap2DGPUBaker] Failed to allocate DXR PerPass descriptor set");
+            ctx->DestroyDescriptorSetLayout(m_dxrPerPassLayout);
+            m_dxrPerPassLayout = nullptr;
+            return;
+        }
+    }
+
+    // ============================================
+    // Create unified compute layout for finalize/dilate passes
+    // ============================================
     m_computePerPassLayout = ComputePassLayout::CreateComputePerPassLayout(ctx);
     if (!m_computePerPassLayout) {
         CFFLog::Error("[Lightmap2DGPUBaker] Failed to create compute PerPass layout");
@@ -1385,14 +1201,9 @@ void CLightmap2DGPUBaker::InitDescriptorSets() {
 // Baking (Descriptor Set Path)
 // ============================================
 
-// Note: Ray tracing dispatch uses legacy binding APIs because DXR requires specific
-// root signature setup that differs from compute passes. The ray tracing pipeline
-// uses SetAccelerationStructure, SetShaderResource, etc. which work with the DXR
-// root signature. This is guarded with FF_LEGACY_BINDING_DISABLED.
-//
-// Future work: Create a dedicated DXR descriptor set layout for ray tracing passes.
-
-#ifndef FF_LEGACY_BINDING_DISABLED
+// Ray tracing dispatch uses a dedicated DXR descriptor set layout that includes
+// AccelerationStructure binding. This is separate from the compute pass layout
+// used by FinalizeAtlas_DS and DilateLightmap_DS.
 
 void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config) {
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
@@ -1400,6 +1211,12 @@ void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config
 
     auto* cmdList = ctx->GetCommandList();
     if (!cmdList) return;
+
+    // Check if DXR descriptor set is available
+    if (!m_dxrPerPassSet) {
+        CFFLog::Error("[Lightmap2DGPUBaker] DispatchBake_DS: DXR descriptor set not initialized");
+        return;
+    }
 
     // Calculate number of batches
     uint32_t numBatches = (m_validTexelCount + BATCH_SIZE - 1) / BATCH_SIZE;
@@ -1410,39 +1227,44 @@ void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config
     // Set pipeline
     cmdList->SetRayTracingPipelineState(m_rtPipeline.get());
 
-    // Bind TLAS (t0 is handled by SetAccelerationStructure)
-    cmdList->SetAccelerationStructure(0, m_asManager->GetTLAS());
-
-    // Bind SRVs using SetShaderResource/SetShaderResourceBuffer
-    // t1=Skybox, t2=Materials, t3=Lights, t4=Instances, t5=Vertices, t6=Indices, t7=TexelData
-    if (m_skyboxTexture) {
-        cmdList->SetShaderResource(RHI::EShaderStage::Compute, 1, m_skyboxTexture);
+    // Bind resources via descriptor set
+    // t0: TLAS (AccelerationStructure)
+    auto* tlas = m_asManager->GetTLAS();
+    if (tlas) {
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::AccelerationStructure(0, tlas));
     }
+
+    // t1: Skybox texture
+    if (m_skyboxTexture) {
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Texture_SRV(1, m_skyboxTexture));
+    }
+
+    // t2-t7: Scene buffers
     if (m_materialBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 2, m_materialBuffer.get());
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(2, m_materialBuffer.get()));
     }
     if (m_lightBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 3, m_lightBuffer.get());
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(3, m_lightBuffer.get()));
     }
     if (m_instanceBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 4, m_instanceBuffer.get());
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(4, m_instanceBuffer.get()));
     }
     if (m_vertexBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 5, m_vertexBuffer.get());
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(5, m_vertexBuffer.get()));
     }
     if (m_indexBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 6, m_indexBuffer.get());
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(6, m_indexBuffer.get()));
     }
     if (m_texelBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 7, m_texelBuffer.get());
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(7, m_texelBuffer.get()));
     }
 
-    // Bind UAV: u0=Accumulation
-    cmdList->SetUnorderedAccess(0, m_accumulationBuffer.get());
+    // u0: Accumulation buffer (UAV)
+    m_dxrPerPassSet->Bind(RHI::BindingSetItem::Buffer_UAV(0, m_accumulationBuffer.get()));
 
-    // Bind sampler
+    // s0: Skybox sampler
     if (m_skyboxSampler) {
-        cmdList->SetSampler(RHI::EShaderStage::Compute, 0, m_skyboxSampler);
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::Sampler(0, m_skyboxSampler));
     }
 
     // Process each batch
@@ -1463,8 +1285,11 @@ void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config
         cbData.frameIndex = batch;  // Use batch index for RNG variation
         cbData.numLights = m_numLights;
 
-        // Use SetConstantBufferData for inline CB update
-        cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &cbData, sizeof(cbData));
+        // Bind volatile CBV
+        m_dxrPerPassSet->Bind(RHI::BindingSetItem::VolatileCBV(0, &cbData, sizeof(cbData)));
+
+        // Bind the descriptor set (Set 1: PerPass)
+        cmdList->BindDescriptorSet(1, m_dxrPerPassSet);
 
         // Dispatch rays
         // Dispatch (batchSize, samplesPerTexel, 1)
@@ -1482,25 +1307,10 @@ void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config
     }
 }
 
-#else // FF_LEGACY_BINDING_DISABLED
-
-void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& /*config*/) {
-    // DXR ray tracing requires legacy binding APIs for resource binding.
-    // When FF_LEGACY_BINDING_DISABLED is defined, ray tracing baking is not available.
-    // Future work: Implement DXR-specific descriptor set layout for ray tracing passes.
-    CFFLog::Error("[Lightmap2DGPUBaker] DispatchBake_DS: DXR ray tracing requires legacy binding APIs. "
-                  "Ray tracing baking is not available when FF_LEGACY_BINDING_DISABLED is defined.");
-}
-
-#endif // FF_LEGACY_BINDING_DISABLED
-
 void CLightmap2DGPUBaker::FinalizeAtlas_DS() {
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!ctx || !m_finalizePipeline_ds || !m_computePerPassSet) {
-        CFFLog::Warning("[Lightmap2DGPUBaker] FinalizeAtlas_DS: Missing resources, falling back");
-#ifndef FF_LEGACY_BINDING_DISABLED
-        FinalizeAtlas();
-#endif
+        CFFLog::Warning("[Lightmap2DGPUBaker] FinalizeAtlas_DS: Missing resources");
         return;
     }
 
@@ -1542,10 +1352,7 @@ void CLightmap2DGPUBaker::DilateLightmap_DS(int radius) {
 
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!ctx || !m_dilatePipeline_ds || !m_computePerPassSet || !m_outputTexture) {
-        CFFLog::Warning("[Lightmap2DGPUBaker] DilateLightmap_DS: Missing resources, falling back");
-#ifndef FF_LEGACY_BINDING_DISABLED
-        DilateLightmap(radius);
-#endif
+        CFFLog::Warning("[Lightmap2DGPUBaker] DilateLightmap_DS: Missing resources");
         return;
     }
 

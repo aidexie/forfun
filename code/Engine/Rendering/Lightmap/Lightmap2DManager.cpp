@@ -55,39 +55,6 @@ void CLightmap2DManager::BindToDescriptorSet(RHI::IDescriptorSet* descriptorSet,
     }
 }
 
-// ============================================
-// Bind (Legacy API)
-// ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-
-void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
-    // WARNING: Legacy binding path - will be removed in future versions
-    // Migrate to BindToDescriptorSet() for DX12 descriptor set architecture
-    static bool s_warnedOnce = false;
-    if (!s_warnedOnce) {
-        CFFLog::Warning("[Lightmap2DManager] Using legacy Bind() - migrate to BindToDescriptorSet() for descriptor set architecture");
-        s_warnedOnce = true;
-    }
-
-    if (!m_isLoaded || !cmdList) {
-        return;
-    }
-
-    // Bind t16: Atlas texture
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 16, GetAtlasTexture());
-
-    // Bind t17: ScaleOffset structured buffer
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
-}
-
-#else // FF_LEGACY_BINDING_DISABLED
-
-void CLightmap2DManager::Bind(RHI::ICommandList* /*cmdList*/) {
-    // Legacy binding is disabled - use BindToDescriptorSet() instead
-    CFFLog::Error("[Lightmap2DManager] Legacy Bind() called but FF_LEGACY_BINDING_DISABLED is defined. Use BindToDescriptorSet() instead.");
-}
-
-#endif // FF_LEGACY_BINDING_DISABLED
 
 // ============================================
 // Direct Data Transfer

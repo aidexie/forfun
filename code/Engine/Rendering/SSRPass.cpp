@@ -17,63 +17,6 @@ using namespace DirectX;
 using namespace RHI;
 
 // ============================================
-// Internal Helpers
-// ============================================
-
-namespace {
-
-// Compile a compute shader and create its PSO
-// Returns true on success, false on failure
-bool CreateComputeShaderAndPSO(const std::string& shaderPath,
-                                const char* entryPoint,
-                                const char* shaderDebugName,
-                                const char* psoDebugName,
-                                ShaderPtr& outShader,
-                                PipelineStatePtr& outPSO)
-{
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return false;
-
-#ifdef _DEBUG
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    SCompiledShader compiled = CompileShaderFromFile(shaderPath, entryPoint, "cs_5_0", nullptr, debugShaders);
-    if (!compiled.success) {
-        CFFLog::Error("[SSRPass] Shader compilation failed (%s): %s", shaderDebugName, compiled.errorMessage.c_str());
-        return false;
-    }
-
-    ShaderDesc shaderDesc;
-    shaderDesc.type = EShaderType::Compute;
-    shaderDesc.bytecode = compiled.bytecode.data();
-    shaderDesc.bytecodeSize = compiled.bytecode.size();
-    shaderDesc.debugName = shaderDebugName;
-    outShader.reset(ctx->CreateShader(shaderDesc));
-
-    if (!outShader) {
-        CFFLog::Error("[SSRPass] Failed to create shader: %s", shaderDebugName);
-        return false;
-    }
-
-    ComputePipelineDesc psoDesc;
-    psoDesc.computeShader = outShader.get();
-    psoDesc.debugName = psoDebugName;
-    outPSO.reset(ctx->CreateComputePipelineState(psoDesc));
-
-    if (!outPSO) {
-        CFFLog::Error("[SSRPass] Failed to create PSO: %s", psoDebugName);
-        return false;
-    }
-
-    return true;
-}
-
-} // anonymous namespace
-
-// ============================================
 // Lifecycle
 // ============================================
 
@@ -82,10 +25,6 @@ bool CSSRPass::Initialize() {
 
     CFFLog::Info("[SSRPass] Initializing...");
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    createShaders();
-    createCompositeShader();
-#endif
     createSamplers();
     createFallbackTexture();
     createBlueNoiseTexture();
@@ -97,13 +36,6 @@ bool CSSRPass::Initialize() {
 }
 
 void CSSRPass::Shutdown() {
-#ifndef FF_LEGACY_BINDING_DISABLED
-    m_ssrCS.reset();
-    m_ssrPSO.reset();
-    m_compositeCS.reset();
-    m_compositePSO.reset();
-#endif
-
     m_ssrResult.reset();
     m_ssrHistory.reset();
     m_blueNoise.reset();
@@ -112,11 +44,11 @@ void CSSRPass::Shutdown() {
     m_pointSampler.reset();
     m_linearSampler.reset();
 
-    // Cleanup DS resources
-    m_ssrCS_ds.reset();
-    m_compositeCS_ds.reset();
-    m_ssrPSO_ds.reset();
-    m_compositePSO_ds.reset();
+    // Cleanup descriptor set resources
+    m_ssrCS.reset();
+    m_compositeCS.reset();
+    m_ssrPSO.reset();
+    m_compositePSO.reset();
 
     auto* ctx = CRHIManager::Instance().GetRenderContext();
     if (ctx) {
@@ -228,78 +160,31 @@ void CSSRPass::Render(ICommandList* cmdList,
     // Transition SSR result to UAV state
     cmdList->Barrier(m_ssrResult.get(), EResourceState::ShaderResource, EResourceState::UnorderedAccess);
 
-    // Use descriptor set path if available (DX12)
-    if (IsDescriptorSetModeAvailable()) {
-        cmdList->SetPipelineState(m_ssrPSO_ds.get());
-
-        // Bind PerPass descriptor set
-        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_SSR)));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, depthBuffer));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, normalBuffer));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, hiZTexture));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(3, sceneColor));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(4, m_blueNoise.get()));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(5, m_ssrHistory.get()));
-        m_perPassSet->Bind(BindingSetItem::Texture_UAV(0, m_ssrResult.get()));
-        cmdList->BindDescriptorSet(1, m_perPassSet);
-
-        cmdList->Dispatch(groupsX, groupsY, 1);
-    } else {
-#ifndef FF_LEGACY_BINDING_DISABLED
-        // Legacy path for DX11
-        if (!m_ssrPSO) {
-            cmdList->Barrier(m_ssrResult.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
-            return;
-        }
-
-        cmdList->SetPipelineState(m_ssrPSO.get());
-
-        // Bind resources
-        cmdList->SetShaderResource(EShaderStage::Compute, 0, depthBuffer);
-        cmdList->SetShaderResource(EShaderStage::Compute, 1, normalBuffer);
-        cmdList->SetShaderResource(EShaderStage::Compute, 2, hiZTexture);
-        cmdList->SetShaderResource(EShaderStage::Compute, 3, sceneColor);
-        cmdList->SetShaderResource(EShaderStage::Compute, 4, m_blueNoise.get());
-        cmdList->SetShaderResource(EShaderStage::Compute, 5, m_ssrHistory.get());
-
-        cmdList->SetUnorderedAccessTexture(0, m_ssrResult.get());
-
-        cmdList->SetSampler(EShaderStage::Compute, 0, m_pointSampler.get());
-        cmdList->SetSampler(EShaderStage::Compute, 1, m_linearSampler.get());
-
-        cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
-
-        cmdList->Dispatch(groupsX, groupsY, 1);
-#else
-        CFFLog::Warning("[SSRPass] Legacy binding disabled but descriptor set mode not available");
-#endif
+    // Use descriptor set path (DX12)
+    if (!IsDescriptorSetModeAvailable()) {
+        CFFLog::Warning("[SSRPass] Descriptor set mode not available");
+        cmdList->Barrier(m_ssrResult.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+        return;
     }
+
+    cmdList->SetPipelineState(m_ssrPSO.get());
+
+    // Bind PerPass descriptor set
+    m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_SSR)));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, depthBuffer));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, normalBuffer));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, hiZTexture));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(3, sceneColor));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(4, m_blueNoise.get()));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(5, m_ssrHistory.get()));
+    m_perPassSet->Bind(BindingSetItem::Texture_UAV(0, m_ssrResult.get()));
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    cmdList->Dispatch(groupsX, groupsY, 1);
 
     // Transition SSR result back to SRV state
     cmdList->Barrier(m_ssrResult.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
 }
-
-// ============================================
-// Shader Creation (Legacy SM 5.0)
-// ============================================
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-void CSSRPass::createShaders() {
-    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSR.cs.hlsl";
-
-    if (CreateComputeShaderAndPSO(shaderPath, "CSMain", "SSR_CS", "SSR_PSO", m_ssrCS, m_ssrPSO)) {
-        CFFLog::Info("[SSRPass] SSR shader compiled successfully");
-    }
-}
-
-void CSSRPass::createCompositeShader() {
-    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/SSRComposite.cs.hlsl";
-
-    if (CreateComputeShaderAndPSO(shaderPath, "CSMain", "SSRComposite_CS", "SSRComposite_PSO", m_compositeCS, m_compositePSO)) {
-        CFFLog::Info("[SSRPass] Composite shader compiled successfully");
-    }
-}
-#endif
 
 void CSSRPass::createTextures(uint32_t width, uint32_t height) {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -419,51 +304,23 @@ void CSSRPass::Composite(ICommandList* cmdList,
     uint32_t groupsX = (width + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
     uint32_t groupsY = (height + SSRConfig::THREAD_GROUP_SIZE - 1) / SSRConfig::THREAD_GROUP_SIZE;
 
-    // Use descriptor set path if available (DX12)
-    if (IsDescriptorSetModeAvailable() && m_compositePSO_ds) {
-        cmdList->SetPipelineState(m_compositePSO_ds.get());
-
-        // Bind PerPass descriptor set
-        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_SSRComposite)));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, hdrBuffer));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, m_ssrResult.get()));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, worldPosMetallic));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(3, normalRoughness));
-        m_perPassSet->Bind(BindingSetItem::Texture_UAV(0, hdrBuffer));
-        cmdList->BindDescriptorSet(1, m_perPassSet);
-
-        cmdList->Dispatch(groupsX, groupsY, 1);
-    } else {
-#ifndef FF_LEGACY_BINDING_DISABLED
-        // Legacy path for DX11
-        if (!m_compositePSO) {
-            return;
-        }
-
-        // Transition HDR buffer to UAV state for read-modify-write
-        // cmdList->Barrier(hdrBuffer, EResourceState::RenderTarget, EResourceState::UnorderedAccess);
-
-        // Set PSO
-        cmdList->SetPipelineState(m_compositePSO.get());
-
-        // Bind resources
-        cmdList->SetShaderResource(EShaderStage::Compute, 0, hdrBuffer);  // Will be bound as UAV for output
-        cmdList->SetShaderResource(EShaderStage::Compute, 1, m_ssrResult.get());
-        cmdList->SetShaderResource(EShaderStage::Compute, 2, worldPosMetallic);
-        cmdList->SetShaderResource(EShaderStage::Compute, 3, normalRoughness);
-
-        cmdList->SetUnorderedAccessTexture(0, hdrBuffer);
-
-        cmdList->SetSampler(EShaderStage::Compute, 0, m_linearSampler.get());
-        cmdList->SetSampler(EShaderStage::Compute, 1, m_pointSampler.get());
-
-        cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
-
-        cmdList->Dispatch(groupsX, groupsY, 1);
-#else
-        CFFLog::Warning("[SSRPass] Legacy binding disabled but descriptor set mode not available for Composite");
-#endif
+    // Use descriptor set path (DX12)
+    if (!IsDescriptorSetModeAvailable() || !m_compositePSO) {
+        return;
     }
+
+    cmdList->SetPipelineState(m_compositePSO.get());
+
+    // Bind PerPass descriptor set
+    m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_SSRComposite)));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, hdrBuffer));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, m_ssrResult.get()));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, worldPosMetallic));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(3, normalRoughness));
+    m_perPassSet->Bind(BindingSetItem::Texture_UAV(0, hdrBuffer));
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    cmdList->Dispatch(groupsX, groupsY, 1);
 
     // Transition HDR buffer back to RTV/SRV state
     cmdList->Barrier(hdrBuffer, EResourceState::UnorderedAccess, EResourceState::RenderTarget);
@@ -575,14 +432,14 @@ void CSSRPass::initDescriptorSets() {
         shaderDesc.type = EShaderType::Compute;
         shaderDesc.bytecode = compiled.bytecode.data();
         shaderDesc.bytecodeSize = compiled.bytecode.size();
-        shaderDesc.debugName = "SSR_DS_CS";
-        m_ssrCS_ds.reset(ctx->CreateShader(shaderDesc));
+        shaderDesc.debugName = "SSR_CS";
+        m_ssrCS.reset(ctx->CreateShader(shaderDesc));
 
         ComputePipelineDesc psoDesc;
-        psoDesc.computeShader = m_ssrCS_ds.get();
+        psoDesc.computeShader = m_ssrCS.get();
         psoDesc.setLayouts[1] = m_computePerPassLayout;  // Set 1: PerPass (space1)
-        psoDesc.debugName = "SSR_DS_PSO";
-        m_ssrPSO_ds.reset(ctx->CreateComputePipelineState(psoDesc));
+        psoDesc.debugName = "SSR_PSO";
+        m_ssrPSO.reset(ctx->CreateComputePipelineState(psoDesc));
     }
 
     // Compile SM 5.1 Composite shader
@@ -597,14 +454,14 @@ void CSSRPass::initDescriptorSets() {
             shaderDesc.type = EShaderType::Compute;
             shaderDesc.bytecode = compiled.bytecode.data();
             shaderDesc.bytecodeSize = compiled.bytecode.size();
-            shaderDesc.debugName = "SSRComposite_DS_CS";
-            m_compositeCS_ds.reset(ctx->CreateShader(shaderDesc));
+            shaderDesc.debugName = "SSRComposite_CS";
+            m_compositeCS.reset(ctx->CreateShader(shaderDesc));
 
             ComputePipelineDesc psoDesc;
-            psoDesc.computeShader = m_compositeCS_ds.get();
+            psoDesc.computeShader = m_compositeCS.get();
             psoDesc.setLayouts[1] = m_computePerPassLayout;
-            psoDesc.debugName = "SSRComposite_DS_PSO";
-            m_compositePSO_ds.reset(ctx->CreateComputePipelineState(psoDesc));
+            psoDesc.debugName = "SSRComposite_PSO";
+            m_compositePSO.reset(ctx->CreateComputePipelineState(psoDesc));
         }
     }
 

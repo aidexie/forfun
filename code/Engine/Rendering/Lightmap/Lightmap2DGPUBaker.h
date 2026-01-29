@@ -327,6 +327,12 @@ private:
     // Descriptor Set Resources (DX12 only)
     // ============================================
 
+    // DXR descriptor set layout for ray tracing passes
+    RHI::IDescriptorSetLayout* m_dxrPerPassLayout = nullptr;
+
+    // DXR descriptor set for ray tracing passes
+    RHI::IDescriptorSet* m_dxrPerPassSet = nullptr;
+
     // Descriptor set layout for compute passes (finalize, dilate)
     RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
 

@@ -319,10 +319,6 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 0. Unbind resources to avoid hazards
     // ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-    cmdList->UnbindShaderResources(EShaderStage::Vertex, 0, 8);
-    cmdList->UnbindShaderResources(EShaderStage::Pixel, 0, 8);
-#endif
     cmdList->UnbindRenderTargets();
 
     // ============================================
@@ -440,15 +436,6 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
                                       &m_shadowPass, m_perFrameSet,
                                       ssaoTexture);
             }
-#ifndef FF_LEGACY_BINDING_DISABLED
-            else {
-                // Legacy path (DX11 or fallback)
-                m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
-                                      m_offHDR.get(), ctx.width, ctx.height,
-                                      &m_shadowPass, &m_clusteredLighting,
-                                      ssaoTexture);
-            }
-#endif
         } else {
             // Non-SSR debug modes: clear HDR to black
             ITexture* hdrRT = m_offHDR.get();
@@ -736,41 +723,9 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
 
 void CDeferredRenderPipeline::renderDebugVisualization(uint32_t width, uint32_t height)
 {
-#ifndef FF_LEGACY_BINDING_DISABLED
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ICommandList* cmdList = ctx->GetCommandList();
-
-    if (!m_debugPSO) return;
-
-    cmdList->SetPipelineState(m_debugPSO.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-
-    // Bind G-Buffer textures
-    cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_gbuffer.GetWorldPosMetallic());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 1, m_gbuffer.GetNormalRoughness());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 2, m_gbuffer.GetAlbedoAO());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 3, m_gbuffer.GetEmissiveMaterialID());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 4, m_gbuffer.GetVelocity());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 5, m_gbuffer.GetDepthBuffer());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 6, m_ssaoPass.GetSSAOTexture());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 7, m_hiZPass.GetHiZTexture());
-    cmdList->SetShaderResource(EShaderStage::Pixel, 8, m_ssrPass.GetSSRTexture());
-    cmdList->SetSampler(EShaderStage::Pixel, 0, m_debugSampler.get());
-
-    // Set debug mode
-    struct {
-        int debugMode;
-        float _pad[3];
-    } debugData = { static_cast<int>(CScene::Instance().GetLightSettings().gBufferDebugMode), {0, 0, 0} };
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &debugData, sizeof(debugData));
-
-    // Draw full-screen triangle (3 vertices, no vertex buffer)
-    cmdList->Draw(3, 0);
-#else
     // Debug visualization not available when legacy binding is disabled
     (void)width;
     (void)height;
-#endif
 }
 
 void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)

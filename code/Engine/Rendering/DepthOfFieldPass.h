@@ -82,24 +82,6 @@ private:
     RHI::TexturePtr m_blurTempFar;      // Blur temp far (R16G16B16A16_FLOAT)
 
     // ============================================
-    // Shaders & Pipeline (Legacy, SM 5.0)
-    // ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-    RHI::ShaderPtr m_fullscreenVS;      // Shared fullscreen vertex shader
-    RHI::ShaderPtr m_cocPS;             // Pass 1: CoC calculation
-    RHI::ShaderPtr m_downsampleSplitPS; // Pass 2: Downsample + near/far split
-    RHI::ShaderPtr m_blurHPS;           // Pass 3: Horizontal blur
-    RHI::ShaderPtr m_blurVPS;           // Pass 4: Vertical blur
-    RHI::ShaderPtr m_compositePS;       // Pass 5: Upsample + composite
-
-    RHI::PipelineStatePtr m_cocPSO;
-    RHI::PipelineStatePtr m_downsampleSplitPSO;
-    RHI::PipelineStatePtr m_blurHPSO;
-    RHI::PipelineStatePtr m_blurVPSO;
-    RHI::PipelineStatePtr m_compositePSO;
-#endif // FF_LEGACY_BINDING_DISABLED
-
-    // ============================================
     // Samplers
     // ============================================
     RHI::BufferPtr m_vertexBuffer;      // Fullscreen quad
@@ -118,24 +100,6 @@ private:
     // ============================================
     void ensureTextures(uint32_t width, uint32_t height);
     void createFullscreenQuad();
-#ifndef FF_LEGACY_BINDING_DISABLED
-    bool createShaders();
-    bool createPSOs();
-#endif // FF_LEGACY_BINDING_DISABLED
-
-    // Individual pass execution (Legacy)
-#ifndef FF_LEGACY_BINDING_DISABLED
-    void renderCoCPass(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer,
-                       float nearZ, float farZ, uint32_t width, uint32_t height,
-                       const SDepthOfFieldSettings& settings);
-    void renderDownsampleSplitPass(RHI::ICommandList* cmdList, RHI::ITexture* hdrInput,
-                                    uint32_t width, uint32_t height);
-    void renderBlurPass(RHI::ICommandList* cmdList, bool horizontal,
-                        uint32_t halfWidth, uint32_t halfHeight,
-                        const SDepthOfFieldSettings& settings);
-    void renderCompositePass(RHI::ICommandList* cmdList, RHI::ITexture* hdrInput,
-                              uint32_t width, uint32_t height);
-#endif // FF_LEGACY_BINDING_DISABLED
 
     // ============================================
     // Descriptor Set Resources (SM 5.1, DX12 only)

@@ -10,13 +10,6 @@ if (MSVC)
     add_compile_options(/utf-8)
 endif()
 
-# Descriptor set migration - disable legacy binding APIs
-option(FF_LEGACY_BINDING_DISABLED "Disable legacy slot-based binding APIs (SetShaderResource, etc.)" ON)
-
-if(FF_LEGACY_BINDING_DISABLED)
-    add_compile_definitions(FF_LEGACY_BINDING_DISABLED=1)
-endif()
-
 set(CODE_PATH E:/forfun/source/code)
 set(THIRD_PARTY_PATH E:/forfun/thirdparty)
 set(IMGUI_DIR ${THIRD_PARTY_PATH}/imgui)

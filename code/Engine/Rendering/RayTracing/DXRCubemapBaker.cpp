@@ -763,59 +763,8 @@ void CDXRCubemapBaker::DispatchBakeBrick(
         // Bind the descriptor set (Set 1: PerPass)
         cmdList->BindDescriptorSet(1, m_perPassSet);
     } else {
-#ifndef FF_LEGACY_BINDING_DISABLED
-        // Legacy slot-based binding path
-        CFFLog::Warning("[CubemapBaker] Using legacy binding path - consider migrating to descriptor sets");
-
-        // b0: Constant buffer
-        cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &params, sizeof(params));
-
-        // t0: TLAS
-        auto* tlas = m_asManager->GetTLAS();
-        if (tlas) {
-            cmdList->SetAccelerationStructure(0, tlas);
-        }
-
-        // t1: Skybox
-        if (m_skyboxTexture) {
-            cmdList->SetShaderResource(RHI::EShaderStage::Compute, 1, m_skyboxTexture);
-        }
-
-        // t2-t4: Scene buffers
-        if (m_materialBuffer) {
-            cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 2, m_materialBuffer.get());
-        }
-        if (m_lightBuffer) {
-            cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 3, m_lightBuffer.get());
-        }
-        if (m_instanceBuffer) {
-            cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 4, m_instanceBuffer.get());
-        }
-
-        // t5-t6: Global geometry buffers (for normal computation)
-        if (m_vertexBuffer) {
-            cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 5, m_vertexBuffer.get());
-        }
-        if (m_indexBuffer) {
-            cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 6, m_indexBuffer.get());
-        }
-
-        // t7: Voxel positions buffer
-        if (m_voxelPositionsBuffer) {
-            cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 7, m_voxelPositionsBuffer.get());
-        }
-
-        // u0: Batched cubemap output
-        cmdList->SetUnorderedAccess(0, m_cubemapOutputBuffer.get());
-
-        // s0: Sampler
-        if (m_skyboxTextureSampler) {
-            cmdList->SetSampler(RHI::EShaderStage::Compute, 0, m_skyboxTextureSampler);
-        }
-#else
         CFFLog::Warning("[CubemapBaker] Legacy binding disabled but descriptor set mode not available");
         return;
-#endif
     }
 
     // Dispatch: 32 x 32 x (6 * batchSize)

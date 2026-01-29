@@ -146,19 +146,8 @@ bool CAutoExposurePass::Initialize() {
 
     CFFLog::Info("[AutoExposurePass] Initializing...");
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    if (!createShaders()) {
-        CFFLog::Error("[AutoExposurePass] Failed to create shaders");
-        return false;
-    }
-#endif
-
     createBuffers();
     createSamplers();
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-    createDebugResources();
-#endif
 
     initDescriptorSets();
 
@@ -210,42 +199,6 @@ void CAutoExposurePass::Shutdown() {
 
     CFFLog::Info("[AutoExposurePass] Shutdown");
 }
-
-// ============================================
-// Shader Creation
-// ============================================
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-bool CAutoExposurePass::createShaders() {
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return false;
-
-#ifdef _DEBUG
-    constexpr bool kDebugShaders = true;
-#else
-    constexpr bool kDebugShaders = false;
-#endif
-
-    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/AutoExposure.cs.hlsl";
-
-    // Histogram compute shader
-    if (!createComputeShaderAndPSO(ctx, shaderPath, "CSBuildHistogram",
-                              "AutoExposure_Histogram_CS", "AutoExposure_Histogram_PSO",
-                              kDebugShaders, m_histogramCS, m_histogramPSO)) {
-        return false;
-    }
-
-    // Adaptation compute shader
-    if (!createComputeShaderAndPSO(ctx, shaderPath, "CSAdaptExposure",
-                              "AutoExposure_Adaptation_CS", "AutoExposure_Adaptation_PSO",
-                              kDebugShaders, m_adaptationCS, m_adaptationPSO)) {
-        return false;
-    }
-
-    CFFLog::Info("[AutoExposurePass] Shaders compiled");
-    return true;
-}
-#endif // FF_LEGACY_BINDING_DISABLED
 
 void CAutoExposurePass::createBuffers() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -313,64 +266,6 @@ void CAutoExposurePass::createSamplers() {
     m_linearSampler = createClampSampler(EFilter::MinMagMipLinear);
 }
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-void CAutoExposurePass::createDebugResources() {
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-#ifdef _DEBUG
-    constexpr bool kDebugShaders = true;
-#else
-    constexpr bool kDebugShaders = false;
-#endif
-
-    // Compile debug vertex shader
-    {
-        SCompiledShader compiled = CompileShaderFromSource(g_debugVS, "main", "vs_5_0", nullptr, kDebugShaders);
-        if (compiled.success) {
-            ShaderDesc desc;
-            desc.type = EShaderType::Vertex;
-            desc.bytecode = compiled.bytecode.data();
-            desc.bytecodeSize = compiled.bytecode.size();
-            desc.debugName = "AutoExposure_Debug_VS";
-            m_debugVS.reset(ctx->CreateShader(desc));
-        }
-    }
-
-    // Compile debug pixel shader
-    {
-        SCompiledShader compiled = CompileShaderFromSource(g_debugPS, "main", "ps_5_0", nullptr, kDebugShaders);
-        if (compiled.success) {
-            ShaderDesc desc;
-            desc.type = EShaderType::Pixel;
-            desc.bytecode = compiled.bytecode.data();
-            desc.bytecodeSize = compiled.bytecode.size();
-            desc.debugName = "AutoExposure_Debug_PS";
-            m_debugPS.reset(ctx->CreateShader(desc));
-        }
-    }
-
-    // Create debug PSO
-    if (m_debugVS && m_debugPS) {
-        PipelineStateDesc psoDesc;
-        psoDesc.vertexShader = m_debugVS.get();
-        psoDesc.pixelShader = m_debugPS.get();
-        psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
-        psoDesc.rasterizer.cullMode = ECullMode::None;
-        psoDesc.depthStencil.depthEnable = false;
-        psoDesc.depthStencil.depthWriteEnable = false;
-        psoDesc.blend.blendEnable = true;
-        psoDesc.blend.srcBlend = EBlendFactor::SrcAlpha;
-        psoDesc.blend.dstBlend = EBlendFactor::InvSrcAlpha;
-        psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
-        psoDesc.debugName = "AutoExposure_Debug_PSO";
-        m_debugPSO.reset(ctx->CreatePipelineState(psoDesc));
-    }
-
-    CFFLog::Info("[AutoExposurePass] Debug resources created");
-}
-#endif // FF_LEGACY_BINDING_DISABLED
-
 // ============================================
 // Rendering
 // ============================================
@@ -410,34 +305,11 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
             CScopedDebugEvent evt(cmdList, L"AutoExposure Adaptation (DS)");
             dispatchAdaptation_DS(cmdList, deltaTime, width * height, settings);
         }
-    }
-#ifndef FF_LEGACY_BINDING_DISABLED
-    else {
-        // Guard against invalid state for legacy path
-        if (!m_histogramPSO || !m_adaptationPSO) {
-            m_currentExposure = 1.0f;
-            return;
-        }
-
-        // Step 1: Build histogram
-        {
-            CScopedDebugEvent evt(cmdList, L"AutoExposure Histogram");
-            dispatchHistogram(cmdList, hdrInput, width, height, settings);
-        }
-
-        // Step 2: Calculate and adapt exposure
-        {
-            CScopedDebugEvent evt(cmdList, L"AutoExposure Adaptation");
-            dispatchAdaptation(cmdList, deltaTime, width * height, settings);
-        }
-    }
-#else
-    else {
+    } else {
         CFFLog::Warning("[AutoExposurePass] Legacy binding disabled and descriptor sets not available");
         m_currentExposure = 1.0f;
         return;
     }
-#endif
 
     // Step 3: Copy exposure to staging buffer (for future readback implementation)
     if (m_exposureReadback) {
@@ -451,124 +323,16 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
     }
 }
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-void CAutoExposurePass::dispatchHistogram(ICommandList* cmdList,
-                                          ITexture* hdrInput,
-                                          uint32_t width, uint32_t height,
-                                          const SAutoExposureSettings& settings) {
-    // Clear histogram buffer
-    const uint32_t clearValues[4] = { 0, 0, 0, 0 };
-    cmdList->ClearUnorderedAccessViewUint(m_histogramBuffer.get(), clearValues);
-
-    // UAV barrier after clear
-    cmdList->Barrier(m_histogramBuffer.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
-
-    // Set PSO
-    cmdList->SetPipelineState(m_histogramPSO.get());
-
-    // Update constant buffer (unified structure for both passes)
-    CB_AutoExposure cb{};
-    cb.screenSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
-    cb.rcpScreenSize = XMFLOAT2(1.0f / width, 1.0f / height);
-    cb.minLogLuminance = AutoExposureConfig::MIN_LOG_LUMINANCE;
-    cb.maxLogLuminance = AutoExposureConfig::MAX_LOG_LUMINANCE;
-    cb.centerWeight = settings.centerWeight;
-    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
-
-    // Bind resources
-    cmdList->SetShaderResource(EShaderStage::Compute, 0, hdrInput);
-    cmdList->SetUnorderedAccess(0, m_histogramBuffer.get());
-
-    // Dispatch
-    uint32_t groupsX = calcDispatchGroups(width, AutoExposureConfig::HISTOGRAM_THREAD_GROUP_SIZE);
-    uint32_t groupsY = calcDispatchGroups(height, AutoExposureConfig::HISTOGRAM_THREAD_GROUP_SIZE);
-    cmdList->Dispatch(groupsX, groupsY, 1);
-
-    // Unbind UAV
-    cmdList->SetUnorderedAccess(0, nullptr);
-
-    // UAV barrier before adaptation pass reads histogram
-    cmdList->Barrier(m_histogramBuffer.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
-}
-
-void CAutoExposurePass::dispatchAdaptation(ICommandList* cmdList,
-                                           float deltaTime,
-                                           uint32_t /*pixelCount*/,
-                                           const SAutoExposureSettings& settings) {
-    // Set PSO
-    cmdList->SetPipelineState(m_adaptationPSO.get());
-
-    // Update constant buffer (unified structure for both passes)
-    CB_AutoExposure cb{};
-    cb.minLogLuminance = AutoExposureConfig::MIN_LOG_LUMINANCE;
-    cb.maxLogLuminance = AutoExposureConfig::MAX_LOG_LUMINANCE;
-    cb.deltaTime = deltaTime;
-    cb.minExposure = std::pow(2.0f, settings.minEV);
-    cb.maxExposure = std::pow(2.0f, settings.maxEV);
-    cb.adaptSpeedUp = settings.adaptSpeedUp;
-    cb.adaptSpeedDown = settings.adaptSpeedDown;
-    cb.exposureCompensation = settings.exposureCompensation;
-    cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
-
-    // Bind resources
-    cmdList->SetShaderResourceBuffer(EShaderStage::Compute, 0, m_histogramBuffer.get());
-    cmdList->SetUnorderedAccess(0, m_exposureBuffer.get());
-
-    // Dispatch single thread group (256 threads for parallel reduction)
-    cmdList->Dispatch(1, 1, 1);
-
-    // Unbind resources
-    cmdList->SetUnorderedAccess(0, nullptr);
-    cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 1);
-}
-#endif // FF_LEGACY_BINDING_DISABLED
-
 void CAutoExposurePass::readbackHistogram(ICommandList* /*cmdList*/) {
     // Note: CPU readback of histogram is not yet implemented in this RHI.
     // The histogram data is copied to staging buffer but we can't map it yet.
     // TODO: Implement proper buffer mapping/readback in RHI layer.
 }
 
-void CAutoExposurePass::RenderDebugOverlay(ICommandList* cmdList,
-                                           ITexture* renderTarget,
-                                           uint32_t width, uint32_t height) {
-#ifndef FF_LEGACY_BINDING_DISABLED
-    if (!m_initialized || !m_debugPSO || !cmdList || !renderTarget) return;
-
-    // Set render target
-    cmdList->SetRenderTargets(1, &renderTarget, nullptr);
-    cmdList->SetViewport(0, 0, static_cast<float>(width), static_cast<float>(height));
-    cmdList->SetScissorRect(0, 0, width, height);
-
-    // Set PSO
-    cmdList->SetPipelineState(m_debugPSO.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-
-    // Update constant buffer
-    CB_HistogramDebug cb{};
-    cb.screenSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
-    cb.histogramPos = XMFLOAT2(10.0f, static_cast<float>(height) - 140.0f);  // Bottom-left
-    cb.histogramSize = XMFLOAT2(300.0f, 120.0f);
-    cb.currentExposure = m_currentExposure;
-    cb.targetExposure = m_targetExposure;
-    cb.minLogLuminance = AutoExposureConfig::MIN_LOG_LUMINANCE;
-    cb.maxLogLuminance = AutoExposureConfig::MAX_LOG_LUMINANCE;
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
-
-    // Bind histogram buffer as SRV (t0)
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 0, m_histogramBuffer.get());
-    // Bind exposure buffer as SRV (t1) - contains [current, target, maxHistogramValue]
-    cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 1, m_exposureBuffer.get());
-
-    // Draw fullscreen triangle (3 vertices, shader generates positions)
-    cmdList->Draw(3, 0);
-
-    // Unbind
-    cmdList->UnbindShaderResources(EShaderStage::Pixel, 0, 2);
-#else
+void CAutoExposurePass::RenderDebugOverlay(ICommandList* /*cmdList*/,
+                                           ITexture* /*renderTarget*/,
+                                           uint32_t /*width*/, uint32_t /*height*/) {
     CFFLog::Warning("[AutoExposurePass] RenderDebugOverlay() skipped - descriptor set path not implemented");
-    (void)cmdList; (void)renderTarget; (void)width; (void)height;
-#endif
 }
 
 // ============================================

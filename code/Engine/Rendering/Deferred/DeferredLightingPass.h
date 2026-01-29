@@ -76,23 +76,6 @@ public:
         RHI::ITexture* ssaoTexture = nullptr
     );
 
-    // ============================================
-    // Legacy Rendering (for backwards compatibility during migration)
-    // ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-    void Render(
-        const CCamera& camera,
-        CScene& scene,
-        CGBuffer& gbuffer,
-        RHI::ITexture* hdrOutput,
-        uint32_t width,
-        uint32_t height,
-        const CShadowPass* shadowPass,
-        CClusteredLightingPass* clusteredLighting,
-        RHI::ITexture* ssaoTexture = nullptr
-    );
-#endif // FF_LEGACY_BINDING_DISABLED
-
     // Check if descriptor set mode is available (DX12 only)
     bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
 

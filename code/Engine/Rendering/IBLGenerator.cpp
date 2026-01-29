@@ -90,10 +90,6 @@ bool CIBLGenerator::Initialize() {
     auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
     if (!renderContext) return false;
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    createShaders();
-#endif
-
     // Create sampler state
     RHI::SamplerDesc sampDesc;
     sampDesc.filter = RHI::EFilter::MinMagMipLinear;
@@ -104,18 +100,6 @@ bool CIBLGenerator::Initialize() {
     sampDesc.maxLOD = 3.402823466e+38f; // FLT_MAX
     m_sampler.reset(renderContext->CreateSampler(sampDesc));
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    // Create constant buffer for face index (16 bytes: int + padding)
-    RHI::BufferDesc cbDesc;
-    cbDesc.size = 16;
-    cbDesc.usage = RHI::EBufferUsage::Constant;
-    cbDesc.cpuAccess = RHI::ECPUAccess::Write;
-    m_cbFaceIndex.reset(renderContext->CreateBuffer(cbDesc, nullptr));
-
-    // Create constant buffer for roughness (16 bytes: float + float + padding)
-    m_cbRoughness.reset(renderContext->CreateBuffer(cbDesc, nullptr));
-#endif
-
     // Initialize descriptor sets (DX12 path)
     initDescriptorSets();
 
@@ -125,15 +109,6 @@ bool CIBLGenerator::Initialize() {
 
 void CIBLGenerator::Shutdown() {
     if (!m_initialized) return;
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-    m_fullscreenVS.reset();
-    m_irradiancePS.reset();
-    m_prefilterPS.reset();
-    m_brdfLutPS.reset();
-    m_cbFaceIndex.reset();
-    m_cbRoughness.reset();
-#endif
 
     m_sampler.reset();
     m_irradianceTexture.reset();
@@ -163,81 +138,6 @@ void CIBLGenerator::Shutdown() {
 
     m_initialized = false;
 }
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-void CIBLGenerator::createShaders() {
-    CFFLog::Warning("[IBLGenerator] Using legacy shader creation - consider migrating to descriptor sets");
-
-    auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
-    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    // Compile Irradiance shaders
-    std::string vsSource = LoadShaderSource(shaderDir + "IrradianceConvolution.vs.hlsl");
-    std::string irradiancePsSource = LoadShaderSource(shaderDir + "IrradianceConvolution.ps.hlsl");
-
-    if (!vsSource.empty()) {
-        RHI::SCompiledShader vsCompiled = RHI::CompileShaderFromSource(vsSource, "main", "vs_5_0", nullptr, debugShaders);
-        if (vsCompiled.success) {
-            RHI::ShaderDesc vsDesc;
-            vsDesc.type = RHI::EShaderType::Vertex;
-            vsDesc.bytecode = vsCompiled.bytecode.data();
-            vsDesc.bytecodeSize = vsCompiled.bytecode.size();
-            m_fullscreenVS.reset(renderContext->CreateShader(vsDesc));
-        } else {
-            CFFLog::Error("IBL: Failed to compile irradiance VS: %s", vsCompiled.errorMessage.c_str());
-        }
-    }
-
-    if (!irradiancePsSource.empty()) {
-        RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(irradiancePsSource, "main", "ps_5_0", nullptr, debugShaders);
-        if (psCompiled.success) {
-            RHI::ShaderDesc psDesc;
-            psDesc.type = RHI::EShaderType::Pixel;
-            psDesc.bytecode = psCompiled.bytecode.data();
-            psDesc.bytecodeSize = psCompiled.bytecode.size();
-            m_irradiancePS.reset(renderContext->CreateShader(psDesc));
-        } else {
-            CFFLog::Error("IBL: Failed to compile irradiance PS: %s", psCompiled.errorMessage.c_str());
-        }
-    }
-
-    // Compile Pre-filter shader
-    std::string prefilterPsSource = LoadShaderSource(shaderDir + "PreFilterEnvironmentMap.ps.hlsl");
-    if (!prefilterPsSource.empty()) {
-        RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(prefilterPsSource, "main", "ps_5_0", nullptr, debugShaders);
-        if (psCompiled.success) {
-            RHI::ShaderDesc psDesc;
-            psDesc.type = RHI::EShaderType::Pixel;
-            psDesc.bytecode = psCompiled.bytecode.data();
-            psDesc.bytecodeSize = psCompiled.bytecode.size();
-            m_prefilterPS.reset(renderContext->CreateShader(psDesc));
-        } else {
-            CFFLog::Error("IBL: Failed to compile prefilter PS: %s", psCompiled.errorMessage.c_str());
-        }
-    }
-
-    // Compile BRDF LUT shader
-    std::string brdfLutPsSource = LoadShaderSource(shaderDir + "BrdfLut.ps.hlsl");
-    if (!brdfLutPsSource.empty()) {
-        RHI::SCompiledShader psCompiled = RHI::CompileShaderFromSource(brdfLutPsSource, "main", "ps_5_0", nullptr, debugShaders);
-        if (psCompiled.success) {
-            RHI::ShaderDesc psDesc;
-            psDesc.type = RHI::EShaderType::Pixel;
-            psDesc.bytecode = psCompiled.bytecode.data();
-            psDesc.bytecodeSize = psCompiled.bytecode.size();
-            m_brdfLutPS.reset(renderContext->CreateShader(psDesc));
-        } else {
-            CFFLog::Error("IBL: Failed to compile BRDF LUT PS: %s", psCompiled.errorMessage.c_str());
-        }
-    }
-}
-#endif // FF_LEGACY_BINDING_DISABLED
 
 RHI::ITexture* CIBLGenerator::GenerateIrradianceMap(RHI::ITexture* envMap, int outputSize) {
     auto* renderContext = RHI::CRHIManager::Instance().GetRenderContext();
@@ -285,59 +185,12 @@ RHI::ITexture* CIBLGenerator::GenerateIrradianceMap(RHI::ITexture* envMap, int o
             cmdList->Draw(3, 0);
         }
     } else {
-#ifndef FF_LEGACY_BINDING_DISABLED
-        CFFLog::Warning("[IBLGenerator] Using legacy binding path for irradiance map generation");
-
-        if (!m_fullscreenVS || !m_irradiancePS) {
-            CFFLog::Error("IBL: Cannot generate irradiance map - missing shaders");
-            return nullptr;
-        }
-
-        // Render to each cubemap face
-        for (int face = 0; face < 6; ++face) {
-            // Set render target to this face
-            cmdList->SetRenderTargetSlice(m_irradianceTexture.get(), face, nullptr);
-
-            // Set viewport and scissor rect (DX12 requires both)
-            cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
-            cmdList->SetScissorRect(0, 0, outputSize, outputSize);
-
-            // Update face index constant buffer (use SetConstantBufferData for DX12 compatibility)
-            struct { int faceIndex; int padding[3]; } faceData = { face, {0, 0, 0} };
-
-            // Set shaders and resources
-            cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 0, envMap);
-            cmdList->SetSampler(RHI::EShaderStage::Pixel, 0, m_sampler.get());
-            cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 0, &faceData, sizeof(faceData));
-
-            // Create and set pipeline state
-            RHI::PipelineStateDesc psoDesc;
-            psoDesc.vertexShader = m_fullscreenVS.get();
-            psoDesc.pixelShader = m_irradiancePS.get();
-            psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
-            psoDesc.depthStencil.depthEnable = false;
-            psoDesc.depthStencil.depthWriteEnable = false;
-            psoDesc.debugName = "IBL_Irradiance_PSO";
-
-            std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
-            cmdList->SetPipelineState(pso.get());
-
-            // Draw fullscreen triangle
-            cmdList->Draw(3, 0);
-        }
-#else
         CFFLog::Error("[IBLGenerator] Legacy binding disabled but descriptor set mode not available");
         return nullptr;
-#endif
     }
 
     // Cleanup
     cmdList->UnbindRenderTargets();
-#ifndef FF_LEGACY_BINDING_DISABLED
-    if (!IsDescriptorSetModeAvailable()) {
-        cmdList->UnbindShaderResources(RHI::EShaderStage::Pixel, 0, 1);
-    }
-#endif
 
     CFFLog::Info("IBL: Irradiance map generated (%dx%d)", outputSize, outputSize);
     return m_irradianceTexture.get();
@@ -403,55 +256,11 @@ RHI::ITexture* CIBLGenerator::GeneratePreFilteredMap(RHI::ITexture* envMap, int 
             cmdList->Draw(3, 0);
         }
     } else {
-#ifndef FF_LEGACY_BINDING_DISABLED
-        CFFLog::Warning("[IBLGenerator] Using legacy binding path for pre-filtered map generation");
-
-        if (!m_fullscreenVS || !m_prefilterPS) {
-            CFFLog::Error("IBL: Cannot generate pre-filtered map - missing shaders");
-            return nullptr;
-        }
-
-        // Render mip 0 only (for now)
-        for (int face = 0; face < 6; ++face) {
-            cmdList->SetRenderTargetSlice(m_preFilteredTexture.get(), face, nullptr);
-            cmdList->SetViewport(0, 0, (float)outputSize, (float)outputSize);
-            cmdList->SetScissorRect(0, 0, outputSize, outputSize);
-
-            // Build constant buffers (use SetConstantBufferData for DX12 compatibility)
-            struct { int faceIndex; int padding[3]; } faceData = { face, {0, 0, 0} };
-            struct { float roughness; float envResolution; float padding[2]; } roughnessData = { 0.0f, envResolution, {0.0f, 0.0f} };
-
-            // Set shaders and resources
-            cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 0, envMap);
-            cmdList->SetSampler(RHI::EShaderStage::Pixel, 0, m_sampler.get());
-            cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 0, &faceData, sizeof(faceData));
-            cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 1, &roughnessData, sizeof(roughnessData));
-
-            RHI::PipelineStateDesc psoDesc;
-            psoDesc.vertexShader = m_fullscreenVS.get();
-            psoDesc.pixelShader = m_prefilterPS.get();
-            psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
-            psoDesc.depthStencil.depthEnable = false;
-            psoDesc.depthStencil.depthWriteEnable = false;
-            psoDesc.debugName = "IBL_Prefilter_PSO";
-
-            std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
-            cmdList->SetPipelineState(pso.get());
-
-            cmdList->Draw(3, 0);
-        }
-#else
         CFFLog::Error("[IBLGenerator] Legacy binding disabled but descriptor set mode not available");
         return nullptr;
-#endif
     }
 
     cmdList->UnbindRenderTargets();
-#ifndef FF_LEGACY_BINDING_DISABLED
-    if (!IsDescriptorSetModeAvailable()) {
-        cmdList->UnbindShaderResources(RHI::EShaderStage::Pixel, 0, 1);
-    }
-#endif
 
     CFFLog::Info("IBL: Pre-filtered map generated");
     return m_preFilteredTexture.get();
@@ -500,31 +309,8 @@ RHI::ITexture* CIBLGenerator::GenerateBrdfLut(int resolution) {
         cmdList->BindDescriptorSet(1, m_perPassSet);
         cmdList->Draw(3, 0);
     } else {
-#ifndef FF_LEGACY_BINDING_DISABLED
-        CFFLog::Warning("[IBLGenerator] Using legacy binding path for BRDF LUT generation");
-
-        if (!m_fullscreenVS || !m_brdfLutPS) {
-            CFFLog::Error("IBL: Cannot generate BRDF LUT - missing shaders");
-            return nullptr;
-        }
-
-        // Set pipeline state
-        RHI::PipelineStateDesc psoDesc;
-        psoDesc.vertexShader = m_fullscreenVS.get();
-        psoDesc.pixelShader = m_brdfLutPS.get();
-        psoDesc.primitiveTopology = RHI::EPrimitiveTopology::TriangleList;
-        psoDesc.depthStencil.depthEnable = false;
-        psoDesc.depthStencil.depthWriteEnable = false;
-
-        std::unique_ptr<RHI::IPipelineState> pso(renderContext->CreatePipelineState(psoDesc));
-        cmdList->SetPipelineState(pso.get());
-
-        // Draw fullscreen triangle
-        cmdList->Draw(3, 0);
-#else
         CFFLog::Error("[IBLGenerator] Legacy binding disabled but descriptor set mode not available");
         return nullptr;
-#endif
     }
 
     // Cleanup

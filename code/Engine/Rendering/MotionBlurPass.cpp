@@ -179,72 +179,12 @@ ITexture* CMotionBlurPass::Render(ITexture* hdrInput,
                                    ITexture* velocityBuffer,
                                    uint32_t width, uint32_t height,
                                    const SMotionBlurSettings& settings) {
-#ifndef FF_LEGACY_BINDING_DISABLED
-    CFFLog::Warning("[MotionBlurPass] Using legacy binding path - descriptor set migration pending");
-
-    if (!m_initialized || !hdrInput || !velocityBuffer || width == 0 || height == 0) {
-        return hdrInput;  // Return input unchanged on error
-    }
-
-    // Skip if intensity is zero
-    if (settings.intensity <= 0.0f) {
-        return hdrInput;
-    }
-
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    ICommandList* cmdList = ctx->GetCommandList();
-
-    // Ensure output texture is properly sized
-    ensureOutputTexture(width, height);
-
-    // Unbind any existing render targets to avoid hazards
-    cmdList->UnbindRenderTargets();
-
-    // Set render target
-    ITexture* rt = m_outputHDR.get();
-    cmdList->SetRenderTargets(1, &rt, nullptr);
-    cmdList->SetViewport(0, 0, (float)width, (float)height, 0.0f, 1.0f);
-    cmdList->SetScissorRect(0, 0, width, height);
-
-    // Set pipeline state
-    cmdList->SetPipelineState(m_pso.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(SMotionBlurVertex), 0);
-
-    // Set constant buffer
-    SCBMotionBlur cb;
-    cb.intensity = settings.intensity;
-    cb.sampleCount = std::max(settings.sampleCount, 2);  // Minimum 2 to avoid div-by-zero
-    cb.maxBlurPixels = settings.maxBlurPixels;
-    cb._pad = 0.0f;
-    cb.texelSizeX = 1.0f / static_cast<float>(width);
-    cb.texelSizeY = 1.0f / static_cast<float>(height);
-    cb._pad2[0] = 0.0f;
-    cb._pad2[1] = 0.0f;
-
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
-
-    // Bind textures
-    cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
-    cmdList->SetShaderResource(EShaderStage::Pixel, 1, velocityBuffer);
-    cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
-    cmdList->SetSampler(EShaderStage::Pixel, 1, m_pointSampler.get());
-
-    // Draw fullscreen quad
-    cmdList->Draw(4, 0);
-
-    // Unbind render targets
-    cmdList->UnbindRenderTargets();
-
-    return m_outputHDR.get();
-#else
     // Descriptor set path not yet implemented
     (void)velocityBuffer;
     (void)width;
     (void)height;
     (void)settings;
     return hdrInput;
-#endif
 }
 
 // ============================================

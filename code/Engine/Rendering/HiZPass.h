@@ -100,21 +100,9 @@ private:
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
 
-    // Dispatch helpers
-    void dispatchCopyDepth(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer);
-    void dispatchBuildMip(RHI::ICommandList* cmdList, uint32_t mipLevel);
-
-    // ============================================
-    // Compute Shaders (Legacy - guarded by FF_LEGACY_BINDING_DISABLED)
-    // ============================================
-    RHI::ShaderPtr m_copyDepthCS;     // Mip 0: copy from depth buffer
-    RHI::ShaderPtr m_buildMipCS;      // Mip 1+: MAX downsample
-
-    // ============================================
-    // Pipeline States (Legacy - guarded by FF_LEGACY_BINDING_DISABLED)
-    // ============================================
-    RHI::PipelineStatePtr m_copyDepthPSO;
-    RHI::PipelineStatePtr m_buildMipPSO;
+    // Dispatch helpers (descriptor set path)
+    void dispatchCopyDepth_DS(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer);
+    void dispatchBuildMip_DS(RHI::ICommandList* cmdList, uint32_t mipLevel);
 
     // ============================================
     // Hi-Z Pyramid Texture
@@ -137,8 +125,6 @@ private:
 
     // ============================================
     // Descriptor Set Resources (SM 5.1, DX12 only)
-    // NOTE: Descriptor set rendering path not yet implemented.
-    //       BuildPyramid uses legacy binding, guarded by FF_LEGACY_BINDING_DISABLED.
     // ============================================
     void initDescriptorSets();
 

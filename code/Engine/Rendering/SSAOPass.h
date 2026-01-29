@@ -173,26 +173,6 @@ private:
                          const DirectX::XMFLOAT2& direction);
     void dispatchUpsample_DS(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    // Dispatch helpers (Legacy path)
-    void dispatchDownsampleDepth(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
-    void dispatchSSAO(RHI::ICommandList* cmdList,
-                      RHI::ITexture* depthBuffer,
-                      RHI::ITexture* normalBuffer,
-                      const DirectX::XMMATRIX& view,
-                      const DirectX::XMMATRIX& proj,
-                      float nearZ, float farZ);
-
-    void dispatchBlurH(RHI::ICommandList* cmdList);
-    void dispatchBlurV(RHI::ICommandList* cmdList);
-    void dispatchBlur(RHI::ICommandList* cmdList,
-                      RHI::IPipelineState* pso,
-                      RHI::ITexture* inputAO,
-                      RHI::ITexture* outputAO,
-                      const DirectX::XMFLOAT2& direction);
-    void dispatchUpsample(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
-#endif // FF_LEGACY_BINDING_DISABLED
-
     // ============================================
     // Compute Shaders
     // ============================================

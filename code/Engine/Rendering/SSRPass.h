@@ -237,30 +237,11 @@ public:
     const SSSRSettings& GetSettings() const { return m_settings; }
 
 private:
-#ifndef FF_LEGACY_BINDING_DISABLED
-    void createShaders();
-    void createCompositeShader();
-#endif
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
     void createFallbackTexture();
     void createBlueNoiseTexture();
-
-    // ============================================
-    // Compute Shaders (Legacy SM 5.0)
-    // ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-    RHI::ShaderPtr m_ssrCS;             // Main SSR compute shader
-    RHI::ShaderPtr m_compositeCS;       // SSR composite compute shader
-#endif
-
-    // ============================================
-    // Pipeline States (Legacy SM 5.0)
-    // ============================================
-#ifndef FF_LEGACY_BINDING_DISABLED
-    RHI::PipelineStatePtr m_ssrPSO;
-    RHI::PipelineStatePtr m_compositePSO;
-#endif
+    void initDescriptorSets();
 
     // ============================================
     // Textures
@@ -288,21 +269,20 @@ private:
     DirectX::XMMATRIX m_prevViewProj = DirectX::XMMatrixIdentity();
 
     // ============================================
-    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // Descriptor Set Resources (DX12)
     // ============================================
-    void initDescriptorSets();
 
     // SM 5.1 shaders
-    RHI::ShaderPtr m_ssrCS_ds;
-    RHI::ShaderPtr m_compositeCS_ds;
+    RHI::ShaderPtr m_ssrCS;
+    RHI::ShaderPtr m_compositeCS;
 
     // SM 5.1 PSOs
-    RHI::PipelineStatePtr m_ssrPSO_ds;
-    RHI::PipelineStatePtr m_compositePSO_ds;
+    RHI::PipelineStatePtr m_ssrPSO;
+    RHI::PipelineStatePtr m_compositePSO;
 
     // Unified compute layout (shared across all compute passes)
     RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
     RHI::IDescriptorSet* m_perPassSet = nullptr;
 
-    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_ssrPSO_ds != nullptr; }
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_ssrPSO != nullptr; }
 };

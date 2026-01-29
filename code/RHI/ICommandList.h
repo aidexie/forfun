@@ -77,30 +77,6 @@ public:
     // Set index buffer
     virtual void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0) = 0;
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    // Legacy slot-based binding (deprecated - use BindDescriptorSet instead)
-    // Set constant buffer data directly (PREFERRED for per-frame/per-draw data)
-    // This allocates from a per-frame ring buffer and binds the data inline
-    // - DX12: Allocates from CDX12DynamicBufferRing, each call gets unique GPU address
-    // - DX11: Falls back to UpdateSubresource (safe due to driver-managed buffering)
-    // data: pointer to constant data
-    // size: size of data in bytes (must be 256-byte aligned in DX12)
-    // Returns true if successful
-    virtual bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) = 0;
-
-    // Set shader resource (texture or structured buffer)
-    virtual void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) = 0;
-    virtual void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) = 0;
-
-    // Set sampler
-    virtual void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) = 0;
-
-    // Set unordered access view (for compute shaders or pixel shader UAV)
-    virtual void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) = 0;
-    virtual void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) = 0;
-    virtual void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) = 0;
-#endif // FF_LEGACY_BINDING_DISABLED
-
     // Clear UAV buffer with uint values (for resetting atomic counters, etc.)
     // values: array of 4 uint32_t values to clear with
     virtual void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) = 0;
@@ -185,11 +161,6 @@ public:
 
     // Unbind render targets (set all RT slots to nullptr)
     virtual void UnbindRenderTargets() = 0;
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-    // Unbind shader resources for a stage (slots 0-7)
-    virtual void UnbindShaderResources(EShaderStage stage, uint32_t startSlot = 0, uint32_t numSlots = 8) = 0;
-#endif // FF_LEGACY_BINDING_DISABLED
 
     // ============================================
     // Debug Events (GPU profiling markers for RenderDoc/PIX)

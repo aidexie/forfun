@@ -4,8 +4,10 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include "Core/RenderConfig.h"
 #include <fstream>
 #include <sstream>
@@ -31,11 +33,30 @@ void CDebugLinePass::Initialize() {
     CreateShaders();
     CreateBuffers();
     CreatePipelineState();
+    initDescriptorSets();
 
     m_initialized = true;
 }
 
 void CDebugLinePass::Shutdown() {
+    // Cleanup descriptor set resources
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+    }
+
+    m_pso_ds.reset();
+    m_vs_ds.reset();
+    m_gs_ds.reset();
+    m_ps_ds.reset();
+
     m_pso.reset();
     m_vertexBuffer.reset();
     m_cbPerFrameVS.reset();
@@ -233,43 +254,163 @@ void CDebugLinePass::UpdateVertexBuffer() {
 
 void CDebugLinePass::Render(XMMATRIX view, XMMATRIX proj,
                             unsigned int viewportWidth, unsigned int viewportHeight) {
-#ifndef FF_LEGACY_BINDING_DISABLED
-    CFFLog::Warning("DebugLinePass::Render() uses legacy binding - descriptor set migration pending");
-
-    if (!m_initialized || m_dynamicLines.empty() || !m_pso) return;
+    if (!m_initialized || m_dynamicLines.empty()) return;
 
     IRenderContext* renderContext = CRHIManager::Instance().GetRenderContext();
     if (!renderContext) return;
 
     UpdateVertexBuffer();
 
-    // Update VS constant buffer
+    // Update constant buffer data
     XMMATRIX viewProj = view * proj;
     CBPerFrameVS cbVS;
     cbVS.viewProj = XMMatrixTranspose(viewProj);
 
-    // Update GS constant buffer
     CBPerFrameGS cbGS;
     cbGS.viewportSize = XMFLOAT2(static_cast<float>(viewportWidth), static_cast<float>(viewportHeight));
     cbGS.lineThickness = m_lineThickness;
     cbGS.padding = 0.0f;
 
-    // Get command list and render
+    // Get command list
     ICommandList* cmdList = renderContext->GetCommandList();
-
-    cmdList->SetPipelineState(m_pso.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::LineList);
 
     unsigned int stride = sizeof(LineVertex);
     unsigned int offset = 0;
-    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), stride, offset);
-
-    // Use SetConstantBufferData for DX12 compatibility
-    // VS uses b0, GS uses b1 (DX12 has unified CB slots across stages)
-    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cbVS, sizeof(CBPerFrameVS));
-    cmdList->SetConstantBufferData(EShaderStage::Geometry, 1, &cbGS, sizeof(CBPerFrameGS));
-
     unsigned int vertexCount = static_cast<unsigned int>(m_dynamicLines.size());
-    cmdList->Draw(vertexCount, 0);
-#endif // FF_LEGACY_BINDING_DISABLED
+
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        cmdList->SetPipelineState(m_pso_ds.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::LineList);
+        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), stride, offset);
+
+        // Bind descriptor set with volatile CBVs
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cbVS, sizeof(cbVS)));
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(1, &cbGS, sizeof(cbGS)));
+        cmdList->BindDescriptorSet(1, m_perPassSet);
+
+        cmdList->Draw(vertexCount, 0);
+        return;
+    }
+
+    CFFLog::Warning("DebugLinePass::Render() - Legacy binding disabled, descriptor set path not available");
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CDebugLinePass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[DebugLinePass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Compile SM 5.1 shaders
+    std::string vsSource = LoadShaderSource(shaderDir + "DebugLine_DS.vs.hlsl");
+    std::string gsSource = LoadShaderSource(shaderDir + "DebugLine_DS.gs.hlsl");
+    std::string psSource = LoadShaderSource(shaderDir + "DebugLine_DS.ps.hlsl");
+    if (vsSource.empty() || gsSource.empty() || psSource.empty()) {
+        CFFLog::Warning("[DebugLinePass] Failed to load DS shaders");
+        return;
+    }
+
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource.c_str(), "main", "vs_5_1", nullptr, debugShaders);
+    SCompiledShader gsCompiled = CompileShaderFromSource(gsSource.c_str(), "main", "gs_5_1", nullptr, debugShaders);
+    SCompiledShader psCompiled = CompileShaderFromSource(psSource.c_str(), "main", "ps_5_1", nullptr, debugShaders);
+    if (!vsCompiled.success || !gsCompiled.success || !psCompiled.success) {
+        CFFLog::Error("[DebugLinePass] DS shader compile error: %s %s %s",
+                      vsCompiled.errorMessage.c_str(), gsCompiled.errorMessage.c_str(), psCompiled.errorMessage.c_str());
+        return;
+    }
+
+    ShaderDesc vsDesc(EShaderType::Vertex, vsCompiled.bytecode.data(), vsCompiled.bytecode.size());
+    vsDesc.debugName = "DebugLine_DS_VS";
+    ShaderDesc gsDesc(EShaderType::Geometry, gsCompiled.bytecode.data(), gsCompiled.bytecode.size());
+    gsDesc.debugName = "DebugLine_DS_GS";
+    ShaderDesc psDesc(EShaderType::Pixel, psCompiled.bytecode.data(), psCompiled.bytecode.size());
+    psDesc.debugName = "DebugLine_DS_PS";
+    m_vs_ds.reset(ctx->CreateShader(vsDesc));
+    m_gs_ds.reset(ctx->CreateShader(gsDesc));
+    m_ps_ds.reset(ctx->CreateShader(psDesc));
+
+    if (!m_vs_ds || !m_gs_ds || !m_ps_ds) {
+        CFFLog::Error("[DebugLinePass] Failed to create DS shaders");
+        return;
+    }
+
+    // Create PerPass layout (Set 1): Two VolatileCBVs (b0 for VS, b1 for GS)
+    BindingLayoutDesc layoutDesc("DebugLine_PerPass");
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CBPerFrameVS)));  // VS constant buffer
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(1, sizeof(CBPerFrameGS)));  // GS constant buffer
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[DebugLinePass] Failed to create descriptor set layout");
+        return;
+    }
+
+    m_perPassSet = ctx->AllocateDescriptorSet(m_perPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[DebugLinePass] Failed to allocate descriptor set");
+        return;
+    }
+
+    // Create PSO with descriptor set layout
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs_ds.get();
+    psoDesc.geometryShader = m_gs_ds.get();
+    psoDesc.pixelShader = m_ps_ds.get();
+
+    // Input layout
+    psoDesc.inputLayout = {
+        VertexElement(EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0, false),
+        VertexElement(EVertexSemantic::Color, 0, EVertexFormat::Float4, 12, 0, false)
+    };
+
+    // Rasterizer state
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+
+    // Depth stencil state: test but no write
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);
+    psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;
+
+    // Blend state: alpha blending
+    psoDesc.blend.blendEnable = true;
+    psoDesc.blend.srcBlend = EBlendFactor::SrcAlpha;
+    psoDesc.blend.dstBlend = EBlendFactor::InvSrcAlpha;
+    psoDesc.blend.blendOp = EBlendOp::Add;
+    psoDesc.blend.srcBlendAlpha = EBlendFactor::One;
+    psoDesc.blend.dstBlendAlpha = EBlendFactor::Zero;
+    psoDesc.blend.blendOpAlpha = EBlendOp::Add;
+
+    // Primitive topology
+    psoDesc.primitiveTopology = EPrimitiveTopology::LineList;
+
+    // Render target format: LDR uses R8G8B8A8_UNORM_SRGB
+    psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
+    psoDesc.setLayouts[1] = m_perPassLayout;  // Set 1: PerPass (space1)
+    psoDesc.debugName = "DebugLine_DS_PSO";
+
+    m_pso_ds.reset(ctx->CreatePipelineState(psoDesc));
+    if (!m_pso_ds) {
+        CFFLog::Error("[DebugLinePass] Failed to create DS PSO");
+        return;
+    }
+
+    CFFLog::Info("[DebugLinePass] Descriptor set path initialized");
 }

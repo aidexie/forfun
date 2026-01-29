@@ -43,28 +43,15 @@ public:
 
 private:
     void createFullscreenQuad();
-#ifndef FF_LEGACY_BINDING_DISABLED
-    void createShaders();
-    void createPipelineState();
-#endif
     void createNeutralLUT();
     bool loadLUT(const std::string& cubePath);
 
 private:
-#ifndef FF_LEGACY_BINDING_DISABLED
-    // Legacy Shaders (SM 5.0)
-    RHI::ShaderPtr m_vs;
-    RHI::ShaderPtr m_ps;
-#endif
-
     // Resources
     RHI::BufferPtr m_vertexBuffer;
     RHI::BufferPtr m_constantBuffer;
     RHI::BufferPtr m_dummyExposureBuffer;  // Dummy buffer for t3 when no exposure buffer
     RHI::SamplerPtr m_sampler;
-#ifndef FF_LEGACY_BINDING_DISABLED
-    RHI::PipelineStatePtr m_pso;
-#endif
 
     // Color Grading LUT
     RHI::TexturePtr m_neutralLUT;       // Identity LUT (32x32x32)
@@ -89,7 +76,5 @@ private:
     RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
     RHI::IDescriptorSet* m_perPassSet = nullptr;
 
-#ifndef FF_LEGACY_BINDING_DISABLED
     bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
-#endif
 };

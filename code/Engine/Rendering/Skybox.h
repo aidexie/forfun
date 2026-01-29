@@ -57,6 +57,13 @@ private:
     RHI::ShaderPtr m_ps_ds;
     RHI::PipelineStatePtr m_pso_ds;
 
+    // Conversion pass descriptor set resources (DX12)
+    RHI::IDescriptorSetLayout* m_convLayout = nullptr;
+    std::unique_ptr<RHI::IDescriptorSet, std::function<void(RHI::IDescriptorSet*)>> m_convSet;
+    RHI::ShaderPtr m_convVS_ds;
+    RHI::ShaderPtr m_convPS_ds;
+    RHI::PipelineStatePtr m_convPSO_ds;
+
     uint32_t m_indexCount = 0;
     std::string m_envPathKTX2 = "";
     bool m_initialized = false;

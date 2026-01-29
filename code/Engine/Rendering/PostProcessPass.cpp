@@ -46,10 +46,6 @@ bool CPostProcessPass::Initialize() {
     if (m_initialized) return true;
 
     createFullscreenQuad();
-#ifndef FF_LEGACY_BINDING_DISABLED
-    createShaders();
-    createPipelineState();
-#endif
     createNeutralLUT();
 
     // Create sampler
@@ -86,11 +82,6 @@ bool CPostProcessPass::Initialize() {
 }
 
 void CPostProcessPass::Shutdown() {
-#ifndef FF_LEGACY_BINDING_DISABLED
-    m_pso.reset();
-    m_vs.reset();
-    m_ps.reset();
-#endif
     m_vertexBuffer.reset();
     m_constantBuffer.reset();
     m_dummyExposureBuffer.reset();
@@ -129,6 +120,12 @@ void CPostProcessPass::Render(ITexture* hdrInput,
                               const SColorGradingSettings* colorGrading,
                               bool colorGradingEnabled) {
     if (!m_initialized || !hdrInput || !ldrOutput) return;
+
+    // Descriptor set path required (DX12 only)
+    if (!IsDescriptorSetModeAvailable()) {
+        CFFLog::Warning("[PostProcessPass] Descriptor set mode not available - skipping render");
+        return;
+    }
 
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
@@ -184,56 +181,20 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     // Determine exposure buffer (use dummy if none provided)
     IBuffer* expBuffer = exposureBuffer ? exposureBuffer : m_dummyExposureBuffer.get();
 
-    // Use descriptor set path if available (DX12)
-#ifndef FF_LEGACY_BINDING_DISABLED
-    if (IsDescriptorSetModeAvailable()) {
-#endif
-        cmdList->SetPipelineState(m_pso_ds.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
+    cmdList->SetPipelineState(m_pso_ds.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
 
-        // Bind PerPass descriptor set
-        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_PostProcess)));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, hdrInput));
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, bloomTexture ? bloomTexture : hdrInput));  // Use hdrInput as dummy if no bloom
-        m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, lutTexture));
-        m_perPassSet->Bind(BindingSetItem::Buffer_SRV(3, expBuffer));
-        cmdList->BindDescriptorSet(1, m_perPassSet);
+    // Bind PerPass descriptor set
+    m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_PostProcess)));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, hdrInput));
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(1, bloomTexture ? bloomTexture : hdrInput));  // Use hdrInput as dummy if no bloom
+    m_perPassSet->Bind(BindingSetItem::Texture_SRV(2, lutTexture));
+    m_perPassSet->Bind(BindingSetItem::Buffer_SRV(3, expBuffer));
+    cmdList->BindDescriptorSet(1, m_perPassSet);
 
-        // Draw fullscreen quad
-        cmdList->Draw(4, 0);
-#ifndef FF_LEGACY_BINDING_DISABLED
-    } else {
-        // Legacy path for DX11
-        if (!m_pso) return;
-
-        cmdList->SetPipelineState(m_pso.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
-
-        // Set constant buffer and resources
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CB_PostProcess));
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
-        if (bloomTexture) {
-            cmdList->SetShaderResource(EShaderStage::Pixel, 1, bloomTexture);
-        }
-
-        if (lutTexture) {
-            cmdList->SetShaderResource(EShaderStage::Pixel, 2, lutTexture);
-        }
-
-        cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 3, expBuffer);
-        cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
-
-        // Draw fullscreen quad
-        cmdList->Draw(4, 0);
-
-        // Unbind resources to prevent hazards
-        if (exposureBuffer) {
-            cmdList->UnbindShaderResources(EShaderStage::Pixel, 3, 1);
-        }
-    }
-#endif
+    // Draw fullscreen quad
+    cmdList->Draw(4, 0);
 
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 }
@@ -257,247 +218,6 @@ void CPostProcessPass::createFullscreenQuad() {
 
     m_vertexBuffer.reset(ctx->CreateBuffer(vbDesc, vertices));
 }
-
-#ifndef FF_LEGACY_BINDING_DISABLED
-void CPostProcessPass::createShaders() {
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-    // Vertex shader: Pass-through with UV
-    const char* vsCode = R"(
-        struct VSIn {
-            float2 pos : POSITION;
-            float2 uv : TEXCOORD0;
-        };
-        struct VSOut {
-            float4 pos : SV_Position;
-            float2 uv : TEXCOORD0;
-        };
-        VSOut main(VSIn input) {
-            VSOut output;
-            output.pos = float4(input.pos, 0.0, 1.0);
-            output.uv = input.uv;
-            return output;
-        }
-    )";
-
-    // Pixel shader: Tone mapping + Color Grading + Gamma correction
-    const char* psCode = R"(
-        Texture2D hdrTexture : register(t0);
-        Texture2D bloomTexture : register(t1);
-        Texture3D lutTexture : register(t2);
-        StructuredBuffer<float> exposureBuffer : register(t3);
-        SamplerState samp : register(s0);
-
-        cbuffer CB_PostProcess : register(b0) {
-            float gExposure;
-            int gUseExposureBuffer;
-            float gBloomIntensity;
-            float _pad0;
-
-            float3 gLift;
-            float gSaturation;
-
-            float3 gGamma;
-            float gContrast;
-
-            float3 gGain;
-            float gTemperature;
-
-            float gLutContribution;
-            int gColorGradingEnabled;
-            float2 _pad1;
-        };
-
-        struct PSIn {
-            float4 pos : SV_Position;
-            float2 uv : TEXCOORD0;
-        };
-
-        // ACES Filmic Tone Mapping
-        float3 ACESFilm(float3 x) {
-            float a = 2.51;
-            float b = 0.03;
-            float c = 2.43;
-            float d = 0.59;
-            float e = 0.14;
-            return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
-        }
-
-        // Lift/Gamma/Gain (ASC CDL style)
-        float3 ApplyLiftGammaGain(float3 color, float3 lift, float3 gamma, float3 gain) {
-            // Lift: offset in shadows (add)
-            color = color + lift * 0.1;
-
-            // Gamma: power curve in midtones
-            // Convert -1 to +1 range to 0.5 to 2.0 gamma adjustment
-            float3 gammaAdj = 1.0 / (1.0 + gamma);
-            color = pow(max(color, 0.0001), gammaAdj);
-
-            // Gain: multiply in highlights
-            color = color * (1.0 + gain * 0.5);
-
-            return color;
-        }
-
-        // Saturation adjustment
-        float3 ApplySaturation(float3 color, float saturation) {
-            float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-            return lerp(float3(luma, luma, luma), color, 1.0 + saturation);
-        }
-
-        // Contrast adjustment (around 0.5 pivot)
-        float3 ApplyContrast(float3 color, float contrast) {
-            return (color - 0.5) * (1.0 + contrast) + 0.5;
-        }
-
-        // Temperature adjustment (blue-orange axis)
-        float3 ApplyTemperature(float3 color, float temperature) {
-            // Warm: shift toward orange, Cool: shift toward blue
-            float3 warm = float3(1.05, 1.0, 0.95);
-            float3 cool = float3(0.95, 1.0, 1.05);
-            float3 tint = lerp(cool, warm, temperature * 0.5 + 0.5);
-            return color * tint;
-        }
-
-        // 3D LUT sampling
-        float3 ApplyLUT(float3 color, float contribution) {
-            if (contribution <= 0.0) return color;
-
-            // LUT is 32x32x32, map [0,1] color to proper UV coordinates
-            // Offset by half texel to sample center of texels
-            float lutSize = 32.0;
-            float3 scale = (lutSize - 1.0) / lutSize;
-            float3 offset = 0.5 / lutSize;
-            float3 uvw = saturate(color) * scale + offset;
-
-            float3 lutColor = lutTexture.Sample(samp, uvw).rgb;
-            return lerp(color, lutColor, contribution);
-        }
-
-        float4 main(PSIn input) : SV_Target {
-            // Sample HDR input (linear space)
-            float3 hdrColor = hdrTexture.Sample(samp, input.uv).rgb;
-
-            // Add bloom contribution (bloom texture is half res, bilinear upsample)
-            if (gBloomIntensity > 0.0) {
-                float3 bloom = bloomTexture.Sample(samp, input.uv).rgb;
-                hdrColor += bloom * gBloomIntensity;
-            }
-
-            // Apply exposure (from GPU buffer if available, otherwise from constant)
-            float exposure = gExposure;
-            if (gUseExposureBuffer) {
-                exposure = exposureBuffer[0];  // [0] = current exposure
-            }
-            hdrColor *= exposure;
-
-            // Tone mapping: HDR -> LDR [0, 1] (still linear space)
-            float3 ldrColor = ACESFilm(hdrColor);
-
-            // === COLOR GRADING (LDR space, after tone mapping) ===
-            if (gColorGradingEnabled) {
-                // 1. Lift/Gamma/Gain
-                ldrColor = ApplyLiftGammaGain(ldrColor, gLift, gGamma, gGain);
-
-                // 2. Saturation
-                ldrColor = ApplySaturation(ldrColor, gSaturation);
-
-                // 3. Contrast
-                ldrColor = ApplyContrast(ldrColor, gContrast);
-
-                // 4. Temperature
-                ldrColor = ApplyTemperature(ldrColor, gTemperature);
-
-                // 5. 3D LUT (final creative look)
-                ldrColor = ApplyLUT(ldrColor, gLutContribution);
-
-                // Clamp to valid range
-                ldrColor = saturate(ldrColor);
-            }
-
-            // Gamma correction: Linear -> sRGB
-            // Since output RT is UNORM_SRGB, GPU will do this automatically
-
-            return float4(ldrColor, 1.0);
-        }
-    )";
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    // Compile Vertex Shader
-    SCompiledShader vsCompiled = CompileShaderFromSource(vsCode, "main", "vs_5_0", nullptr, debugShaders);
-    if (!vsCompiled.success) {
-        CFFLog::Error("PostProcess VS compilation error: %s", vsCompiled.errorMessage.c_str());
-        return;
-    }
-
-    // Compile Pixel Shader
-    SCompiledShader psCompiled = CompileShaderFromSource(psCode, "main", "ps_5_0", nullptr, debugShaders);
-    if (!psCompiled.success) {
-        CFFLog::Error("PostProcess PS compilation error: %s", psCompiled.errorMessage.c_str());
-        return;
-    }
-
-    // Create shader objects using RHI
-    ShaderDesc vsDesc;
-    vsDesc.type = EShaderType::Vertex;
-    vsDesc.bytecode = vsCompiled.bytecode.data();
-    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
-    m_vs.reset(ctx->CreateShader(vsDesc));
-
-    ShaderDesc psDesc;
-    psDesc.type = EShaderType::Pixel;
-    psDesc.bytecode = psCompiled.bytecode.data();
-    psDesc.bytecodeSize = psCompiled.bytecode.size();
-    m_ps.reset(ctx->CreateShader(psDesc));
-}
-
-void CPostProcessPass::createPipelineState() {
-    if (!m_vs || !m_ps) return;
-
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-    PipelineStateDesc psoDesc;
-    psoDesc.vertexShader = m_vs.get();
-    psoDesc.pixelShader = m_ps.get();
-
-    // Input layout: POSITION + TEXCOORD
-    psoDesc.inputLayout = {
-        { EVertexSemantic::Position, 0, EVertexFormat::Float2, 0, 0 },
-        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 8, 0 }
-    };
-
-    // Rasterizer state: no culling, no depth clip
-    psoDesc.rasterizer.cullMode = ECullMode::None;
-    psoDesc.rasterizer.fillMode = EFillMode::Solid;
-    psoDesc.rasterizer.depthClipEnable = false;
-
-    // Depth stencil state: no depth test
-    psoDesc.depthStencil.depthEnable = false;
-    psoDesc.depthStencil.depthWriteEnable = false;
-
-    // Blend state: no blending
-    psoDesc.blend.blendEnable = false;
-
-    // Primitive topology
-    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleStrip;
-
-    // Render target format: LDR uses R8G8B8A8_UNORM_SRGB for gamma-correct output
-    psoDesc.renderTargetFormats = { ETextureFormat::R8G8B8A8_UNORM_SRGB };
-
-    // No depth stencil for post-processing
-    psoDesc.depthStencilFormat = ETextureFormat::Unknown;
-    psoDesc.debugName = "PostProcess_ToneMap_ColorGrading_PSO";
-
-    m_pso.reset(ctx->CreatePipelineState(psoDesc));
-}
-#endif
 
 void CPostProcessPass::createNeutralLUT() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();

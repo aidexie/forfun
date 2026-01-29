@@ -130,26 +130,11 @@ void CLightProbeManager::BindToDescriptorSet(RHI::IDescriptorSet* perFrameSet)
 // Legacy Binding (DX11 compatibility)
 // ============================================
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-void CLightProbeManager::Bind(RHI::ICommandList* cmdList)
-{
-    CFFLog::Warning("[LightProbeManager] Using legacy binding path - consider migrating to descriptor sets");
-
-    if (!m_initialized || !cmdList) return;
-
-    // t15: LightProbeBuffer (StructuredBuffer)
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, m_probeBuffer.get());
-
-    // b5: CB_LightProbeParams (use SetConstantBufferData for DX12 compatibility)
-    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 5, &m_params, sizeof(CB_LightProbeParams));
-}
-#else
 void CLightProbeManager::Bind(RHI::ICommandList* cmdList)
 {
     CFFLog::Warning("[LightProbeManager] Legacy binding is disabled - use BindToDescriptorSet() instead");
     (void)cmdList;
 }
-#endif // FF_LEGACY_BINDING_DISABLED
 
 void CLightProbeManager::BlendProbesForPosition(
     const XMFLOAT3& worldPos,

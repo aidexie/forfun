@@ -22,7 +22,6 @@ uint32_t calcDispatchGroups(uint32_t size) {
     return (size + kThreadGroupSize - 1) / kThreadGroupSize;
 }
 
-#ifndef FF_LEGACY_BINDING_DISABLED
 bool createComputeShaderAndPSO(IRenderContext* ctx,
                                 const std::string& shader_path,
                                 const char* entry_point,
@@ -51,7 +50,6 @@ bool createComputeShaderAndPSO(IRenderContext* ctx,
 
     return true;
 }
-#endif
 
 }  // namespace
 
@@ -83,12 +81,10 @@ bool CTAAPass::Initialize() {
 }
 
 void CTAAPass::Shutdown() {
-#ifndef FF_LEGACY_BINDING_DISABLED
     m_taa_cs.reset();
     m_sharpen_cs.reset();
     m_taa_pso.reset();
     m_sharpen_pso.reset();
-#endif
 
     m_history[0].reset();
     m_history[1].reset();
@@ -127,7 +123,6 @@ void CTAAPass::Shutdown() {
 }
 
 void CTAAPass::createShaders() {
-#ifndef FF_LEGACY_BINDING_DISABLED
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
 
@@ -152,7 +147,6 @@ void CTAAPass::createShaders() {
     }
 
     CFFLog::Info("[TAAPass] Shaders created");
-#endif
 }
 
 void CTAAPass::createTextures(uint32_t width, uint32_t height) {
@@ -179,9 +173,7 @@ void CTAAPass::createTextures(uint32_t width, uint32_t height) {
 
     // Create sharpen output if sharpen PSO is available (either legacy or DS)
     bool hasSharpenPSO = m_sharpen_pso_ds != nullptr;
-#ifndef FF_LEGACY_BINDING_DISABLED
     hasSharpenPSO = hasSharpenPSO || m_sharpen_pso != nullptr;
-#endif
     if (hasSharpenPSO) {
         desc.debugName = "TAA_SharpenOutput";
         m_sharpen_output.reset(ctx->CreateTexture(desc, nullptr));
@@ -219,86 +211,19 @@ void CTAAPass::Render(ICommandList* cmd_list,
     ensureTextures(width, height);
 
     // Descriptor set path (DX12)
-    if (IsDescriptorSetModeAvailable()) {
-        if (!m_taa_pso_ds || !m_output || !current_color || !velocity_buffer || !depth_buffer) return;
-
-        ITexture* history_read = m_history[m_history_index].get();
-        ITexture* history_write = m_history[1 - m_history_index].get();
-
-        // TAA Resolve
-        {
-            CScopedDebugEvent evt(cmd_list, L"TAA Resolve");
-
-            CB_TAA cb{};
-            XMStoreFloat4x4(&cb.inv_view_proj, XMMatrixTranspose(XMMatrixInverse(nullptr, view_proj)));
-            XMStoreFloat4x4(&cb.prev_view_proj, XMMatrixTranspose(prev_view_proj));
-            cb.screen_size = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
-            cb.texel_size = XMFLOAT2(1.0f / width, 1.0f / height);
-            cb.jitter_offset = jitter_offset;
-            cb.prev_jitter_offset = prev_jitter_offset;
-            cb.history_blend = m_settings.history_blend;
-            cb.variance_clip_gamma = m_settings.variance_clip_gamma;
-            cb.velocity_rejection_scale = m_settings.velocity_rejection_scale;
-            cb.depth_rejection_scale = m_settings.depth_rejection_scale;
-            cb.algorithm = static_cast<uint32_t>(m_settings.algorithm);
-            cb.frame_index = m_frame_index;
-            cb.flags = m_history_valid ? 0 : 1;
-
-            cmd_list->SetPipelineState(m_taa_pso_ds.get());
-
-            // Bind PerPass descriptor set
-            m_perPassSet->Bind(BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(CB_TAA)));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, current_color));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input1, velocity_buffer));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input2, depth_buffer));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input3, history_read));
-            m_perPassSet->Bind(BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, history_write));
-            cmd_list->BindDescriptorSet(1, m_perPassSet);
-
-            cmd_list->Dispatch(calcDispatchGroups(width), calcDispatchGroups(height), 1);
-        }
-
-        // Sharpening (Production level only)
-        if (m_settings.algorithm == ETAAAlgorithm::Production &&
-            m_settings.sharpening_enabled && m_sharpen_pso_ds && m_sharpen_output) {
-            CScopedDebugEvent evt(cmd_list, L"TAA Sharpen");
-
-            CB_TAASharpen cb{};
-            cb.screen_size = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
-            cb.texel_size = XMFLOAT2(1.0f / width, 1.0f / height);
-            cb.sharpen_strength = m_settings.sharpening_strength;
-
-            cmd_list->SetPipelineState(m_sharpen_pso_ds.get());
-
-            // Bind PerPass descriptor set for sharpen
-            m_perPassSet->Bind(BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(CB_TAASharpen)));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, history_write));
-            m_perPassSet->Bind(BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, m_sharpen_output.get()));
-            cmd_list->BindDescriptorSet(1, m_perPassSet);
-
-            cmd_list->Dispatch(calcDispatchGroups(width), calcDispatchGroups(height), 1);
-
-            cmd_list->CopyTexture(m_output.get(), m_sharpen_output.get());
-        } else {
-            cmd_list->CopyTexture(m_output.get(), history_write);
-        }
-
-        m_history_index = 1 - m_history_index;
-        m_history_valid = true;
-        m_frame_index++;
+    if (!IsDescriptorSetModeAvailable()) {
+        CFFLog::Warning("[TAAPass] Legacy binding disabled and descriptor sets not available");
         return;
     }
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    // Legacy path for DX11
-    if (!m_taa_pso || !m_output || !current_color || !velocity_buffer || !depth_buffer) return;
+    if (!m_taa_pso_ds || !m_output || !current_color || !velocity_buffer || !depth_buffer) return;
 
     ITexture* history_read = m_history[m_history_index].get();
     ITexture* history_write = m_history[1 - m_history_index].get();
 
     // TAA Resolve
     {
-        CScopedDebugEvent evt(cmd_list, L"TAA Resolve");
+        CScopedDebugEvent evt(cmd_list, L"TAA Resolve (DS)");
 
         CB_TAA cb{};
         XMStoreFloat4x4(&cb.inv_view_proj, XMMatrixTranspose(XMMatrixInverse(nullptr, view_proj)));
@@ -315,45 +240,39 @@ void CTAAPass::Render(ICommandList* cmd_list,
         cb.frame_index = m_frame_index;
         cb.flags = m_history_valid ? 0 : 1;
 
-        cmd_list->SetPipelineState(m_taa_pso.get());
-        cmd_list->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
+        cmd_list->SetPipelineState(m_taa_pso_ds.get());
 
-        cmd_list->SetShaderResource(EShaderStage::Compute, 0, current_color);
-        cmd_list->SetShaderResource(EShaderStage::Compute, 1, velocity_buffer);
-        cmd_list->SetShaderResource(EShaderStage::Compute, 2, depth_buffer);
-        cmd_list->SetShaderResource(EShaderStage::Compute, 3, history_read);
+        // Bind PerPass descriptor set
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(CB_TAA)));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, current_color));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input1, velocity_buffer));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input2, depth_buffer));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input3, history_read));
+        m_perPassSet->Bind(BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, history_write));
+        cmd_list->BindDescriptorSet(1, m_perPassSet);
 
-        cmd_list->SetSampler(EShaderStage::Compute, 0, m_linear_sampler.get());
-        cmd_list->SetSampler(EShaderStage::Compute, 1, m_point_sampler.get());
-
-        cmd_list->SetUnorderedAccessTexture(0, history_write);
         cmd_list->Dispatch(calcDispatchGroups(width), calcDispatchGroups(height), 1);
-
-        cmd_list->SetUnorderedAccessTexture(0, nullptr);
-        cmd_list->UnbindShaderResources(EShaderStage::Compute, 0, 4);
     }
 
     // Sharpening (Production level only)
     if (m_settings.algorithm == ETAAAlgorithm::Production &&
-        m_settings.sharpening_enabled && m_sharpen_pso && m_sharpen_output) {
-        CScopedDebugEvent evt(cmd_list, L"TAA Sharpen");
+        m_settings.sharpening_enabled && m_sharpen_pso_ds && m_sharpen_output) {
+        CScopedDebugEvent evt(cmd_list, L"TAA Sharpen (DS)");
 
         CB_TAASharpen cb{};
         cb.screen_size = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
         cb.texel_size = XMFLOAT2(1.0f / width, 1.0f / height);
         cb.sharpen_strength = m_settings.sharpening_strength;
 
-        cmd_list->SetPipelineState(m_sharpen_pso.get());
-        cmd_list->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
+        cmd_list->SetPipelineState(m_sharpen_pso_ds.get());
 
-        cmd_list->SetShaderResource(EShaderStage::Compute, 0, history_write);
-        cmd_list->SetSampler(EShaderStage::Compute, 0, m_point_sampler.get());
-        cmd_list->SetUnorderedAccessTexture(0, m_sharpen_output.get());
+        // Bind PerPass descriptor set for sharpen
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(CB_TAASharpen)));
+        m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, history_write));
+        m_perPassSet->Bind(BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, m_sharpen_output.get()));
+        cmd_list->BindDescriptorSet(1, m_perPassSet);
 
         cmd_list->Dispatch(calcDispatchGroups(width), calcDispatchGroups(height), 1);
-
-        cmd_list->SetUnorderedAccessTexture(0, nullptr);
-        cmd_list->UnbindShaderResources(EShaderStage::Compute, 0, 1);
 
         cmd_list->CopyTexture(m_output.get(), m_sharpen_output.get());
     } else {
@@ -363,9 +282,6 @@ void CTAAPass::Render(ICommandList* cmd_list,
     m_history_index = 1 - m_history_index;
     m_history_valid = true;
     m_frame_index++;
-#else
-    CFFLog::Warning("[TAAPass] Legacy binding disabled and descriptor set mode not available");
-#endif
 }
 
 // ============================================

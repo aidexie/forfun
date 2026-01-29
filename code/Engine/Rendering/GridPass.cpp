@@ -210,37 +210,7 @@ void CGridPass::Render(XMMATRIX view, XMMATRIX proj, XMFLOAT3 cameraPos) {
         return;
     }
 
-#ifndef FF_LEGACY_BINDING_DISABLED
-    if (!m_pso) return;
-
-    // Update constant buffer
-    XMMATRIX viewProj = view * proj;
-    XMMATRIX invViewProj = XMMatrixInverse(nullptr, viewProj);
-
-    CBPerFrame cb;
-    cb.viewProj = XMMatrixTranspose(viewProj);       // HLSL expects column-major
-    cb.invViewProj = XMMatrixTranspose(invViewProj);
-    cb.cameraPos = cameraPos;
-    cb.fadeStart = m_fadeStart;
-    cb.fadeEnd = m_fadeEnd;
-    cb.padding = XMFLOAT3(0, 0, 0);
-
-    // Get command list
-    ICommandList* cmdList = renderContext->GetCommandList();
-
-    // Set pipeline state
-    cmdList->SetPipelineState(m_pso.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-
-    // Bind constant buffer (use SetConstantBufferData for DX12 compatibility)
-    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cb, sizeof(CBPerFrame));
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(CBPerFrame));
-
-    // Draw full-screen quad (4 vertices, triangle strip)
-    cmdList->Draw(4, 0);
-#else
     CFFLog::Warning("GridPass::Render() - Legacy binding disabled, descriptor set path not available");
-#endif
 }
 
 // ============================================
