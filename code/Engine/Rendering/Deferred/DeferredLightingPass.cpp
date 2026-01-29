@@ -375,11 +375,9 @@ void CDeferredLightingPass::Render(
     ICommandList* cmdList = ctx->GetCommandList();
     if (!cmdList) return;
 
-    // Fallback to legacy path if descriptor sets not available
+    // Require descriptor set path
     if (!m_perPassSet || !perFrameSet || !m_pso_ds) {
-        // Call legacy render with nullptr for clusteredLighting (data is in perFrameSet)
-        CClusteredLightingPass* nullClustered = nullptr;
-        Render(camera, scene, gbuffer, hdrOutput, width, height, shadowPass, nullClustered, ssaoTexture);
+        CFFLog::Warning("[DeferredLightingPass] Descriptor set resources not available, skipping render");
         return;
     }
 
@@ -484,6 +482,7 @@ void CDeferredLightingPass::Render(
 // ============================================
 // Legacy Render Method (backwards compatibility)
 // ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CDeferredLightingPass::Render(
     const CCamera& camera,
     CScene& scene,
@@ -624,3 +623,4 @@ void CDeferredLightingPass::Render(
     // Draw full-screen triangle
     cmdList->Draw(3, 0);
 }
+#endif // FF_LEGACY_BINDING_DISABLED
