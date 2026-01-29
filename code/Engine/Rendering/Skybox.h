@@ -1,8 +1,10 @@
 #pragma once
 #include "RHI/RHIPointers.h"
 #include "RHI/RHIResources.h"
+#include "RHI/IDescriptorSet.h"
 #include <DirectXMath.h>
 #include <string>
+#include <functional>
 
 // Skybox renderer using HDR cubemap
 class CSkybox {
@@ -32,6 +34,7 @@ private:
     void createPipelineState();
     void createConstantBuffer();
     void createSampler();
+    void initDescriptorSets();
 
     // Legacy: HDR to cubemap conversion (still D3D11)
     void convertEquirectToCubemapLegacy(const std::string& hdrPath, int size);
@@ -46,6 +49,13 @@ private:
     RHI::BufferPtr m_constantBuffer;
     RHI::SamplerPtr m_sampler;
     RHI::PipelineStatePtr m_pso;
+
+    // Descriptor set resources (DX12)
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    std::unique_ptr<RHI::IDescriptorSet, std::function<void(RHI::IDescriptorSet*)>> m_perPassSet;
+    RHI::ShaderPtr m_vs_ds;
+    RHI::ShaderPtr m_ps_ds;
+    RHI::PipelineStatePtr m_pso_ds;
 
     uint32_t m_indexCount = 0;
     std::string m_envPathKTX2 = "";
