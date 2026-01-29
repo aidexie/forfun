@@ -248,10 +248,10 @@ void CTAAPass::Render(ICommandList* cmd_list,
 
             // Bind PerPass descriptor set
             m_perPassSet->Bind(BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(CB_TAA)));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::SRV_Input0, current_color));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::SRV_Input1, velocity_buffer));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::SRV_Input2, depth_buffer));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::SRV_Input3, history_read));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, current_color));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input1, velocity_buffer));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input2, depth_buffer));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input3, history_read));
             m_perPassSet->Bind(BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, history_write));
             cmd_list->BindDescriptorSet(1, m_perPassSet);
 
@@ -272,7 +272,7 @@ void CTAAPass::Render(ICommandList* cmd_list,
 
             // Bind PerPass descriptor set for sharpen
             m_perPassSet->Bind(BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(CB_TAASharpen)));
-            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::SRV_Input0, history_write));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, history_write));
             m_perPassSet->Bind(BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, m_sharpen_output.get()));
             cmd_list->BindDescriptorSet(1, m_perPassSet);
 

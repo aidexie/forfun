@@ -133,6 +133,14 @@ void CTransparentForwardPass::Shutdown()
             ctx->DestroyDescriptorSetLayout(m_perPassLayout);
             m_perPassLayout = nullptr;
         }
+        if (m_perMaterialSet) {
+            ctx->FreeDescriptorSet(m_perMaterialSet);
+            m_perMaterialSet = nullptr;
+        }
+        if (m_perMaterialLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perMaterialLayout);
+            m_perMaterialLayout = nullptr;
+        }
     }
 }
 
@@ -508,10 +516,220 @@ void CTransparentForwardPass::Render(
         cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }
 #else
-    // TODO: TransparentForwardPass needs migration to descriptor set architecture
-    CFFLog::Warning("[TransparentForwardPass] Legacy binding disabled but descriptor set path not implemented");
-    (void)camera; (void)scene; (void)hdrRT; (void)depthRT;
-    (void)width; (void)height; (void)shadowData; (void)clusteredLighting;
+    // ============================================
+    // Descriptor Set Rendering Path (DX12)
+    // ============================================
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    ICommandList* cmdList = ctx->GetCommandList();
+    if (!cmdList) return;
+
+    // Check if DS path is available
+    if (!IsDescriptorSetModeAvailable()) {
+        CFFLog::Warning("[TransparentForwardPass] Descriptor set path not available, skipping render");
+        return;
+    }
+
+    // ============================================
+    // Collect transparent objects
+    // ============================================
+    std::vector<TransparentItem> transparentItems;
+    XMVECTOR eye = XMLoadFloat3(&camera.position);
+
+    auto& probeManager = scene.GetProbeManager();
+    CTextureManager& texMgr = CTextureManager::Instance();
+    ITexture* defaultWhite = texMgr.GetDefaultWhite().get();
+    ITexture* defaultNormal = texMgr.GetDefaultNormal().get();
+    ITexture* defaultBlack = texMgr.GetDefaultBlack().get();
+
+    for (auto& objPtr : scene.GetWorld().Objects()) {
+        auto* obj = objPtr.get();
+        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+        auto* transform = obj->GetComponent<STransform>();
+
+        if (!meshRenderer || !transform) continue;
+
+        meshRenderer->EnsureUploaded();
+
+        // Get material via MaterialManager
+        CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
+        if (!meshRenderer->materialPath.empty()) {
+            material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
+        }
+        if (!material) continue;
+
+        // Only collect transparent objects
+        if (material->alphaMode != EAlphaMode::Blend) continue;
+
+        XMMATRIX worldMatrix = transform->WorldMatrix();
+        XMVECTOR objPos = worldMatrix.r[3];
+        float distance = XMVectorGetX(XMVector3Length(XMVectorSubtract(objPos, eye)));
+
+        // Get textures (async loading - returns placeholder until ready)
+        ITexture* albedoTex = material->albedoTexture.empty() ?
+            defaultWhite : texMgr.LoadAsync(material->albedoTexture, true)->GetTexture();
+        ITexture* normalTex = material->normalMap.empty() ?
+            defaultNormal : texMgr.LoadAsync(material->normalMap, false)->GetTexture();
+        ITexture* metallicRoughnessTex = material->metallicRoughnessMap.empty() ?
+            defaultWhite : texMgr.LoadAsync(material->metallicRoughnessMap, false)->GetTexture();
+        ITexture* emissiveTex = material->emissiveMap.empty() ?
+            defaultBlack : texMgr.LoadAsync(material->emissiveMap, true)->GetTexture();
+
+        bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
+        bool hasRealEmissiveMap = !material->emissiveMap.empty();
+
+        // Probe selection
+        XMFLOAT3 worldPos;
+        XMStoreFloat3(&worldPos, objPos);
+        int probeIndex = probeManager.SelectProbeForPosition(worldPos);
+
+        // Collect each mesh
+        for (auto& gpuMesh : meshRenderer->meshes) {
+            if (!gpuMesh) continue;
+
+            TransparentItem item;
+            item.obj = obj;
+            item.meshRenderer = meshRenderer;
+            item.transform = transform;
+            item.material = material;
+            item.worldMatrix = worldMatrix;
+            item.distanceToCamera = distance;
+            item.gpuMesh = gpuMesh.get();
+            item.albedoTex = albedoTex ? albedoTex : defaultWhite;
+            item.normalTex = normalTex ? normalTex : defaultNormal;
+            item.metallicRoughnessTex = metallicRoughnessTex ? metallicRoughnessTex : defaultWhite;
+            item.emissiveTex = emissiveTex ? emissiveTex : defaultBlack;
+            item.hasRealMetallicRoughnessTexture = hasRealMetallicRoughnessTexture;
+            item.hasRealEmissiveMap = hasRealEmissiveMap;
+            item.probeIndex = probeIndex;
+            item.lightmapIndex = meshRenderer->lightmapInfosIndex;
+
+            transparentItems.push_back(item);
+        }
+    }
+
+    // Skip if no transparent objects
+    if (transparentItems.empty()) return;
+
+    // Sort back-to-front for proper blending
+    std::sort(transparentItems.begin(), transparentItems.end(),
+        [](const TransparentItem& a, const TransparentItem& b) {
+            return a.distanceToCamera > b.distanceToCamera;
+        });
+
+    CScopedDebugEvent evt(cmdList, L"Transparent Forward Pass (DS)");
+
+    // ============================================
+    // Set render target (HDR + depth read-only)
+    // ============================================
+    cmdList->SetRenderTargets(1, &hdrRT, depthRT);
+    cmdList->SetViewport(0, 0, (float)width, (float)height);
+    cmdList->SetScissorRect(0, 0, width, height);
+
+    // ============================================
+    // Set pipeline state
+    // ============================================
+    cmdList->SetPipelineState(m_pso_ds.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+
+    // ============================================
+    // Update frame constants (PerPass CB)
+    // ============================================
+    XMMATRIX view = camera.GetViewMatrix();
+    XMMATRIX proj = camera.GetProjectionMatrix();
+
+    SDirectionalLight* dirLight = nullptr;
+    for (auto& objPtr : scene.GetWorld().Objects()) {
+        dirLight = objPtr->GetComponent<SDirectionalLight>();
+        if (dirLight) break;
+    }
+
+    CB_Frame cf{};
+    cf.view = XMMatrixTranspose(view);
+    cf.proj = XMMatrixTranspose(proj);
+
+    if (shadowData) {
+        cf.cascadeCount = shadowData->cascadeCount;
+        cf.debugShowCascades = shadowData->debugShowCascades ? 1 : 0;
+        cf.enableSoftShadows = shadowData->enableSoftShadows ? 1 : 0;
+        cf.cascadeBlendRange = shadowData->cascadeBlendRange;
+        cf.cascadeSplits = XMFLOAT4(
+            (0 < shadowData->cascadeCount) ? shadowData->cascadeSplits[0] : 100.0f,
+            (1 < shadowData->cascadeCount) ? shadowData->cascadeSplits[1] : 100.0f,
+            (2 < shadowData->cascadeCount) ? shadowData->cascadeSplits[2] : 100.0f,
+            (3 < shadowData->cascadeCount) ? shadowData->cascadeSplits[3] : 100.0f
+        );
+        for (int i = 0; i < 4; ++i) {
+            cf.lightSpaceVPs[i] = XMMatrixTranspose(shadowData->lightSpaceVPs[i]);
+        }
+    } else {
+        cf.cascadeCount = 1;
+        cf.enableSoftShadows = 1;
+        for (int i = 0; i < 4; ++i) {
+            cf.lightSpaceVPs[i] = XMMatrixTranspose(XMMatrixIdentity());
+        }
+    }
+
+    if (dirLight) {
+        cf.lightDirWS = dirLight->GetDirection();
+        cf.lightColor = XMFLOAT3(
+            dirLight->color.x * dirLight->intensity,
+            dirLight->color.y * dirLight->intensity,
+            dirLight->color.z * dirLight->intensity
+        );
+        cf.shadowBias = dirLight->shadow_bias;
+        cf.iblIntensity = dirLight->ibl_intensity;
+    } else {
+        cf.lightDirWS = XMFLOAT3(0.4f, -1.0f, 0.2f);
+        XMVECTOR L = XMVector3Normalize(XMLoadFloat3(&cf.lightDirWS));
+        XMStoreFloat3(&cf.lightDirWS, L);
+        cf.lightColor = XMFLOAT3(1.0f, 1.0f, 1.0f);
+        cf.shadowBias = 0.005f;
+        cf.iblIntensity = 1.0f;
+    }
+
+    cf.camPosWS = camera.position;
+    cf.diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
+
+    // Bind PerPass set with frame CB
+    m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cf, sizeof(cf)));
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    // ============================================
+    // Render each transparent item
+    // ============================================
+    for (const auto& item : transparentItems) {
+        // Update per-object constants (PerMaterial CB)
+        CB_Object co{};
+        co.world = XMMatrixTranspose(item.worldMatrix);
+        co.albedo = item.material->albedo;
+        co.metallic = item.material->metallic;
+        co.roughness = item.material->roughness;
+        co.hasMetallicRoughnessTexture = item.hasRealMetallicRoughnessTexture ? 1 : 0;
+        co.emissive = item.material->emissive;
+        co.emissiveStrength = item.material->emissiveStrength;
+        co.hasEmissiveMap = item.hasRealEmissiveMap ? 1 : 0;
+        co.alphaMode = static_cast<int>(item.material->alphaMode);
+        co.alphaCutoff = item.material->alphaCutoff;
+        co.probeIndex = item.probeIndex;
+        co.lightmapIndex = item.lightmapIndex;
+
+        // Bind PerMaterial set with material CB and textures
+        m_perMaterialSet->Bind({
+            BindingSetItem::VolatileCBV(0, &co, sizeof(co)),
+            BindingSetItem::Texture_SRV(0, item.albedoTex),
+            BindingSetItem::Texture_SRV(1, item.normalTex),
+            BindingSetItem::Texture_SRV(2, item.metallicRoughnessTex),
+            BindingSetItem::Texture_SRV(3, item.emissiveTex)
+        });
+        cmdList->BindDescriptorSet(2, m_perMaterialSet);
+
+        // Bind vertex/index buffers and draw
+        cmdList->SetVertexBuffer(0, item.gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
+        cmdList->SetIndexBuffer(item.gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
+        cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
+    }
 #endif // FF_LEGACY_BINDING_DISABLED
 }
 
@@ -529,9 +747,393 @@ void CTransparentForwardPass::initDescriptorSets()
         return;
     }
 
-    // TransparentForwardPass uses the same shaders as MainPass
-    // For now, we just initialize the descriptor set infrastructure
-    // The actual DS path will be implemented when MainPass is migrated
+    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
+    CDefaultShaderIncludeHandler includeHandler(shaderDir);
 
-    CFFLog::Info("[TransparentForwardPass] Descriptor set resources initialized (placeholder)");
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Compile SM 5.1 shaders
+    std::string vsSource = LoadShaderSource(shaderDir + "MainPass_DS.vs.hlsl");
+    std::string psSource = LoadShaderSource(shaderDir + "MainPass_DS.ps.hlsl");
+
+    if (vsSource.empty() || psSource.empty()) {
+        CFFLog::Warning("[TransparentForwardPass] Failed to load MainPass_DS shaders");
+        return;
+    }
+
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource.c_str(), "main", "vs_5_1", &includeHandler, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("[TransparentForwardPass] MainPass_DS.vs.hlsl compile error: %s", vsCompiled.errorMessage.c_str());
+        return;
+    }
+
+    SCompiledShader psCompiled = CompileShaderFromSource(psSource.c_str(), "main", "ps_5_1", &includeHandler, debugShaders);
+    if (!psCompiled.success) {
+        CFFLog::Error("[TransparentForwardPass] MainPass_DS.ps.hlsl compile error: %s", psCompiled.errorMessage.c_str());
+        return;
+    }
+
+    ShaderDesc vsDesc;
+    vsDesc.type = EShaderType::Vertex;
+    vsDesc.bytecode = vsCompiled.bytecode.data();
+    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
+    vsDesc.debugName = "TransparentForward_DS_VS";
+    m_vs_ds.reset(ctx->CreateShader(vsDesc));
+
+    ShaderDesc psDesc;
+    psDesc.type = EShaderType::Pixel;
+    psDesc.bytecode = psCompiled.bytecode.data();
+    psDesc.bytecodeSize = psCompiled.bytecode.size();
+    psDesc.debugName = "TransparentForward_DS_PS";
+    m_ps_ds.reset(ctx->CreateShader(psDesc));
+
+    if (!m_vs_ds || !m_ps_ds) {
+        CFFLog::Error("[TransparentForwardPass] Failed to create SM 5.1 shaders");
+        return;
+    }
+
+    // Create PerPass layout (Set 1, space1)
+    // Contains: Frame CB (b0), no textures needed at pass level
+    BindingLayoutDesc perPassLayoutDesc("TransparentForward_PerPass");
+    perPassLayoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_Frame)));  // b0, space1
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(perPassLayoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[TransparentForwardPass] Failed to create PerPass layout");
+        return;
+    }
+
+    m_perPassSet = ctx->AllocateDescriptorSet(m_perPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[TransparentForwardPass] Failed to allocate PerPass set");
+        return;
+    }
+
+    // Create PerMaterial layout (Set 2, space2)
+    // Contains: Material CB (b0), textures (t0-t3), sampler (s0)
+    BindingLayoutDesc perMaterialLayoutDesc("TransparentForward_PerMaterial");
+    perMaterialLayoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_Object)));  // b0, space2
+    perMaterialLayoutDesc.AddItem(BindingLayoutItem::Texture_SRV(0));  // t0: Albedo
+    perMaterialLayoutDesc.AddItem(BindingLayoutItem::Texture_SRV(1));  // t1: Normal
+    perMaterialLayoutDesc.AddItem(BindingLayoutItem::Texture_SRV(2));  // t2: MetallicRoughness
+    perMaterialLayoutDesc.AddItem(BindingLayoutItem::Texture_SRV(3));  // t3: Emissive
+    perMaterialLayoutDesc.AddItem(BindingLayoutItem::Sampler(0));      // s0: Material sampler
+
+    m_perMaterialLayout = ctx->CreateDescriptorSetLayout(perMaterialLayoutDesc);
+    if (!m_perMaterialLayout) {
+        CFFLog::Error("[TransparentForwardPass] Failed to create PerMaterial layout");
+        return;
+    }
+
+    m_perMaterialSet = ctx->AllocateDescriptorSet(m_perMaterialLayout);
+    if (!m_perMaterialSet) {
+        CFFLog::Error("[TransparentForwardPass] Failed to allocate PerMaterial set");
+        return;
+    }
+
+    // Bind static sampler to PerMaterial set
+    m_perMaterialSet->Bind(BindingSetItem::Sampler(0, m_linearSampler.get()));
+
+    CFFLog::Info("[TransparentForwardPass] Descriptor set resources initialized");
+}
+
+// ============================================
+// Create PSO with Descriptor Set Layouts
+// ============================================
+void CTransparentForwardPass::CreatePSOWithLayouts(IDescriptorSetLayout* perFrameLayout)
+{
+    if (!m_perPassLayout || !m_perMaterialLayout || !perFrameLayout || !m_vs_ds || !m_ps_ds) {
+        CFFLog::Warning("[TransparentForwardPass] Cannot create PSO with layouts - missing resources");
+        return;
+    }
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Input layout (matches SVertexPNT)
+    std::vector<VertexElement> inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 },
+        { EVertexSemantic::Normal,   0, EVertexFormat::Float3, 12, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 24, 0 },
+        { EVertexSemantic::Tangent,  0, EVertexFormat::Float4, 32, 0 },
+        { EVertexSemantic::Color,    0, EVertexFormat::Float4, 48, 0 },
+        { EVertexSemantic::Texcoord, 1, EVertexFormat::Float2, 64, 0 }  // UV2 for lightmap
+    };
+
+    // Transparent PSO: depth read-only, alpha blending
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs_ds.get();
+    psoDesc.pixelShader = m_ps_ds.get();
+    psoDesc.inputLayout = inputLayout;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.cullMode = ECullMode::Back;
+    psoDesc.rasterizer.frontCounterClockwise = false;
+    psoDesc.rasterizer.depthClipEnable = true;
+
+    // Depth: read-only (no write)
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);  // LessEqual or GreaterEqual
+
+    // Alpha blending: SrcAlpha * Src + InvSrcAlpha * Dst
+    psoDesc.blend.blendEnable = true;
+    psoDesc.blend.srcBlend = EBlendFactor::SrcAlpha;
+    psoDesc.blend.dstBlend = EBlendFactor::InvSrcAlpha;
+    psoDesc.blend.blendOp = EBlendOp::Add;
+    psoDesc.blend.srcBlendAlpha = EBlendFactor::One;
+    psoDesc.blend.dstBlendAlpha = EBlendFactor::Zero;
+    psoDesc.blend.blendOpAlpha = EBlendOp::Add;
+
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+    psoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+    psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;
+    psoDesc.debugName = "TransparentForward_DS_PSO";
+
+    // Set descriptor set layouts
+    psoDesc.setLayouts[0] = perFrameLayout;      // Set 0: PerFrame (space0)
+    psoDesc.setLayouts[1] = m_perPassLayout;     // Set 1: PerPass (space1)
+    psoDesc.setLayouts[2] = m_perMaterialLayout; // Set 2: PerMaterial (space2)
+
+    m_pso_ds.reset(ctx->CreatePipelineState(psoDesc));
+
+    if (m_pso_ds) {
+        CFFLog::Info("[TransparentForwardPass] PSO with descriptor set layouts created");
+    } else {
+        CFFLog::Error("[TransparentForwardPass] Failed to create PSO with descriptor set layouts");
+    }
+}
+
+// ============================================
+// Descriptor Set Render Method (new API)
+// ============================================
+void CTransparentForwardPass::Render(
+    const CCamera& camera,
+    CScene& scene,
+    ITexture* hdrRT,
+    ITexture* depthRT,
+    uint32_t width,
+    uint32_t height,
+    const CShadowPass::Output* shadowData,
+    IDescriptorSet* perFrameSet)
+{
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    ICommandList* cmdList = ctx->GetCommandList();
+    if (!cmdList) return;
+
+    // Require descriptor set path
+    if (!m_perPassSet || !m_perMaterialSet || !perFrameSet || !m_pso_ds) {
+        CFFLog::Warning("[TransparentForwardPass] Descriptor set resources not available, skipping render");
+        return;
+    }
+
+    // ============================================
+    // Collect transparent objects
+    // ============================================
+    std::vector<TransparentItem> transparentItems;
+    XMVECTOR eye = XMLoadFloat3(&camera.position);
+
+    auto& probeManager = scene.GetProbeManager();
+    CTextureManager& texMgr = CTextureManager::Instance();
+    ITexture* defaultWhite = texMgr.GetDefaultWhite().get();
+    ITexture* defaultNormal = texMgr.GetDefaultNormal().get();
+    ITexture* defaultBlack = texMgr.GetDefaultBlack().get();
+
+    for (auto& objPtr : scene.GetWorld().Objects()) {
+        auto* obj = objPtr.get();
+        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
+        auto* transform = obj->GetComponent<STransform>();
+
+        if (!meshRenderer || !transform) continue;
+
+        meshRenderer->EnsureUploaded();
+
+        // Get material via MaterialManager
+        CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
+        if (!meshRenderer->materialPath.empty()) {
+            material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
+        }
+        if (!material) continue;
+
+        // Only collect transparent objects
+        if (material->alphaMode != EAlphaMode::Blend) continue;
+
+        XMMATRIX worldMatrix = transform->WorldMatrix();
+        XMVECTOR objPos = worldMatrix.r[3];
+        float distance = XMVectorGetX(XMVector3Length(XMVectorSubtract(objPos, eye)));
+
+        // Get textures (async loading - returns placeholder until ready)
+        ITexture* albedoTex = material->albedoTexture.empty() ?
+            defaultWhite : texMgr.LoadAsync(material->albedoTexture, true)->GetTexture();
+        ITexture* normalTex = material->normalMap.empty() ?
+            defaultNormal : texMgr.LoadAsync(material->normalMap, false)->GetTexture();
+        ITexture* metallicRoughnessTex = material->metallicRoughnessMap.empty() ?
+            defaultWhite : texMgr.LoadAsync(material->metallicRoughnessMap, false)->GetTexture();
+        ITexture* emissiveTex = material->emissiveMap.empty() ?
+            defaultBlack : texMgr.LoadAsync(material->emissiveMap, true)->GetTexture();
+
+        bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
+        bool hasRealEmissiveMap = !material->emissiveMap.empty();
+
+        // Probe selection
+        XMFLOAT3 worldPos;
+        XMStoreFloat3(&worldPos, objPos);
+        int probeIndex = probeManager.SelectProbeForPosition(worldPos);
+
+        // Collect each mesh
+        for (auto& gpuMesh : meshRenderer->meshes) {
+            if (!gpuMesh) continue;
+
+            TransparentItem item;
+            item.obj = obj;
+            item.meshRenderer = meshRenderer;
+            item.transform = transform;
+            item.material = material;
+            item.worldMatrix = worldMatrix;
+            item.distanceToCamera = distance;
+            item.gpuMesh = gpuMesh.get();
+            item.albedoTex = albedoTex ? albedoTex : defaultWhite;
+            item.normalTex = normalTex ? normalTex : defaultNormal;
+            item.metallicRoughnessTex = metallicRoughnessTex ? metallicRoughnessTex : defaultWhite;
+            item.emissiveTex = emissiveTex ? emissiveTex : defaultBlack;
+            item.hasRealMetallicRoughnessTexture = hasRealMetallicRoughnessTexture;
+            item.hasRealEmissiveMap = hasRealEmissiveMap;
+            item.probeIndex = probeIndex;
+            item.lightmapIndex = meshRenderer->lightmapInfosIndex;
+
+            transparentItems.push_back(item);
+        }
+    }
+
+    // Skip if no transparent objects
+    if (transparentItems.empty()) return;
+
+    // Sort back-to-front for proper blending
+    std::sort(transparentItems.begin(), transparentItems.end(),
+        [](const TransparentItem& a, const TransparentItem& b) {
+            return a.distanceToCamera > b.distanceToCamera;
+        });
+
+    CScopedDebugEvent evt(cmdList, L"Transparent Forward Pass (DS API)");
+
+    // ============================================
+    // Set render target (HDR + depth read-only)
+    // ============================================
+    cmdList->SetRenderTargets(1, &hdrRT, depthRT);
+    cmdList->SetViewport(0, 0, (float)width, (float)height);
+    cmdList->SetScissorRect(0, 0, width, height);
+
+    // ============================================
+    // Set pipeline state
+    // ============================================
+    cmdList->SetPipelineState(m_pso_ds.get());
+    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+
+    // ============================================
+    // Bind PerFrame set (Set 0)
+    // ============================================
+    cmdList->BindDescriptorSet(0, perFrameSet);
+
+    // ============================================
+    // Update frame constants (PerPass CB)
+    // ============================================
+    XMMATRIX view = camera.GetViewMatrix();
+    XMMATRIX proj = camera.GetProjectionMatrix();
+
+    SDirectionalLight* dirLight = nullptr;
+    for (auto& objPtr : scene.GetWorld().Objects()) {
+        dirLight = objPtr->GetComponent<SDirectionalLight>();
+        if (dirLight) break;
+    }
+
+    CB_Frame cf{};
+    cf.view = XMMatrixTranspose(view);
+    cf.proj = XMMatrixTranspose(proj);
+
+    if (shadowData) {
+        cf.cascadeCount = shadowData->cascadeCount;
+        cf.debugShowCascades = shadowData->debugShowCascades ? 1 : 0;
+        cf.enableSoftShadows = shadowData->enableSoftShadows ? 1 : 0;
+        cf.cascadeBlendRange = shadowData->cascadeBlendRange;
+        cf.cascadeSplits = XMFLOAT4(
+            (0 < shadowData->cascadeCount) ? shadowData->cascadeSplits[0] : 100.0f,
+            (1 < shadowData->cascadeCount) ? shadowData->cascadeSplits[1] : 100.0f,
+            (2 < shadowData->cascadeCount) ? shadowData->cascadeSplits[2] : 100.0f,
+            (3 < shadowData->cascadeCount) ? shadowData->cascadeSplits[3] : 100.0f
+        );
+        for (int i = 0; i < 4; ++i) {
+            cf.lightSpaceVPs[i] = XMMatrixTranspose(shadowData->lightSpaceVPs[i]);
+        }
+    } else {
+        cf.cascadeCount = 1;
+        cf.enableSoftShadows = 1;
+        for (int i = 0; i < 4; ++i) {
+            cf.lightSpaceVPs[i] = XMMatrixTranspose(XMMatrixIdentity());
+        }
+    }
+
+    if (dirLight) {
+        cf.lightDirWS = dirLight->GetDirection();
+        cf.lightColor = XMFLOAT3(
+            dirLight->color.x * dirLight->intensity,
+            dirLight->color.y * dirLight->intensity,
+            dirLight->color.z * dirLight->intensity
+        );
+        cf.shadowBias = dirLight->shadow_bias;
+        cf.iblIntensity = dirLight->ibl_intensity;
+    } else {
+        cf.lightDirWS = XMFLOAT3(0.4f, -1.0f, 0.2f);
+        XMVECTOR L = XMVector3Normalize(XMLoadFloat3(&cf.lightDirWS));
+        XMStoreFloat3(&cf.lightDirWS, L);
+        cf.lightColor = XMFLOAT3(1.0f, 1.0f, 1.0f);
+        cf.shadowBias = 0.005f;
+        cf.iblIntensity = 1.0f;
+    }
+
+    cf.camPosWS = camera.position;
+    cf.diffuseGIMode = static_cast<int>(scene.GetLightSettings().diffuseGIMode);
+
+    // Bind PerPass set with frame CB (Set 1)
+    m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cf, sizeof(cf)));
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    // ============================================
+    // Render each transparent item
+    // ============================================
+    for (const auto& item : transparentItems) {
+        // Update per-object constants (PerMaterial CB)
+        CB_Object co{};
+        co.world = XMMatrixTranspose(item.worldMatrix);
+        co.albedo = item.material->albedo;
+        co.metallic = item.material->metallic;
+        co.roughness = item.material->roughness;
+        co.hasMetallicRoughnessTexture = item.hasRealMetallicRoughnessTexture ? 1 : 0;
+        co.emissive = item.material->emissive;
+        co.emissiveStrength = item.material->emissiveStrength;
+        co.hasEmissiveMap = item.hasRealEmissiveMap ? 1 : 0;
+        co.alphaMode = static_cast<int>(item.material->alphaMode);
+        co.alphaCutoff = item.material->alphaCutoff;
+        co.probeIndex = item.probeIndex;
+        co.lightmapIndex = item.lightmapIndex;
+
+        // Bind PerMaterial set with material CB and textures (Set 2)
+        m_perMaterialSet->Bind({
+            BindingSetItem::VolatileCBV(0, &co, sizeof(co)),
+            BindingSetItem::Texture_SRV(0, item.albedoTex),
+            BindingSetItem::Texture_SRV(1, item.normalTex),
+            BindingSetItem::Texture_SRV(2, item.metallicRoughnessTex),
+            BindingSetItem::Texture_SRV(3, item.emissiveTex)
+        });
+        cmdList->BindDescriptorSet(2, m_perMaterialSet);
+
+        // Bind vertex/index buffers and draw
+        cmdList->SetVertexBuffer(0, item.gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
+        cmdList->SetIndexBuffer(item.gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
+        cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
+    }
 }

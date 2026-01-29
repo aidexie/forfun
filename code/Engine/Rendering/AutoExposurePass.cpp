@@ -1,9 +1,11 @@
 #include "AutoExposurePass.h"
+#include "ComputePassLayout.h"
 #include "Engine/SceneLightSettings.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
@@ -144,12 +146,21 @@ bool CAutoExposurePass::Initialize() {
 
     CFFLog::Info("[AutoExposurePass] Initializing...");
 
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (!createShaders()) {
         CFFLog::Error("[AutoExposurePass] Failed to create shaders");
         return false;
     }
+#endif
+
     createBuffers();
+    createSamplers();
+
+#ifndef FF_LEGACY_BINDING_DISABLED
     createDebugResources();
+#endif
+
+    initDescriptorSets();
 
     m_initialized = true;
     CFFLog::Info("[AutoExposurePass] Initialized successfully");
@@ -171,6 +182,27 @@ void CAutoExposurePass::Shutdown() {
     m_histogramReadback.reset();
     m_exposureReadback.reset();
 
+    // Cleanup DS resources
+    m_histogramCS_ds.reset();
+    m_adaptationCS_ds.reset();
+    m_histogramPSO_ds.reset();
+    m_adaptationPSO_ds.reset();
+
+    m_pointSampler.reset();
+    m_linearSampler.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_computePerPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_computePerPassLayout);
+            m_computePerPassLayout = nullptr;
+        }
+    }
+
     m_currentExposure = 1.0f;
     m_targetExposure = 1.0f;
     m_initialized = false;
@@ -183,6 +215,7 @@ void CAutoExposurePass::Shutdown() {
 // Shader Creation
 // ============================================
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 bool CAutoExposurePass::createShaders() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return false;
@@ -212,6 +245,7 @@ bool CAutoExposurePass::createShaders() {
     CFFLog::Info("[AutoExposurePass] Shaders compiled");
     return true;
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CAutoExposurePass::createBuffers() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
@@ -262,6 +296,24 @@ void CAutoExposurePass::createBuffers() {
     CFFLog::Info("[AutoExposurePass] Buffers created");
 }
 
+void CAutoExposurePass::createSamplers() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    auto createClampSampler = [ctx](EFilter filter) {
+        SamplerDesc desc;
+        desc.filter = filter;
+        desc.addressU = ETextureAddressMode::Clamp;
+        desc.addressV = ETextureAddressMode::Clamp;
+        desc.addressW = ETextureAddressMode::Clamp;
+        return SamplerPtr(ctx->CreateSampler(desc));
+    };
+
+    m_pointSampler = createClampSampler(EFilter::MinMagMipPoint);
+    m_linearSampler = createClampSampler(EFilter::MinMagMipLinear);
+}
+
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CAutoExposurePass::createDebugResources() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
@@ -317,6 +369,7 @@ void CAutoExposurePass::createDebugResources() {
 
     CFFLog::Info("[AutoExposurePass] Debug resources created");
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 // ============================================
 // Rendering
@@ -327,14 +380,13 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
                                 uint32_t width, uint32_t height,
                                 float deltaTime,
                                 const SAutoExposureSettings& settings) {
-#ifndef FF_LEGACY_BINDING_DISABLED
     if (!m_initialized || !cmdList || !hdrInput || width == 0 || height == 0) {
         m_currentExposure = 1.0f;
         return;
     }
 
     // Guard against invalid state
-    if (!m_histogramPSO || !m_adaptationPSO || !m_histogramBuffer || !m_exposureBuffer) {
+    if (!m_histogramBuffer || !m_exposureBuffer) {
         m_currentExposure = 1.0f;
         return;
     }
@@ -345,11 +397,47 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
     // TODO: Implement proper buffer mapping/readback in RHI layer.
     m_firstFrame = false;
 
-    // Step 1: Build histogram
-    dispatchHistogram(cmdList, hdrInput, width, height, settings);
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        // Step 1: Build histogram
+        {
+            CScopedDebugEvent evt(cmdList, L"AutoExposure Histogram (DS)");
+            dispatchHistogram_DS(cmdList, hdrInput, width, height, settings);
+        }
 
-    // Step 2: Calculate and adapt exposure
-    dispatchAdaptation(cmdList, deltaTime, width * height, settings);
+        // Step 2: Calculate and adapt exposure
+        {
+            CScopedDebugEvent evt(cmdList, L"AutoExposure Adaptation (DS)");
+            dispatchAdaptation_DS(cmdList, deltaTime, width * height, settings);
+        }
+    }
+#ifndef FF_LEGACY_BINDING_DISABLED
+    else {
+        // Guard against invalid state for legacy path
+        if (!m_histogramPSO || !m_adaptationPSO) {
+            m_currentExposure = 1.0f;
+            return;
+        }
+
+        // Step 1: Build histogram
+        {
+            CScopedDebugEvent evt(cmdList, L"AutoExposure Histogram");
+            dispatchHistogram(cmdList, hdrInput, width, height, settings);
+        }
+
+        // Step 2: Calculate and adapt exposure
+        {
+            CScopedDebugEvent evt(cmdList, L"AutoExposure Adaptation");
+            dispatchAdaptation(cmdList, deltaTime, width * height, settings);
+        }
+    }
+#else
+    else {
+        CFFLog::Warning("[AutoExposurePass] Legacy binding disabled and descriptor sets not available");
+        m_currentExposure = 1.0f;
+        return;
+    }
+#endif
 
     // Step 3: Copy exposure to staging buffer (for future readback implementation)
     if (m_exposureReadback) {
@@ -361,13 +449,9 @@ void CAutoExposurePass::Render(ICommandList* cmdList,
         cmdList->CopyBuffer(m_histogramReadback.get(), 0, m_histogramBuffer.get(), 0,
                             AutoExposureConfig::HISTOGRAM_BINS * sizeof(uint32_t));
     }
-#else
-    CFFLog::Warning("[AutoExposurePass] Render() skipped - descriptor set path not implemented");
-    m_currentExposure = 1.0f;
-    (void)cmdList; (void)hdrInput; (void)width; (void)height; (void)deltaTime; (void)settings;
-#endif
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CAutoExposurePass::dispatchHistogram(ICommandList* cmdList,
                                           ITexture* hdrInput,
                                           uint32_t width, uint32_t height,
@@ -437,6 +521,7 @@ void CAutoExposurePass::dispatchAdaptation(ICommandList* cmdList,
     cmdList->SetUnorderedAccess(0, nullptr);
     cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 1);
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CAutoExposurePass::readbackHistogram(ICommandList* /*cmdList*/) {
     // Note: CPU readback of histogram is not yet implemented in this RHI.
@@ -484,4 +569,170 @@ void CAutoExposurePass::RenderDebugOverlay(ICommandList* cmdList,
     CFFLog::Warning("[AutoExposurePass] RenderDebugOverlay() skipped - descriptor set path not implemented");
     (void)cmdList; (void)renderTarget; (void)width; (void)height;
 #endif
+}
+
+// ============================================
+// Descriptor Set Dispatch Helpers
+// ============================================
+
+void CAutoExposurePass::dispatchHistogram_DS(ICommandList* cmdList,
+                                              ITexture* hdrInput,
+                                              uint32_t width, uint32_t height,
+                                              const SAutoExposureSettings& settings) {
+    if (!m_histogramPSO_ds || !m_perPassSet) return;
+
+    // Clear histogram buffer
+    const uint32_t clearValues[4] = { 0, 0, 0, 0 };
+    cmdList->ClearUnorderedAccessViewUint(m_histogramBuffer.get(), clearValues);
+
+    // UAV barrier after clear
+    cmdList->Barrier(m_histogramBuffer.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
+
+    // Update constant buffer (unified structure for both passes)
+    CB_AutoExposure cb{};
+    cb.screenSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
+    cb.rcpScreenSize = XMFLOAT2(1.0f / width, 1.0f / height);
+    cb.minLogLuminance = AutoExposureConfig::MIN_LOG_LUMINANCE;
+    cb.maxLogLuminance = AutoExposureConfig::MAX_LOG_LUMINANCE;
+    cb.centerWeight = settings.centerWeight;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, hdrInput),
+        BindingSetItem::Buffer_UAV(ComputePassLayout::Slots::UAV_Output0, m_histogramBuffer.get())
+    });
+
+    cmdList->SetPipelineState(m_histogramPSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    // Dispatch
+    uint32_t groupsX = calcDispatchGroups(width, AutoExposureConfig::HISTOGRAM_THREAD_GROUP_SIZE);
+    uint32_t groupsY = calcDispatchGroups(height, AutoExposureConfig::HISTOGRAM_THREAD_GROUP_SIZE);
+    cmdList->Dispatch(groupsX, groupsY, 1);
+
+    // UAV barrier before adaptation pass reads histogram
+    cmdList->Barrier(m_histogramBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+void CAutoExposurePass::dispatchAdaptation_DS(ICommandList* cmdList,
+                                               float deltaTime,
+                                               uint32_t /*pixelCount*/,
+                                               const SAutoExposureSettings& settings) {
+    if (!m_adaptationPSO_ds || !m_perPassSet) return;
+
+    // Update constant buffer (unified structure for both passes)
+    CB_AutoExposure cb{};
+    cb.minLogLuminance = AutoExposureConfig::MIN_LOG_LUMINANCE;
+    cb.maxLogLuminance = AutoExposureConfig::MAX_LOG_LUMINANCE;
+    cb.deltaTime = deltaTime;
+    cb.minExposure = std::pow(2.0f, settings.minEV);
+    cb.maxExposure = std::pow(2.0f, settings.maxEV);
+    cb.adaptSpeedUp = settings.adaptSpeedUp;
+    cb.adaptSpeedDown = settings.adaptSpeedDown;
+    cb.exposureCompensation = settings.exposureCompensation;
+
+    // Bind resources to descriptor set
+    // Note: Histogram is read as SRV (t1), exposure is written as UAV (u1)
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Buffer_SRV(ComputePassLayout::Slots::Tex_Input1, m_histogramBuffer.get()),
+        BindingSetItem::Buffer_UAV(ComputePassLayout::Slots::UAV_Output1, m_exposureBuffer.get())
+    });
+
+    cmdList->SetPipelineState(m_adaptationPSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    // Dispatch single thread group (256 threads for parallel reduction)
+    cmdList->Dispatch(1, 1, 1);
+
+    // UAV barrier for exposure buffer
+    cmdList->Barrier(m_exposureBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CAutoExposurePass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[AutoExposurePass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/AutoExposure_DS.cs.hlsl";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Create unified compute layout
+    m_computePerPassLayout = ComputePassLayout::CreateComputePerPassLayout(ctx);
+    if (!m_computePerPassLayout) {
+        CFFLog::Error("[AutoExposurePass] Failed to create compute PerPass layout");
+        return;
+    }
+
+    // Allocate descriptor set
+    m_perPassSet = ctx->AllocateDescriptorSet(m_computePerPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[AutoExposurePass] Failed to allocate PerPass descriptor set");
+        return;
+    }
+
+    // Bind static samplers (not used by AutoExposure but required for layout compatibility)
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Point, m_pointSampler.get()));
+    m_perPassSet->Bind(BindingSetItem::Sampler(ComputePassLayout::Slots::Samp_Linear, m_linearSampler.get()));
+
+    // Compile SM 5.1 shaders
+    // Histogram compute shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSBuildHistogram", "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[AutoExposurePass] CSBuildHistogram (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc shaderDesc;
+        shaderDesc.type = EShaderType::Compute;
+        shaderDesc.bytecode = compiled.bytecode.data();
+        shaderDesc.bytecodeSize = compiled.bytecode.size();
+        shaderDesc.debugName = "AutoExposure_DS_Histogram_CS";
+        m_histogramCS_ds.reset(ctx->CreateShader(shaderDesc));
+
+        ComputePipelineDesc psoDesc;
+        psoDesc.computeShader = m_histogramCS_ds.get();
+        psoDesc.setLayouts[1] = m_computePerPassLayout;  // Set 1: PerPass (space1)
+        psoDesc.debugName = "AutoExposure_DS_Histogram_PSO";
+        m_histogramPSO_ds.reset(ctx->CreateComputePipelineState(psoDesc));
+    }
+
+    // Adaptation compute shader
+    {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, "CSAdaptExposure", "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[AutoExposurePass] CSAdaptExposure (SM 5.1) compilation failed: %s", compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc shaderDesc;
+        shaderDesc.type = EShaderType::Compute;
+        shaderDesc.bytecode = compiled.bytecode.data();
+        shaderDesc.bytecodeSize = compiled.bytecode.size();
+        shaderDesc.debugName = "AutoExposure_DS_Adaptation_CS";
+        m_adaptationCS_ds.reset(ctx->CreateShader(shaderDesc));
+
+        ComputePipelineDesc psoDesc;
+        psoDesc.computeShader = m_adaptationCS_ds.get();
+        psoDesc.setLayouts[1] = m_computePerPassLayout;  // Set 1: PerPass (space1)
+        psoDesc.debugName = "AutoExposure_DS_Adaptation_PSO";
+        m_adaptationPSO_ds.reset(ctx->CreateComputePipelineState(psoDesc));
+    }
+
+    CFFLog::Info("[AutoExposurePass] Descriptor set resources initialized");
 }

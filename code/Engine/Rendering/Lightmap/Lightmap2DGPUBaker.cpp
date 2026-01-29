@@ -1385,14 +1385,16 @@ void CLightmap2DGPUBaker::InitDescriptorSets() {
 // Baking (Descriptor Set Path)
 // ============================================
 
-void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config) {
-    // Note: Ray tracing dispatch currently uses the same binding approach as legacy
-    // because DXR requires specific root signature setup that differs from compute passes.
-    // The ray tracing pipeline uses SetAccelerationStructure, SetShaderResource, etc.
-    // which work with the DXR root signature.
-    //
-    // Future work: Create a dedicated DXR descriptor set layout for ray tracing passes.
+// Note: Ray tracing dispatch uses legacy binding APIs because DXR requires specific
+// root signature setup that differs from compute passes. The ray tracing pipeline
+// uses SetAccelerationStructure, SetShaderResource, etc. which work with the DXR
+// root signature. This is guarded with FF_LEGACY_BINDING_DISABLED.
+//
+// Future work: Create a dedicated DXR descriptor set layout for ray tracing passes.
 
+#ifndef FF_LEGACY_BINDING_DISABLED
+
+void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config) {
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
 
@@ -1479,6 +1481,18 @@ void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& config
         ReportProgress(progress, "Baking");
     }
 }
+
+#else // FF_LEGACY_BINDING_DISABLED
+
+void CLightmap2DGPUBaker::DispatchBake_DS(const SLightmap2DGPUBakeConfig& /*config*/) {
+    // DXR ray tracing requires legacy binding APIs for resource binding.
+    // When FF_LEGACY_BINDING_DISABLED is defined, ray tracing baking is not available.
+    // Future work: Implement DXR-specific descriptor set layout for ray tracing passes.
+    CFFLog::Error("[Lightmap2DGPUBaker] DispatchBake_DS: DXR ray tracing requires legacy binding APIs. "
+                  "Ray tracing baking is not available when FF_LEGACY_BINDING_DISABLED is defined.");
+}
+
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CLightmap2DGPUBaker::FinalizeAtlas_DS() {
     auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();

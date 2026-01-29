@@ -351,7 +351,13 @@ CDX12DescriptorSet::CDX12DescriptorSet(CDX12DescriptorSetLayout* layout, bool is
     : m_layout(layout)
     , m_isPersistent(isPersistent) {
 
-    // Initialize handle arrays
+    // Get null descriptors for unbound slots
+    auto& heapMgr = CDX12DescriptorHeapManager::Instance();
+    D3D12_CPU_DESCRIPTOR_HANDLE nullSRV = heapMgr.GetNullSRV();
+    D3D12_CPU_DESCRIPTOR_HANDLE nullUAV = heapMgr.GetNullUAV();
+    D3D12_CPU_DESCRIPTOR_HANDLE nullSampler = heapMgr.GetNullSampler();
+
+    // Initialize handle arrays with null descriptors
     uint32_t srvCount = layout->GetSRVCount();
     uint32_t uavCount = layout->GetUAVCount();
     uint32_t samplerCount = layout->GetSamplerCount();
@@ -359,19 +365,22 @@ CDX12DescriptorSet::CDX12DescriptorSet(CDX12DescriptorSetLayout* layout, bool is
     if (srvCount > 0) {
         m_srvHandles.resize(srvCount);
         m_srvBound.resize(srvCount, false);
-        for (auto& h : m_srvHandles) { h.ptr = 0; }
+        // Initialize with null SRV descriptor (returns 0 when sampled)
+        for (auto& h : m_srvHandles) { h = nullSRV; }
     }
 
     if (uavCount > 0) {
         m_uavHandles.resize(uavCount);
         m_uavBound.resize(uavCount, false);
-        for (auto& h : m_uavHandles) { h.ptr = 0; }
+        // Initialize with null UAV descriptor (discards writes)
+        for (auto& h : m_uavHandles) { h = nullUAV; }
     }
 
     if (samplerCount > 0) {
         m_samplerHandles.resize(samplerCount);
         m_samplerBound.resize(samplerCount, false);
-        for (auto& h : m_samplerHandles) { h.ptr = 0; }
+        // Initialize with null sampler descriptor
+        for (auto& h : m_samplerHandles) { h = nullSampler; }
     }
 
     // Initialize volatile CBV storage for each CBV in layout

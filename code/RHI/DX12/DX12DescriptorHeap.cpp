@@ -392,6 +392,9 @@ bool CDX12DescriptorHeapManager::Initialize(ID3D12Device* device) {
         return false;
     }
 
+    // Create null descriptors for unbound slots
+    CreateNullDescriptors(device);
+
     m_initialized = true;
     CFFLog::Info("[DX12DescriptorHeapManager] All descriptor heaps created successfully");
 
@@ -427,6 +430,50 @@ void CDX12DescriptorHeapManager::Shutdown() {
 void CDX12DescriptorHeapManager::BeginFrame(uint32_t frameIndex) {
     m_srvStagingRing.BeginFrame(frameIndex);
     m_samplerStagingRing.BeginFrame(frameIndex);
+}
+
+void CDX12DescriptorHeapManager::CreateNullDescriptors(ID3D12Device* device) {
+    // Create null SRV (Texture2D, returns 0 when sampled)
+    m_nullSRV = m_cbvSrvUavHeap.Allocate();
+    if (m_nullSRV.IsValid()) {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.Texture2D.MipLevels = 1;
+        srvDesc.Texture2D.MostDetailedMip = 0;
+        device->CreateShaderResourceView(nullptr, &srvDesc, m_nullSRV.cpuHandle);
+        CFFLog::Info("[DX12DescriptorHeapManager] Null SRV created");
+    }
+
+    // Create null UAV (RWTexture2D, discards writes)
+    m_nullUAV = m_cbvSrvUavHeap.Allocate();
+    if (m_nullUAV.IsValid()) {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uavDesc.Texture2D.MipSlice = 0;
+        uavDesc.Texture2D.PlaneSlice = 0;
+        device->CreateUnorderedAccessView(nullptr, nullptr, &uavDesc, m_nullUAV.cpuHandle);
+        CFFLog::Info("[DX12DescriptorHeapManager] Null UAV created");
+    }
+
+    // Create null Sampler (point clamp)
+    m_nullSampler = m_samplerHeap.Allocate();
+    if (m_nullSampler.IsValid()) {
+        D3D12_SAMPLER_DESC samplerDesc = {};
+        samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+        samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        samplerDesc.MipLODBias = 0.0f;
+        samplerDesc.MaxAnisotropy = 1;
+        samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+        samplerDesc.MinLOD = 0.0f;
+        samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+        device->CreateSampler(&samplerDesc, m_nullSampler.cpuHandle);
+        CFFLog::Info("[DX12DescriptorHeapManager] Null Sampler created");
+    }
 }
 
 } // namespace DX12

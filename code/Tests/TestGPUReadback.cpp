@@ -7,7 +7,7 @@
 #include "RHI/ICommandList.h"
 #include "RHI/RHIResources.h"
 #include "RHI/RHIDescriptors.h"
-#include "RHI/RHIDescriptorSet.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 
 #include <vector>

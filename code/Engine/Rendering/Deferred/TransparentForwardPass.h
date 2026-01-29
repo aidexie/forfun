@@ -48,6 +48,31 @@ public:
         CClusteredLightingPass* clusteredLighting
     );
 
+    // Descriptor Set Render (DX12 only)
+    // Uses PerFrame descriptor set from pipeline
+    void Render(
+        const CCamera& camera,
+        CScene& scene,
+        RHI::ITexture* hdrRT,
+        RHI::ITexture* depthRT,
+        uint32_t width,
+        uint32_t height,
+        const CShadowPass::Output* shadowData,
+        RHI::IDescriptorSet* perFrameSet
+    );
+
+    // Check if descriptor set mode is available (DX12 only)
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
+
+    // Get PerPass layout for pipeline creation
+    RHI::IDescriptorSetLayout* GetPerPassLayout() const { return m_perPassLayout; }
+
+    // Get PerMaterial layout for pipeline creation
+    RHI::IDescriptorSetLayout* GetPerMaterialLayout() const { return m_perMaterialLayout; }
+
+    // Create PSO with descriptor set layouts (called after PerFrame layout is available)
+    void CreatePSOWithLayouts(RHI::IDescriptorSetLayout* perFrameLayout);
+
 private:
     void createPipeline();
 
@@ -78,9 +103,11 @@ private:
     // SM 5.1 PSO
     RHI::PipelineStatePtr m_pso_ds;
 
-    // Descriptor set layout and set for PerPass
+    // Descriptor set layout and set for PerPass (Set 1, space1)
     RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
     RHI::IDescriptorSet* m_perPassSet = nullptr;
 
-    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
+    // Descriptor set layout and set for PerMaterial (Set 2, space2)
+    RHI::IDescriptorSetLayout* m_perMaterialLayout = nullptr;
+    RHI::IDescriptorSet* m_perMaterialSet = nullptr;
 };

@@ -319,8 +319,10 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     // 0. Unbind resources to avoid hazards
     // ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
     cmdList->UnbindShaderResources(EShaderStage::Vertex, 0, 8);
     cmdList->UnbindShaderResources(EShaderStage::Pixel, 0, 8);
+#endif
     cmdList->UnbindRenderTargets();
 
     // ============================================
@@ -437,13 +439,16 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
                                       m_offHDR.get(), ctx.width, ctx.height,
                                       &m_shadowPass, m_perFrameSet,
                                       ssaoTexture);
-            } else {
+            }
+#ifndef FF_LEGACY_BINDING_DISABLED
+            else {
                 // Legacy path (DX11 or fallback)
                 m_lightingPass.Render(ctx.camera, ctx.scene, m_gbuffer,
                                       m_offHDR.get(), ctx.width, ctx.height,
                                       &m_shadowPass, &m_clusteredLighting,
                                       ssaoTexture);
             }
+#endif
         } else {
             // Non-SSR debug modes: clear HDR to black
             ITexture* hdrRT = m_offHDR.get();
@@ -648,6 +653,10 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     bool aaEnabled = ctx.showFlags.AntiAliasing && m_aaPass.IsEnabled(aaSettings);
     ITexture* postProcessOutput = aaEnabled ? m_offLDR_PreAA.get() : m_offLDR.get();
 
+    // Transition HDR input to ShaderResource state before PostProcess reads it
+    cmdList->UnbindRenderTargets();
+    cmdList->Barrier(hdrAfterDoF, EResourceState::RenderTarget, EResourceState::ShaderResource);
+
     if (ctx.showFlags.PostProcessing) {
         CScopedDebugEvent evt(cmdList, L"Post-Processing");
         const auto& bloomSettings = ctx.scene.GetLightSettings().bloom;
@@ -727,6 +736,7 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
 
 void CDeferredRenderPipeline::renderDebugVisualization(uint32_t width, uint32_t height)
 {
+#ifndef FF_LEGACY_BINDING_DISABLED
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
 
@@ -756,6 +766,11 @@ void CDeferredRenderPipeline::renderDebugVisualization(uint32_t width, uint32_t 
 
     // Draw full-screen triangle (3 vertices, no vertex buffer)
     cmdList->Draw(3, 0);
+#else
+    // Debug visualization not available when legacy binding is disabled
+    (void)width;
+    (void)height;
+#endif
 }
 
 void CDeferredRenderPipeline::ensureOffscreen(unsigned int w, unsigned int h)
@@ -934,6 +949,7 @@ void CDeferredRenderPipeline::createPerFrameDescriptorSet()
     m_gbufferPass.CreatePSOWithLayouts(m_perFrameLayout);
     m_shadowPass.CreatePSOWithLayouts(m_perFrameLayout);
     m_depthPrePass.CreatePSOWithLayouts(m_perFrameLayout);
+    m_transparentPass.CreatePSOWithLayouts(m_perFrameLayout);
 }
 
 void CDeferredRenderPipeline::populatePerFrameSet(const RenderContext& ctx, const CShadowPass::Output* shadowData)

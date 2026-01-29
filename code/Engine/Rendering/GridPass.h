@@ -4,11 +4,19 @@
 #include "RHI/ICommandList.h"
 #include "RHI/RHIPointers.h"
 
+// Forward declarations
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // CGridPass: Renders an infinite procedural grid on the XZ plane at Y=0
 // Uses shader-based rendering (full-screen quad) with depth buffer reconstruction
 // Supports dual-scale grid lines, distance fading, and view angle fading
 //
 // Phase 2 Migration: Uses global RHI Manager with smart pointers
+// Descriptor Set Model:
+// - Set 1 (PerPass, space1): CBV for grid parameters
 class CGridPass {
 public:
     static CGridPass& Instance();
@@ -32,6 +40,9 @@ public:
         m_fadeEnd = end;
     }
 
+    // Check if descriptor set mode is available (DX12 only)
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
+
 private:
     CGridPass() = default;
     ~CGridPass() = default;
@@ -41,6 +52,7 @@ private:
     void CreateShaders();
     void CreateBuffers();
     void CreatePipelineState();
+    void initDescriptorSets();
 
     struct CBPerFrame {
         DirectX::XMMATRIX viewProj;
@@ -51,10 +63,18 @@ private:
         DirectX::XMFLOAT3 padding;
     };
 
+    // Legacy resources (SM 5.0)
     RHI::ShaderPtr m_vs;
     RHI::ShaderPtr m_ps;
     RHI::BufferPtr m_cbPerFrame;
     RHI::PipelineStatePtr m_pso;
+
+    // Descriptor set resources (SM 5.1, DX12 only)
+    RHI::ShaderPtr m_vs_ds;
+    RHI::ShaderPtr m_ps_ds;
+    RHI::PipelineStatePtr m_pso_ds;
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
 
     bool m_initialized = false;
     bool m_enabled = true;

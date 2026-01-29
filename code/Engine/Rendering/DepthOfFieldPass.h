@@ -7,6 +7,8 @@ struct SDepthOfFieldSettings;
 
 namespace RHI {
     class ICommandList;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -80,8 +82,9 @@ private:
     RHI::TexturePtr m_blurTempFar;      // Blur temp far (R16G16B16A16_FLOAT)
 
     // ============================================
-    // Shaders & Pipeline
+    // Shaders & Pipeline (Legacy, SM 5.0)
     // ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
     RHI::ShaderPtr m_fullscreenVS;      // Shared fullscreen vertex shader
     RHI::ShaderPtr m_cocPS;             // Pass 1: CoC calculation
     RHI::ShaderPtr m_downsampleSplitPS; // Pass 2: Downsample + near/far split
@@ -94,6 +97,7 @@ private:
     RHI::PipelineStatePtr m_blurHPSO;
     RHI::PipelineStatePtr m_blurVPSO;
     RHI::PipelineStatePtr m_compositePSO;
+#endif // FF_LEGACY_BINDING_DISABLED
 
     // ============================================
     // Samplers
@@ -114,10 +118,13 @@ private:
     // ============================================
     void ensureTextures(uint32_t width, uint32_t height);
     void createFullscreenQuad();
+#ifndef FF_LEGACY_BINDING_DISABLED
     bool createShaders();
     bool createPSOs();
+#endif // FF_LEGACY_BINDING_DISABLED
 
-    // Individual pass execution
+    // Individual pass execution (Legacy)
+#ifndef FF_LEGACY_BINDING_DISABLED
     void renderCoCPass(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer,
                        float nearZ, float farZ, uint32_t width, uint32_t height,
                        const SDepthOfFieldSettings& settings);
@@ -128,4 +135,43 @@ private:
                         const SDepthOfFieldSettings& settings);
     void renderCompositePass(RHI::ICommandList* cmdList, RHI::ITexture* hdrInput,
                               uint32_t width, uint32_t height);
+#endif // FF_LEGACY_BINDING_DISABLED
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_fullscreenVS_ds;
+    RHI::ShaderPtr m_cocPS_ds;
+    RHI::ShaderPtr m_downsampleSplitPS_ds;
+    RHI::ShaderPtr m_blurHPS_ds;
+    RHI::ShaderPtr m_blurVPS_ds;
+    RHI::ShaderPtr m_compositePS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_cocPSO_ds;
+    RHI::PipelineStatePtr m_downsampleSplitPSO_ds;
+    RHI::PipelineStatePtr m_blurHPSO_ds;
+    RHI::PipelineStatePtr m_blurVPSO_ds;
+    RHI::PipelineStatePtr m_compositePSO_ds;
+
+    // Descriptor set layout and set
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_cocPSO_ds != nullptr; }
+
+    // Individual pass execution (Descriptor Set)
+    void renderCoCPass_DS(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer,
+                          float nearZ, float farZ, uint32_t width, uint32_t height,
+                          const SDepthOfFieldSettings& settings);
+    void renderDownsampleSplitPass_DS(RHI::ICommandList* cmdList, RHI::ITexture* hdrInput,
+                                       uint32_t width, uint32_t height);
+    void renderBlurPass_DS(RHI::ICommandList* cmdList, bool horizontal,
+                           uint32_t halfWidth, uint32_t halfHeight,
+                           const SDepthOfFieldSettings& settings);
+    void renderCompositePass_DS(RHI::ICommandList* cmdList, RHI::ITexture* hdrInput,
+                                 uint32_t width, uint32_t height);
 };

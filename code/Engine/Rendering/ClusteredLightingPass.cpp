@@ -1,10 +1,12 @@
 #include "ClusteredLightingPass.h"
+#include "ComputePassLayout.h"
 #include "RHI/RHIManager.h"
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
 #include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
+#include "RHI/RHIHelpers.h"
 #include "Core/FFLog.h"
 #include "Core/PathManager.h"
 #include "Engine/Scene.h"
@@ -50,6 +52,7 @@ void CClusteredLightingPass::Initialize() {
     // CreateBuffers() will be called from Resize() when dimensions are known
     CreateShaders();
     CreateDebugShaders();
+    initDescriptorSets();
     m_initialized = true;
     CFFLog::Info("[ClusteredLightingPass] Initialized successfully");
 }
@@ -65,6 +68,25 @@ void CClusteredLightingPass::Shutdown() {
     m_debugVS.reset();
     m_debugHeatmapPS.reset();
     m_debugAABBPS.reset();
+
+    // Cleanup DS resources
+    m_buildClusterGridCS_ds.reset();
+    m_cullLightsCS_ds.reset();
+    m_buildClusterGridPSO_ds.reset();
+    m_cullLightsPSO_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_computePerPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_computePerPassLayout);
+            m_computePerPassLayout = nullptr;
+        }
+    }
+
     m_initialized = false;
 }
 
@@ -244,8 +266,15 @@ void CClusteredLightingPass::CreateDebugShaders() {
 void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
                                                const XMMATRIX& projection,
                                                float nearZ, float farZ) {
+    if (!cmdList) return;
+
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        BuildClusterGrid_DS(cmdList, projection, nearZ, farZ);
+        return;
+    }
+
 #ifdef FF_LEGACY_BINDING_DISABLED
-    (void)cmdList;
     (void)projection;
     (void)nearZ;
     (void)farZ;
@@ -255,7 +284,7 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
         warned = true;
     }
 #else
-    if (!m_buildClusterGridPSO || !cmdList) return;
+    if (!m_buildClusterGridPSO) return;
 
     // Extract FovY from projection matrix for dirty checking
     // For perspective projection: tan(FovY/2) = 1 / m11
@@ -311,9 +340,15 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
 void CClusteredLightingPass::CullLights(ICommandList* cmdList,
                                         CScene* scene,
                                         const XMMATRIX& view) {
+    if (!scene || !cmdList) return;
+
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        CullLights_DS(cmdList, scene, view);
+        return;
+    }
+
 #ifdef FF_LEGACY_BINDING_DISABLED
-    (void)cmdList;
-    (void)scene;
     (void)view;
     static bool warned = false;
     if (!warned) {
@@ -321,7 +356,7 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
         warned = true;
     }
 #else
-    if (!m_cullLightsPSO || !scene || !cmdList) return;
+    if (!m_cullLightsPSO) return;
 
     // Unbind cluster buffers from pixel shader before using them as UAVs
     // This prevents D3D11 resource hazard warnings
@@ -496,3 +531,247 @@ void CClusteredLightingPass::PopulatePerFrameSet(RHI::IDescriptorSet* perFrameSe
     });
 }
 
+// ============================================
+// Descriptor Set Dispatch Methods (DX12 only)
+// ============================================
+
+void CClusteredLightingPass::BuildClusterGrid_DS(ICommandList* cmdList,
+                                                  const XMMATRIX& projection,
+                                                  float nearZ, float farZ) {
+    if (!m_buildClusterGridPSO_ds || !m_perPassSet || !m_clusterAABBBuffer) return;
+
+    // Extract FovY from projection matrix for dirty checking
+    XMFLOAT4X4 projF;
+    XMStoreFloat4x4(&projF, projection);
+    float fovY = 2.0f * atan(1.0f / projF._22);
+
+    // Check if projection parameters changed
+    const float epsilon = 0.001f;
+    bool projChanged = (abs(fovY - m_cachedFovY) > epsilon) ||
+                       (abs(nearZ - m_cachedNearZ) > epsilon) ||
+                       (abs(farZ - m_cachedFarZ) > epsilon);
+
+    if (!projChanged && !m_clusterGridDirty) {
+        // Cluster grid is up-to-date, skip rebuild
+        return;
+    }
+
+    // Cache new parameters
+    m_cachedFovY = fovY;
+    m_cachedNearZ = nearZ;
+    m_cachedFarZ = farZ;
+    m_clusterGridDirty = false;
+
+    CScopedDebugEvent evt(cmdList, L"ClusteredLighting BuildClusterGrid (DS)");
+
+    // Build constant buffer data
+    SClusterCB cb{};
+    XMMATRIX invProj = XMMatrixInverse(nullptr, projection);
+    XMStoreFloat4x4(&cb.inverseProjection, XMMatrixTranspose(invProj));
+    cb.nearZ = nearZ;
+    cb.farZ = farZ;
+    cb.numClustersX = m_numClustersX;
+    cb.numClustersY = m_numClustersY;
+    cb.numClustersZ = ClusteredConfig::DEPTH_SLICES;
+    cb.screenWidth = m_screenWidth;
+    cb.screenHeight = m_screenHeight;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Buffer_UAV(ComputePassLayout::Slots::UAV_Output0, m_clusterAABBBuffer.get())
+    });
+
+    cmdList->SetPipelineState(m_buildClusterGridPSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    // Dispatch (one thread per cluster)
+    uint32_t groupsX = (m_numClustersX + 7) / 8;
+    uint32_t groupsY = (m_numClustersY + 7) / 8;
+    uint32_t groupsZ = ClusteredConfig::DEPTH_SLICES;
+    cmdList->Dispatch(groupsX, groupsY, groupsZ);
+
+    // UAV barrier for cluster AABB buffer (will be read by CullLights)
+    cmdList->Barrier(m_clusterAABBBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+void CClusteredLightingPass::CullLights_DS(ICommandList* cmdList,
+                                            CScene* scene,
+                                            const XMMATRIX& view) {
+    if (!m_cullLightsPSO_ds || !m_perPassSet || !m_clusterAABBBuffer ||
+        !m_clusterDataBuffer || !m_compactLightListBuffer || !m_globalCounterBuffer) return;
+
+    // Gather all lights (Point + Spot) from scene
+    std::vector<SGpuLight> gpuLights;
+    auto& world = scene->GetWorld();
+    for (auto& go : world.Objects()) {
+        auto* transform = go->GetComponent<STransform>();
+        if (!transform) continue;
+
+        // Check for Point Light
+        auto* pointLight = go->GetComponent<SPointLight>();
+        if (pointLight) {
+            SGpuLight gpuLight = {};
+            gpuLight.position = transform->position;
+            gpuLight.range = pointLight->range;
+            gpuLight.color = pointLight->color;
+            gpuLight.intensity = pointLight->intensity;
+            gpuLight.type = (uint32_t)ELightType::Point;
+            gpuLights.push_back(gpuLight);
+        }
+
+        // Check for Spot Light
+        auto* spotLight = go->GetComponent<SSpotLight>();
+        if (spotLight) {
+            SGpuLight gpuLight = {};
+            gpuLight.position = transform->position;
+            gpuLight.range = spotLight->range;
+            gpuLight.color = spotLight->color;
+            gpuLight.intensity = spotLight->intensity;
+            gpuLight.type = (uint32_t)ELightType::Spot;
+
+            // Transform local direction to world space
+            XMVECTOR localDir = XMLoadFloat3(&spotLight->direction);
+            localDir = XMVector3Normalize(localDir);
+            XMMATRIX rotation = transform->GetRotationMatrix();
+            XMVECTOR worldDir = XMVector3TransformNormal(localDir, rotation);
+            worldDir = XMVector3Normalize(worldDir);
+            XMStoreFloat3(&gpuLight.direction, worldDir);
+
+            // Precompute cos(angle) for shader
+            float innerRadians = XMConvertToRadians(spotLight->innerConeAngle);
+            float outerRadians = XMConvertToRadians(spotLight->outerConeAngle);
+            gpuLight.innerConeAngle = cosf(innerRadians);
+            gpuLight.outerConeAngle = cosf(outerRadians);
+
+            gpuLights.push_back(gpuLight);
+        }
+    }
+
+    if (gpuLights.empty()) {
+        return;
+    }
+
+    CScopedDebugEvent evt(cmdList, L"ClusteredLighting CullLights (DS)");
+
+    // Upload all lights to GPU
+    void* mapped = m_pointLightBuffer->Map();
+    if (mapped) {
+        memcpy(mapped, gpuLights.data(), sizeof(SGpuLight) * gpuLights.size());
+        m_pointLightBuffer->Unmap();
+    }
+
+    // Reset global counter to 0 for atomic operations
+    const uint32_t zeroValues[4] = {0, 0, 0, 0};
+    cmdList->ClearUnorderedAccessViewUint(m_globalCounterBuffer.get(), zeroValues);
+
+    // UAV barrier after clear
+    cmdList->Barrier(m_globalCounterBuffer.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
+
+    // Build constant buffer data for light culling
+    SLightCullingCB cb{};
+    XMStoreFloat4x4(&cb.view, XMMatrixTranspose(view));
+    cb.numLights = (uint32_t)gpuLights.size();
+    cb.numClustersX = m_numClustersX;
+    cb.numClustersY = m_numClustersY;
+    cb.numClustersZ = ClusteredConfig::DEPTH_SLICES;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Buffer_SRV(ComputePassLayout::Slots::Tex_Input0, m_pointLightBuffer.get()),
+        BindingSetItem::Buffer_SRV(ComputePassLayout::Slots::Tex_Input1, m_clusterAABBBuffer.get()),
+        BindingSetItem::Buffer_UAV(ComputePassLayout::Slots::UAV_Output0, m_clusterDataBuffer.get()),
+        BindingSetItem::Buffer_UAV(ComputePassLayout::Slots::UAV_Output1, m_compactLightListBuffer.get()),
+        BindingSetItem::Buffer_UAV(ComputePassLayout::Slots::UAV_Output2, m_globalCounterBuffer.get())
+    });
+
+    cmdList->SetPipelineState(m_cullLightsPSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    // Dispatch (one thread per cluster)
+    uint32_t groupsX = (m_numClustersX + 7) / 8;
+    uint32_t groupsY = (m_numClustersY + 7) / 8;
+    uint32_t groupsZ = ClusteredConfig::DEPTH_SLICES;
+    cmdList->Dispatch(groupsX, groupsY, groupsZ);
+
+    // Transition buffers from UAV to SRV for consumers (deferred lighting pass)
+    cmdList->Barrier(m_clusterDataBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+    cmdList->Barrier(m_compactLightListBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CClusteredLightingPass::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[ClusteredLightingPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    std::string shaderPath = FFPath::GetSourceDir() + "/Shader/ClusteredLighting_DS.cs.hlsl";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Create unified compute layout
+    m_computePerPassLayout = ComputePassLayout::CreateComputePerPassLayout(ctx);
+    if (!m_computePerPassLayout) {
+        CFFLog::Error("[ClusteredLightingPass] Failed to create compute PerPass layout");
+        return;
+    }
+
+    // Allocate descriptor set
+    m_perPassSet = ctx->AllocateDescriptorSet(m_computePerPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[ClusteredLightingPass] Failed to allocate PerPass descriptor set");
+        return;
+    }
+
+    // Compile SM 5.1 shaders
+    struct ShaderDef {
+        const char* entryPoint;
+        const char* shaderName;
+        const char* psoName;
+        ShaderPtr* shader;
+        PipelineStatePtr* pso;
+    };
+
+    ShaderDef shaders[] = {
+        {"CSBuildClusterGrid", "ClusteredLighting_DS_BuildGrid_CS", "ClusteredLighting_DS_BuildGrid_PSO",
+         &m_buildClusterGridCS_ds, &m_buildClusterGridPSO_ds},
+        {"CSCullLights", "ClusteredLighting_DS_CullLights_CS", "ClusteredLighting_DS_CullLights_PSO",
+         &m_cullLightsCS_ds, &m_cullLightsPSO_ds},
+    };
+
+    for (const auto& def : shaders) {
+        SCompiledShader compiled = CompileShaderFromFile(shaderPath, def.entryPoint, "cs_5_1", nullptr, debugShaders);
+        if (!compiled.success) {
+            CFFLog::Error("[ClusteredLightingPass] %s (SM 5.1) compilation failed: %s",
+                          def.entryPoint, compiled.errorMessage.c_str());
+            return;
+        }
+
+        ShaderDesc shaderDesc;
+        shaderDesc.type = EShaderType::Compute;
+        shaderDesc.bytecode = compiled.bytecode.data();
+        shaderDesc.bytecodeSize = compiled.bytecode.size();
+        shaderDesc.debugName = def.shaderName;
+        def.shader->reset(ctx->CreateShader(shaderDesc));
+
+        ComputePipelineDesc psoDesc;
+        psoDesc.computeShader = def.shader->get();
+        psoDesc.setLayouts[1] = m_computePerPassLayout;  // Set 1: PerPass (space1)
+        psoDesc.debugName = def.psoName;
+        def.pso->reset(ctx->CreateComputePipelineState(psoDesc));
+    }
+
+    CFFLog::Info("[ClusteredLightingPass] Descriptor set resources initialized");
+}
