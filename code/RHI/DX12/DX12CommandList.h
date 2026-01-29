@@ -71,6 +71,7 @@ public:
     // Resource Binding
     void SetVertexBuffer(uint32_t slot, IBuffer* buffer, uint32_t stride, uint32_t offset = 0) override;
     void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0) override;
+#ifndef FF_LEGACY_BINDING_DISABLED
     bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) override;
     void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) override;
     void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
@@ -78,6 +79,7 @@ public:
     void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) override;
     void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) override;
     void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) override;
+#endif // FF_LEGACY_BINDING_DISABLED
     void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) override;
 
     // Descriptor Set Binding (DX12 only)
@@ -107,7 +109,9 @@ public:
 
     // Unbind Operations
     void UnbindRenderTargets() override;
+#ifndef FF_LEGACY_BINDING_DISABLED
     void UnbindShaderResources(EShaderStage stage, uint32_t startSlot = 0, uint32_t numSlots = 8) override;
+#endif // FF_LEGACY_BINDING_DISABLED
 
     // Debug Events
     void BeginEvent(const wchar_t* name) override;

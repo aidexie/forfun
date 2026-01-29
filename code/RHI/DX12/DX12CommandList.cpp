@@ -323,6 +323,7 @@ void CDX12CommandList::SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint
     m_commandList->IASetIndexBuffer(&ibv);
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 bool CDX12CommandList::SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) {
     if (!data || size == 0 || slot >= MAX_CBV_SLOTS) return false;
 
@@ -469,6 +470,7 @@ void CDX12CommandList::SetUnorderedAccessTextureMip(uint32_t slot, ITexture* tex
     m_pendingUAVCpuHandles[slot] = uavHandle.cpuHandle;
     m_uavDirty = true;
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CDX12CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) {
     if (!buffer) return;
@@ -817,10 +819,12 @@ void CDX12CommandList::UnbindRenderTargets() {
     m_commandList->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CDX12CommandList::UnbindShaderResources(EShaderStage stage, uint32_t startSlot, uint32_t numSlots) {
     // DX12 doesn't have explicit unbind - resources are managed via descriptors
     // State transitions handle hazards
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 // ============================================
 // Debug Events
