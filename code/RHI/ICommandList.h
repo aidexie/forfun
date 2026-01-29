@@ -77,6 +77,8 @@ public:
     // Set index buffer
     virtual void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0) = 0;
 
+#ifndef FF_LEGACY_BINDING_DISABLED
+    // Legacy slot-based binding (deprecated - use BindDescriptorSet instead)
     // Set constant buffer data directly (PREFERRED for per-frame/per-draw data)
     // This allocates from a per-frame ring buffer and binds the data inline
     // - DX12: Allocates from CDX12DynamicBufferRing, each call gets unique GPU address
@@ -97,6 +99,7 @@ public:
     virtual void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) = 0;
     virtual void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) = 0;
     virtual void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) = 0;
+#endif // FF_LEGACY_BINDING_DISABLED
 
     // Clear UAV buffer with uint values (for resetting atomic counters, etc.)
     // values: array of 4 uint32_t values to clear with
@@ -183,8 +186,10 @@ public:
     // Unbind render targets (set all RT slots to nullptr)
     virtual void UnbindRenderTargets() = 0;
 
+#ifndef FF_LEGACY_BINDING_DISABLED
     // Unbind shader resources for a stage (slots 0-7)
     virtual void UnbindShaderResources(EShaderStage stage, uint32_t startSlot = 0, uint32_t numSlots = 8) = 0;
+#endif // FF_LEGACY_BINDING_DISABLED
 
     // ============================================
     // Debug Events (GPU profiling markers for RenderDoc/PIX)
