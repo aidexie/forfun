@@ -197,6 +197,9 @@ void CSSAOPass::Render(ICommandList* cmdList,
         CScopedDebugEvent evt(cmdList, L"SSAO Upsample");
         dispatchUpsample(cmdList, depthBuffer);
     }
+
+    // Transition SSAO output from UAV to SRV for consumers (deferred lighting)
+    cmdList->Barrier(m_ssaoFinal.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
 }
 
 // ============================================

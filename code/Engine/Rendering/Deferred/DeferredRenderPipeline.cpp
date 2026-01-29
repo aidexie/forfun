@@ -674,6 +674,9 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // ============================================
     if (aaEnabled) {
         CScopedDebugEvent evt(cmdList, L"Anti-Aliasing");
+        // Transition PreAA texture from RenderTarget to ShaderResource before AA reads it
+        cmdList->UnbindRenderTargets();
+        cmdList->Barrier(m_offLDR_PreAA.get(), EResourceState::RenderTarget, EResourceState::ShaderResource);
         m_aaPass.Render(m_offLDR_PreAA.get(), m_offLDR.get(),
                         ctx.width, ctx.height, aaSettings);
     }
