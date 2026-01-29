@@ -49,17 +49,19 @@ private:
     uint32_t m_mipWidth[kMipCount] = {};
     uint32_t m_mipHeight[kMipCount] = {};
 
-    // Shaders (embedded in .cpp)
+#ifndef FF_LEGACY_BINDING_DISABLED
+    // Legacy shaders (SM 5.0, embedded in .cpp)
     RHI::ShaderPtr m_fullscreenVS;
     RHI::ShaderPtr m_thresholdPS;
     RHI::ShaderPtr m_downsamplePS;
     RHI::ShaderPtr m_upsamplePS;
 
-    // Pipeline states
+    // Legacy pipeline states
     RHI::PipelineStatePtr m_thresholdPSO;
     RHI::PipelineStatePtr m_downsamplePSO;
     RHI::PipelineStatePtr m_upsamplePSO;       // Opaque write (for first upsample)
     RHI::PipelineStatePtr m_upsampleBlendPSO;  // Additive blend (for accumulation)
+#endif // FF_LEGACY_BINDING_DISABLED
 
     // Resources
     RHI::BufferPtr m_vertexBuffer;
@@ -76,8 +78,10 @@ private:
 
     void ensureMipChain(uint32_t width, uint32_t height);
     void createFullscreenQuad();
+#ifndef FF_LEGACY_BINDING_DISABLED
     void createShaders();
     void createPSOs();
+#endif // FF_LEGACY_BINDING_DISABLED
     void createBlackTexture();
 
     // ============================================

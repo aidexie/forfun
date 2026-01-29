@@ -187,8 +187,10 @@ bool CBloomPass::Initialize() {
     if (m_initialized) return true;
 
     createFullscreenQuad();
+#ifndef FF_LEGACY_BINDING_DISABLED
     createShaders();
     createPSOs();
+#endif // FF_LEGACY_BINDING_DISABLED
     createBlackTexture();
 
     // Create linear sampler
@@ -215,6 +217,7 @@ void CBloomPass::Shutdown() {
         m_mipHeight[i] = 0;
     }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
     m_thresholdPSO.reset();
     m_downsamplePSO.reset();
     m_upsamplePSO.reset();
@@ -224,6 +227,7 @@ void CBloomPass::Shutdown() {
     m_thresholdPS.reset();
     m_downsamplePS.reset();
     m_upsamplePS.reset();
+#endif // FF_LEGACY_BINDING_DISABLED
 
     m_vertexBuffer.reset();
     m_linearSampler.reset();
@@ -273,95 +277,198 @@ RHI::ITexture* CBloomPass::Render(ITexture* hdrInput,
     // Unbind any existing render targets to avoid hazards
     cmdList->UnbindRenderTargets();
 
-    // ============================================
-    // Pass 1: Threshold (HDR -> Mip[0] at half res)
-    // ============================================
-    {
-        CScopedDebugEvent evt(cmdList, L"Bloom Threshold");
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        // ============================================
+        // Pass 1: Threshold (HDR -> Mip[0] at half res)
+        // ============================================
+        {
+            CScopedDebugEvent evt(cmdList, L"Bloom Threshold (DS)");
 
-        ITexture* rt = m_mipChain[0].get();
-        cmdList->SetRenderTargets(1, &rt, nullptr);
-        cmdList->SetViewport(0, 0, (float)m_mipWidth[0], (float)m_mipHeight[0], 0.0f, 1.0f);
-        cmdList->SetScissorRect(0, 0, m_mipWidth[0], m_mipHeight[0]);
+            ITexture* rt = m_mipChain[0].get();
+            cmdList->SetRenderTargets(1, &rt, nullptr);
+            cmdList->SetViewport(0, 0, (float)m_mipWidth[0], (float)m_mipHeight[0], 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, m_mipWidth[0], m_mipHeight[0]);
 
-        cmdList->SetPipelineState(m_thresholdPSO.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
+            cmdList->SetPipelineState(m_thresholdPSO_ds.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+            cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
 
-        CB_BloomThreshold cb;
-        cb.texelSizeX = 1.0f / (float)width;
-        cb.texelSizeY = 1.0f / (float)height;
-        cb.threshold = settings.threshold;
-        cb.softKnee = 0.5f;  // Fixed soft knee
+            CB_BloomThreshold cb;
+            cb.texelSizeX = 1.0f / (float)width;
+            cb.texelSizeY = 1.0f / (float)height;
+            cb.threshold = settings.threshold;
+            cb.softKnee = 0.5f;  // Fixed soft knee
 
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
-        cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
+            // Bind PerPass descriptor set
+            m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_BloomThreshold)));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, hdrInput));
+            m_perPassSet->Bind(BindingSetItem::Sampler(0, m_linearSampler.get()));
+            cmdList->BindDescriptorSet(1, m_perPassSet);
 
-        cmdList->Draw(4, 0);
+            cmdList->Draw(4, 0);
+        }
+
+        // ============================================
+        // Pass 2: Downsample chain (Mip[0] -> Mip[4])
+        // ============================================
+        for (int i = 1; i < kMipCount; ++i) {
+            CScopedDebugEvent evt(cmdList, L"Bloom Downsample (DS)");
+
+            // Unbind previous RT before using as SRV
+            cmdList->UnbindRenderTargets();
+
+            ITexture* rt = m_mipChain[i].get();
+            cmdList->SetRenderTargets(1, &rt, nullptr);
+            cmdList->SetViewport(0, 0, (float)m_mipWidth[i], (float)m_mipHeight[i], 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, m_mipWidth[i], m_mipHeight[i]);
+
+            cmdList->SetPipelineState(m_downsamplePSO_ds.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+            cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
+
+            CB_BloomDownsample cb;
+            cb.texelSizeX = 1.0f / (float)m_mipWidth[i - 1];
+            cb.texelSizeY = 1.0f / (float)m_mipHeight[i - 1];
+            cb._pad[0] = cb._pad[1] = 0.0f;
+
+            // Bind PerPass descriptor set
+            m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_BloomDownsample)));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, m_mipChain[i - 1].get()));
+            m_perPassSet->Bind(BindingSetItem::Sampler(0, m_linearSampler.get()));
+            cmdList->BindDescriptorSet(1, m_perPassSet);
+
+            cmdList->Draw(4, 0);
+        }
+
+        // ============================================
+        // Pass 3: Upsample chain (Mip[4] -> Mip[0])
+        // ============================================
+        for (int i = kMipCount - 2; i >= 0; --i) {
+            CScopedDebugEvent evt(cmdList, L"Bloom Upsample (DS)");
+
+            // Unbind previous RT before using as SRV
+            cmdList->UnbindRenderTargets();
+
+            ITexture* rt = m_mipChain[i].get();
+            cmdList->SetRenderTargets(1, &rt, nullptr);
+            cmdList->SetViewport(0, 0, (float)m_mipWidth[i], (float)m_mipHeight[i], 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, m_mipWidth[i], m_mipHeight[i]);
+
+            // Use additive blend PSO to accumulate with existing content
+            cmdList->SetPipelineState(m_upsampleBlendPSO_ds.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+            cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
+
+            CB_BloomUpsample cb;
+            cb.texelSizeX = 1.0f / (float)m_mipWidth[i + 1];
+            cb.texelSizeY = 1.0f / (float)m_mipHeight[i + 1];
+            cb.scatter = settings.scatter;
+            cb._pad = 0.0f;
+
+            // Bind PerPass descriptor set
+            m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &cb, sizeof(CB_BloomUpsample)));
+            m_perPassSet->Bind(BindingSetItem::Texture_SRV(0, m_mipChain[i + 1].get()));
+            m_perPassSet->Bind(BindingSetItem::Sampler(0, m_linearSampler.get()));
+            cmdList->BindDescriptorSet(1, m_perPassSet);
+
+            cmdList->Draw(4, 0);
+        }
     }
+#ifndef FF_LEGACY_BINDING_DISABLED
+    else {
+        // Legacy path for DX11
+        // ============================================
+        // Pass 1: Threshold (HDR -> Mip[0] at half res)
+        // ============================================
+        {
+            CScopedDebugEvent evt(cmdList, L"Bloom Threshold");
 
-    // ============================================
-    // Pass 2: Downsample chain (Mip[0] -> Mip[4])
-    // ============================================
-    for (int i = 1; i < kMipCount; ++i) {
-        CScopedDebugEvent evt(cmdList, L"Bloom Downsample");
+            ITexture* rt = m_mipChain[0].get();
+            cmdList->SetRenderTargets(1, &rt, nullptr);
+            cmdList->SetViewport(0, 0, (float)m_mipWidth[0], (float)m_mipHeight[0], 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, m_mipWidth[0], m_mipHeight[0]);
 
-        // Unbind previous RT before using as SRV
-        cmdList->UnbindRenderTargets();
+            cmdList->SetPipelineState(m_thresholdPSO.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+            cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
 
-        ITexture* rt = m_mipChain[i].get();
-        cmdList->SetRenderTargets(1, &rt, nullptr);
-        cmdList->SetViewport(0, 0, (float)m_mipWidth[i], (float)m_mipHeight[i], 0.0f, 1.0f);
-        cmdList->SetScissorRect(0, 0, m_mipWidth[i], m_mipHeight[i]);
+            CB_BloomThreshold cb;
+            cb.texelSizeX = 1.0f / (float)width;
+            cb.texelSizeY = 1.0f / (float)height;
+            cb.threshold = settings.threshold;
+            cb.softKnee = 0.5f;  // Fixed soft knee
 
-        cmdList->SetPipelineState(m_downsamplePSO.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
+            cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
+            cmdList->SetShaderResource(EShaderStage::Pixel, 0, hdrInput);
+            cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
 
-        CB_BloomDownsample cb;
-        cb.texelSizeX = 1.0f / (float)m_mipWidth[i - 1];
-        cb.texelSizeY = 1.0f / (float)m_mipHeight[i - 1];
-        cb._pad[0] = cb._pad[1] = 0.0f;
+            cmdList->Draw(4, 0);
+        }
 
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_mipChain[i - 1].get());
-        cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
+        // ============================================
+        // Pass 2: Downsample chain (Mip[0] -> Mip[4])
+        // ============================================
+        for (int i = 1; i < kMipCount; ++i) {
+            CScopedDebugEvent evt(cmdList, L"Bloom Downsample");
 
-        cmdList->Draw(4, 0);
+            // Unbind previous RT before using as SRV
+            cmdList->UnbindRenderTargets();
+
+            ITexture* rt = m_mipChain[i].get();
+            cmdList->SetRenderTargets(1, &rt, nullptr);
+            cmdList->SetViewport(0, 0, (float)m_mipWidth[i], (float)m_mipHeight[i], 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, m_mipWidth[i], m_mipHeight[i]);
+
+            cmdList->SetPipelineState(m_downsamplePSO.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+            cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
+
+            CB_BloomDownsample cb;
+            cb.texelSizeX = 1.0f / (float)m_mipWidth[i - 1];
+            cb.texelSizeY = 1.0f / (float)m_mipHeight[i - 1];
+            cb._pad[0] = cb._pad[1] = 0.0f;
+
+            cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
+            cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_mipChain[i - 1].get());
+            cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
+
+            cmdList->Draw(4, 0);
+        }
+
+        // ============================================
+        // Pass 3: Upsample chain (Mip[4] -> Mip[0])
+        // ============================================
+        for (int i = kMipCount - 2; i >= 0; --i) {
+            CScopedDebugEvent evt(cmdList, L"Bloom Upsample");
+
+            // Unbind previous RT before using as SRV
+            cmdList->UnbindRenderTargets();
+
+            ITexture* rt = m_mipChain[i].get();
+            cmdList->SetRenderTargets(1, &rt, nullptr);
+            cmdList->SetViewport(0, 0, (float)m_mipWidth[i], (float)m_mipHeight[i], 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, m_mipWidth[i], m_mipHeight[i]);
+
+            // Use additive blend PSO to accumulate with existing content
+            cmdList->SetPipelineState(m_upsampleBlendPSO.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
+            cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
+
+            CB_BloomUpsample cb;
+            cb.texelSizeX = 1.0f / (float)m_mipWidth[i + 1];
+            cb.texelSizeY = 1.0f / (float)m_mipHeight[i + 1];
+            cb.scatter = settings.scatter;
+            cb._pad = 0.0f;
+
+            cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
+            cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_mipChain[i + 1].get());
+            cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
+
+            cmdList->Draw(4, 0);
+        }
     }
-
-    // ============================================
-    // Pass 3: Upsample chain (Mip[4] -> Mip[0])
-    // ============================================
-    for (int i = kMipCount - 2; i >= 0; --i) {
-        CScopedDebugEvent evt(cmdList, L"Bloom Upsample");
-
-        // Unbind previous RT before using as SRV
-        cmdList->UnbindRenderTargets();
-
-        ITexture* rt = m_mipChain[i].get();
-        cmdList->SetRenderTargets(1, &rt, nullptr);
-        cmdList->SetViewport(0, 0, (float)m_mipWidth[i], (float)m_mipHeight[i], 0.0f, 1.0f);
-        cmdList->SetScissorRect(0, 0, m_mipWidth[i], m_mipHeight[i]);
-
-        // Use additive blend PSO to accumulate with existing content
-        cmdList->SetPipelineState(m_upsampleBlendPSO.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
-        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(BloomVertex), 0);
-
-        CB_BloomUpsample cb;
-        cb.texelSizeX = 1.0f / (float)m_mipWidth[i + 1];
-        cb.texelSizeY = 1.0f / (float)m_mipHeight[i + 1];
-        cb.scatter = settings.scatter;
-        cb._pad = 0.0f;
-
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &cb, sizeof(cb));
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_mipChain[i + 1].get());
-        cmdList->SetSampler(EShaderStage::Pixel, 0, m_linearSampler.get());
-
-        cmdList->Draw(4, 0);
-    }
+#endif // FF_LEGACY_BINDING_DISABLED
 
     // Unbind render targets to prepare for PostProcess pass
     cmdList->UnbindRenderTargets();
@@ -443,6 +550,7 @@ void CBloomPass::createFullscreenQuad() {
     m_vertexBuffer.reset(ctx->CreateBuffer(vbDesc, vertices));
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CBloomPass::createShaders() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
@@ -576,6 +684,7 @@ void CBloomPass::createPSOs() {
         m_upsampleBlendPSO.reset(ctx->CreatePipelineState(psoDesc));
     }
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CBloomPass::createBlackTexture() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();

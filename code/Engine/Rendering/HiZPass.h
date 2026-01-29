@@ -105,13 +105,13 @@ private:
     void dispatchBuildMip(RHI::ICommandList* cmdList, uint32_t mipLevel);
 
     // ============================================
-    // Compute Shaders
+    // Compute Shaders (Legacy - guarded by FF_LEGACY_BINDING_DISABLED)
     // ============================================
     RHI::ShaderPtr m_copyDepthCS;     // Mip 0: copy from depth buffer
     RHI::ShaderPtr m_buildMipCS;      // Mip 1+: MAX downsample
 
     // ============================================
-    // Pipeline States
+    // Pipeline States (Legacy - guarded by FF_LEGACY_BINDING_DISABLED)
     // ============================================
     RHI::PipelineStatePtr m_copyDepthPSO;
     RHI::PipelineStatePtr m_buildMipPSO;
@@ -137,6 +137,8 @@ private:
 
     // ============================================
     // Descriptor Set Resources (SM 5.1, DX12 only)
+    // NOTE: Descriptor set rendering path not yet implemented.
+    //       BuildPyramid uses legacy binding, guarded by FF_LEGACY_BINDING_DISABLED.
     // ============================================
     void initDescriptorSets();
 

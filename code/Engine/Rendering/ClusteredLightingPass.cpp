@@ -244,6 +244,17 @@ void CClusteredLightingPass::CreateDebugShaders() {
 void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
                                                const XMMATRIX& projection,
                                                float nearZ, float farZ) {
+#ifdef FF_LEGACY_BINDING_DISABLED
+    (void)cmdList;
+    (void)projection;
+    (void)nearZ;
+    (void)farZ;
+    static bool warned = false;
+    if (!warned) {
+        CFFLog::Warning("[ClusteredLightingPass] BuildClusterGrid uses legacy binding - not yet migrated to descriptor sets");
+        warned = true;
+    }
+#else
     if (!m_buildClusterGridPSO || !cmdList) return;
 
     // Extract FovY from projection matrix for dirty checking
@@ -294,11 +305,22 @@ void CClusteredLightingPass::BuildClusterGrid(ICommandList* cmdList,
 
     // Unbind UAVs
     cmdList->SetUnorderedAccess(0, nullptr);
+#endif
 }
 
 void CClusteredLightingPass::CullLights(ICommandList* cmdList,
                                         CScene* scene,
                                         const XMMATRIX& view) {
+#ifdef FF_LEGACY_BINDING_DISABLED
+    (void)cmdList;
+    (void)scene;
+    (void)view;
+    static bool warned = false;
+    if (!warned) {
+        CFFLog::Warning("[ClusteredLightingPass] CullLights uses legacy binding - not yet migrated to descriptor sets");
+        warned = true;
+    }
+#else
     if (!m_cullLightsPSO || !scene || !cmdList) return;
 
     // Unbind cluster buffers from pixel shader before using them as UAVs
@@ -425,9 +447,18 @@ void CClusteredLightingPass::CullLights(ICommandList* cmdList,
     // Transition buffers from UAV to SRV for consumers (deferred lighting pass)
     cmdList->Barrier(m_clusterDataBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
     cmdList->Barrier(m_compactLightListBuffer.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+#endif
 }
 
 void CClusteredLightingPass::BindToMainPass(ICommandList* cmdList) {
+#ifdef FF_LEGACY_BINDING_DISABLED
+    (void)cmdList;
+    static bool warned = false;
+    if (!warned) {
+        CFFLog::Warning("[ClusteredLightingPass] BindToMainPass uses legacy binding - not yet migrated to descriptor sets");
+        warned = true;
+    }
+#else
     if (!cmdList) return;
 
     // Bind clustered params constant buffer (b3)
@@ -443,6 +474,7 @@ void CClusteredLightingPass::BindToMainPass(ICommandList* cmdList) {
     cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 8, m_clusterDataBuffer.get());
     cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 9, m_compactLightListBuffer.get());
     cmdList->SetShaderResourceBuffer(EShaderStage::Pixel, 10, m_pointLightBuffer.get());
+#endif
 }
 
 void CClusteredLightingPass::RenderDebug(ICommandList* cmdList) {

@@ -10,6 +10,63 @@
 
 ---
 
+## Progress Tracking (Updated 2026-01-29)
+
+### Phase 1: Core Infrastructure - COMPLETE
+| Task | Status | Notes |
+|------|--------|-------|
+| 1. Add CMake option | ✅ DONE | `FF_LEGACY_BINDING_DISABLED=ON` by default |
+| 2. Guard ICommandList.h | ✅ DONE | Legacy APIs wrapped with `#ifndef` |
+| 3. Guard DX12CommandList | ✅ DONE | Header and implementation guarded |
+| 4. Guard DX11CommandList | ✅ DONE | Header and implementation guarded |
+
+### Phase 1: Render Pass Migration - IN PROGRESS
+| Pass | Status | Notes |
+|------|--------|-------|
+| ShadowPass | ✅ DONE | DS-only, legacy path removed |
+| DepthPrePass | ✅ DONE | DS-only, legacy path removed |
+| Skybox | ✅ DONE | New DS shaders created, legacy guarded |
+| DeferredLightingPass | ✅ DONE | DS-only, legacy path guarded |
+| SSAOPass | ✅ DONE | DS dispatch methods added |
+| SSRPass | ✅ DONE | DS-only |
+| BloomPass | ✅ DONE | DS path added, legacy guarded |
+| PostProcessPass | ✅ DONE | DS path added |
+| HiZPass | ✅ DONE | DS-only |
+| GBufferPass | ✅ DONE | Legacy Render guarded |
+| TransparentForwardPass | ✅ DONE | Legacy guarded |
+| ClusteredLightingPass | ✅ DONE | Legacy guarded |
+| ForwardRenderPipeline | ✅ DONE | UnbindShaderResources removed |
+| SceneRenderer | ✅ DONE | Legacy guarded |
+
+### Phase 1: Remaining Passes - TODO
+| Pass | Status | Notes |
+|------|--------|-------|
+| TAAPass | ❌ TODO | Needs DS migration |
+| AntiAliasingPass | ❌ TODO | Needs DS migration |
+| AutoExposurePass | ❌ TODO | Needs DS migration |
+| MotionBlurPass | ❌ TODO | Needs DS migration |
+| DepthOfFieldPass | ❌ TODO | Needs DS migration |
+| GridPass | ❌ TODO | Needs DS migration |
+| DebugLinePass | ❌ TODO | Needs DS migration |
+| DeferredRenderPipeline | ❌ TODO | Needs legacy calls removed |
+
+### Phase 2: Utilities & Baking - TODO
+| File | Status | Notes |
+|------|--------|-------|
+| IBLGenerator | ❌ TODO | 9 legacy calls |
+| Lightmap2DGPUBaker | ❌ TODO | 19 legacy calls |
+| Lightmap2DManager | ❌ TODO | 2 legacy calls |
+| ReflectionProbeManager | ❌ TODO | 5 legacy calls |
+| LightProbeManager | ❌ TODO | 3 legacy calls |
+| VolumetricLightmap | ❌ TODO | 21 legacy calls |
+| DXRCubemapBaker | ❌ TODO | 10 legacy calls |
+
+### Build Status
+- **Current Errors:** 151 (down from 306)
+- **Files Remaining:** 15
+
+---
+
 ## Task 1: Add CMake Option
 
 **Files:**

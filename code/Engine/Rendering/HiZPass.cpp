@@ -209,6 +209,10 @@ void CHiZPass::BuildPyramid(ICommandList* cmdList,
                              uint32_t width, uint32_t height) {
     if (!m_initialized || !cmdList || !depthBuffer) return;
 
+#ifdef FF_LEGACY_BINDING_DISABLED
+    CFFLog::Warning("[HiZPass] BuildPyramid called but legacy binding is disabled and descriptor set path not implemented");
+    return;
+#else
     // Ensure textures are properly sized
     if (width != m_width || height != m_height) {
         createTextures(width, height);
@@ -240,9 +244,11 @@ void CHiZPass::BuildPyramid(ICommandList* cmdList,
 
     // Final barrier to SRV state for use by SSR
     cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+#endif // FF_LEGACY_BINDING_DISABLED
 }
 
 void CHiZPass::dispatchCopyDepth(ICommandList* cmdList, ITexture* depthBuffer) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     // Set PSO
     cmdList->SetPipelineState(m_copyDepthPSO.get());
 
@@ -272,9 +278,11 @@ void CHiZPass::dispatchCopyDepth(ICommandList* cmdList, ITexture* depthBuffer) {
 
     // UAV barrier before next pass reads this mip
     cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
+#endif // FF_LEGACY_BINDING_DISABLED
 }
 
 void CHiZPass::dispatchBuildMip(ICommandList* cmdList, uint32_t mipLevel) {
+#ifndef FF_LEGACY_BINDING_DISABLED
     // Calculate source and destination dimensions
     uint32_t srcWidth = std::max(1u, m_width >> (mipLevel - 1));
     uint32_t srcHeight = std::max(1u, m_height >> (mipLevel - 1));
@@ -311,6 +319,7 @@ void CHiZPass::dispatchBuildMip(ICommandList* cmdList, uint32_t mipLevel) {
 
     // UAV barrier before next mip level reads this one
     //cmdList->Barrier(m_hiZTexture.get(), EResourceState::UnorderedAccess, EResourceState::UnorderedAccess);
+#endif // FF_LEGACY_BINDING_DISABLED
 }
 
 // ============================================

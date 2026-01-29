@@ -46,8 +46,10 @@ bool CPostProcessPass::Initialize() {
     if (m_initialized) return true;
 
     createFullscreenQuad();
+#ifndef FF_LEGACY_BINDING_DISABLED
     createShaders();
     createPipelineState();
+#endif
     createNeutralLUT();
 
     // Create sampler
@@ -84,9 +86,11 @@ bool CPostProcessPass::Initialize() {
 }
 
 void CPostProcessPass::Shutdown() {
+#ifndef FF_LEGACY_BINDING_DISABLED
     m_pso.reset();
     m_vs.reset();
     m_ps.reset();
+#endif
     m_vertexBuffer.reset();
     m_constantBuffer.reset();
     m_dummyExposureBuffer.reset();
@@ -181,7 +185,9 @@ void CPostProcessPass::Render(ITexture* hdrInput,
     IBuffer* expBuffer = exposureBuffer ? exposureBuffer : m_dummyExposureBuffer.get();
 
     // Use descriptor set path if available (DX12)
+#ifndef FF_LEGACY_BINDING_DISABLED
     if (IsDescriptorSetModeAvailable()) {
+#endif
         cmdList->SetPipelineState(m_pso_ds.get());
         cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleStrip);
         cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(FullscreenVertex), 0);
@@ -196,6 +202,7 @@ void CPostProcessPass::Render(ITexture* hdrInput,
 
         // Draw fullscreen quad
         cmdList->Draw(4, 0);
+#ifndef FF_LEGACY_BINDING_DISABLED
     } else {
         // Legacy path for DX11
         if (!m_pso) return;
@@ -226,6 +233,7 @@ void CPostProcessPass::Render(ITexture* hdrInput,
             cmdList->UnbindShaderResources(EShaderStage::Pixel, 3, 1);
         }
     }
+#endif
 
     cmdList->SetRenderTargets(0, nullptr, nullptr);
 }
@@ -250,6 +258,7 @@ void CPostProcessPass::createFullscreenQuad() {
     m_vertexBuffer.reset(ctx->CreateBuffer(vbDesc, vertices));
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CPostProcessPass::createShaders() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
@@ -488,6 +497,7 @@ void CPostProcessPass::createPipelineState() {
 
     m_pso.reset(ctx->CreatePipelineState(psoDesc));
 }
+#endif
 
 void CPostProcessPass::createNeutralLUT() {
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();

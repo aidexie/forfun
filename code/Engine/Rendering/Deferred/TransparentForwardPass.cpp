@@ -269,6 +269,7 @@ void CTransparentForwardPass::Render(
     const CShadowPass::Output* shadowData,
     CClusteredLightingPass* clusteredLighting)
 {
+#ifndef FF_LEGACY_BINDING_DISABLED
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     if (!ctx) return;
 
@@ -506,6 +507,12 @@ void CTransparentForwardPass::Render(
         cmdList->SetIndexBuffer(item.gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
         cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }
+#else
+    // TODO: TransparentForwardPass needs migration to descriptor set architecture
+    CFFLog::Warning("[TransparentForwardPass] Legacy binding disabled but descriptor set path not implemented");
+    (void)camera; (void)scene; (void)hdrRT; (void)depthRT;
+    (void)width; (void)height; (void)shadowData; (void)clusteredLighting;
+#endif // FF_LEGACY_BINDING_DISABLED
 }
 
 // ============================================

@@ -159,6 +159,7 @@ CB_Frame updateFrameConstants(
 }
 
 // 更新物体常量 via SetConstantBufferData (unified API for both DX11 and DX12)
+#ifndef FF_LEGACY_BINDING_DISABLED
 void updateObjectConstants(
     ICommandList* cmdList,
     const RenderItem& item)
@@ -181,6 +182,7 @@ void updateObjectConstants(
     cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &co, sizeof(CB_Object));
     cmdList->SetConstantBufferData(EShaderStage::Pixel, 1, &co, sizeof(CB_Object));
 }
+#endif
 
 // 收集并分类渲染项
 void collectRenderItems(
@@ -268,6 +270,7 @@ void collectRenderItems(
 }
 
 // 渲染物体列表 (统一处理 opaque 和 transparent)
+#ifndef FF_LEGACY_BINDING_DISABLED
 void renderItems(
     ICommandList* cmdList,
     const std::vector<RenderItem>& items)
@@ -289,6 +292,7 @@ void renderItems(
         cmdList->DrawIndexed(item.gpuMesh->indexCount, 0, 0);
     }
 }
+#endif
 
 } // anonymous namespace
 
@@ -327,6 +331,10 @@ void CSceneRenderer::Render(
     const CShadowPass::Output* shadowData,
     CClusteredLightingPass* clusteredLighting)
 {
+#ifdef FF_LEGACY_BINDING_DISABLED
+    CFFLog::Warning("CSceneRenderer::Render() uses legacy binding APIs and is disabled. Migrate to descriptor sets.");
+    return;
+#else
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
     if (!cmdList) return;
@@ -422,6 +430,7 @@ void CSceneRenderer::Render(
         // renderItems will set per-object CB b1, SRV t0-t3
         renderItems(cmdList, transparentItems);
     }
+#endif
 }
 
 void CSceneRenderer::createPipeline()

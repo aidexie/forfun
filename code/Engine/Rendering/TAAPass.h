@@ -114,11 +114,13 @@ private:
     void createTextures(uint32_t width, uint32_t height);
     void ensureTextures(uint32_t width, uint32_t height);
 
-    // Shaders & PSOs
+#ifndef FF_LEGACY_BINDING_DISABLED
+    // Legacy Shaders & PSOs (SM 5.0, DX11)
     RHI::ShaderPtr m_taa_cs;
     RHI::ShaderPtr m_sharpen_cs;
     RHI::PipelineStatePtr m_taa_pso;
     RHI::PipelineStatePtr m_sharpen_pso;
+#endif
 
     // Textures
     RHI::TexturePtr m_history[2];  // Double-buffered history

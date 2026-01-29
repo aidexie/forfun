@@ -246,6 +246,7 @@ void CGBufferPass::Shutdown()
     }
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CGBufferPass::Render(
     const CCamera& camera,
     CScene& scene,
@@ -388,6 +389,7 @@ void CGBufferPass::Render(
     cmdList->Barrier(gbuffer.GetVelocity(), EResourceState::RenderTarget, EResourceState::ShaderResource);
     cmdList->Barrier(gbuffer.GetDepthBuffer(), EResourceState::DepthWrite, EResourceState::ShaderResource);
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 // ============================================
 // Descriptor Set Initialization (DX12 only)
@@ -626,9 +628,9 @@ void CGBufferPass::Render(
     ICommandList* cmdList = ctx->GetCommandList();
     if (!cmdList) return;
 
-    // Fallback to legacy path if descriptor sets not available
-    if (!m_perPassSet || !perFrameSet || !m_pso_ds) {
-        Render(camera, scene, gbuffer, viewProjPrev, width, height);
+    // Descriptor set resources must be available
+    if (!m_perPassSet || !m_pso_ds) {
+        CFFLog::Error("[GBufferPass] Descriptor set resources not initialized");
         return;
     }
 

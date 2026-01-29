@@ -350,14 +350,8 @@ void CDeferredRenderPipeline::Render(const RenderContext& ctx)
     // 3. G-Buffer Pass
     // ============================================
     {
-        // Use descriptor set API if available (DX12), otherwise fall back to legacy
-        if (m_perFrameSet && m_gbufferPass.IsDescriptorSetModeAvailable()) {
-            m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev,
-                                 ctx.width, ctx.height, m_perFrameSet);
-        } else {
-            m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev,
-                                 ctx.width, ctx.height);
-        }
+        m_gbufferPass.Render(ctx.camera, ctx.scene, m_gbuffer, m_viewProjPrev,
+                             ctx.width, ctx.height, m_perFrameSet);
     }
 
     // Advance jitter for next frame (if TAA enabled)

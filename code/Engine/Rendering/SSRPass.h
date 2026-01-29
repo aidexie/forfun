@@ -237,24 +237,30 @@ public:
     const SSSRSettings& GetSettings() const { return m_settings; }
 
 private:
+#ifndef FF_LEGACY_BINDING_DISABLED
     void createShaders();
     void createCompositeShader();
+#endif
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
     void createFallbackTexture();
     void createBlueNoiseTexture();
 
     // ============================================
-    // Compute Shaders
+    // Compute Shaders (Legacy SM 5.0)
     // ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
     RHI::ShaderPtr m_ssrCS;             // Main SSR compute shader
     RHI::ShaderPtr m_compositeCS;       // SSR composite compute shader
+#endif
 
     // ============================================
-    // Pipeline States
+    // Pipeline States (Legacy SM 5.0)
     // ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
     RHI::PipelineStatePtr m_ssrPSO;
     RHI::PipelineStatePtr m_compositePSO;
+#endif
 
     // ============================================
     // Textures

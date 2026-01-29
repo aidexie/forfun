@@ -174,29 +174,65 @@ void CSSAOPass::Render(ICommandList* cmdList,
     }
 
     // Guard against invalid state
-    if (!m_ssaoPSO || !m_ssaoRaw || !depthBuffer || !normalBuffer) return;
+    if (!m_ssaoRaw || !depthBuffer || !normalBuffer) return;
 
-    // Pipeline: Downsample -> SSAO -> BlurH -> BlurV -> Upsample
-    {
-        CScopedDebugEvent evt(cmdList, L"SSAO Depth Downsample");
-        dispatchDownsampleDepth(cmdList, depthBuffer);
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        // Pipeline: Downsample -> SSAO -> BlurH -> BlurV -> Upsample (Descriptor Set path)
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Depth Downsample (DS)");
+            dispatchDownsampleDepth_DS(cmdList, depthBuffer);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO GTAO Compute (DS)");
+            dispatchSSAO_DS(cmdList, depthBuffer, normalBuffer, view, proj, nearZ, farZ);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Blur H (DS)");
+            dispatchBlurH_DS(cmdList);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Blur V (DS)");
+            dispatchBlurV_DS(cmdList);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Upsample (DS)");
+            dispatchUpsample_DS(cmdList, depthBuffer);
+        }
     }
-    {
-        CScopedDebugEvent evt(cmdList, L"SSAO GTAO Compute");
-        dispatchSSAO(cmdList, depthBuffer, normalBuffer, view, proj, nearZ, farZ);
+#ifndef FF_LEGACY_BINDING_DISABLED
+    else {
+        // Guard against invalid state for legacy path
+        if (!m_ssaoPSO) return;
+
+        // Pipeline: Downsample -> SSAO -> BlurH -> BlurV -> Upsample (Legacy path)
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Depth Downsample");
+            dispatchDownsampleDepth(cmdList, depthBuffer);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO GTAO Compute");
+            dispatchSSAO(cmdList, depthBuffer, normalBuffer, view, proj, nearZ, farZ);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Blur H");
+            dispatchBlurH(cmdList);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Blur V");
+            dispatchBlurV(cmdList);
+        }
+        {
+            CScopedDebugEvent evt(cmdList, L"SSAO Upsample");
+            dispatchUpsample(cmdList, depthBuffer);
+        }
     }
-    {
-        CScopedDebugEvent evt(cmdList, L"SSAO Blur H");
-        dispatchBlurH(cmdList);
+#else
+    else {
+        CFFLog::Warning("[SSAOPass] Legacy binding disabled and descriptor sets not available");
+        return;
     }
-    {
-        CScopedDebugEvent evt(cmdList, L"SSAO Blur V");
-        dispatchBlurV(cmdList);
-    }
-    {
-        CScopedDebugEvent evt(cmdList, L"SSAO Upsample");
-        dispatchUpsample(cmdList, depthBuffer);
-    }
+#endif
 
     // Transition SSAO output from UAV to SRV for consumers (deferred lighting)
     cmdList->Barrier(m_ssaoFinal.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
@@ -356,8 +392,9 @@ void CSSAOPass::createSamplers() {
 }
 
 // ============================================
-// Dispatch Helpers
+// Dispatch Helpers (Legacy Binding)
 // ============================================
+#ifndef FF_LEGACY_BINDING_DISABLED
 
 void CSSAOPass::dispatchDownsampleDepth(ICommandList* cmdList, ITexture* depthFullRes) {
     if (!m_downsamplePSO || !m_depthHalfRes) return;
@@ -485,6 +522,152 @@ void CSSAOPass::dispatchUpsample(ICommandList* cmdList, ITexture* depthFullRes) 
 
     cmdList->SetUnorderedAccessTexture(0, nullptr);
     cmdList->UnbindShaderResources(EShaderStage::Compute, 0, 3);
+}
+
+#endif // FF_LEGACY_BINDING_DISABLED
+
+// ============================================
+// Dispatch Helpers (Descriptor Set Binding)
+// ============================================
+
+void CSSAOPass::dispatchDownsampleDepth_DS(ICommandList* cmdList, ITexture* depthFullRes) {
+    if (!m_downsamplePSO_ds || !m_depthHalfRes || !m_perPassSet) return;
+
+    struct CB_Downsample {
+        float texelSizeX, texelSizeY;
+        uint32_t useReversedZ;
+        float _pad;
+    } cb;
+
+    cb.texelSizeX = 1.0f / static_cast<float>(m_fullWidth);
+    cb.texelSizeY = 1.0f / static_cast<float>(m_fullHeight);
+    cb.useReversedZ = UseReversedZ() ? 1 : 0;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, depthFullRes),
+        BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, m_depthHalfRes.get())
+    });
+
+    cmdList->SetPipelineState(m_downsamplePSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    cmdList->Dispatch(calcDispatchGroups(m_halfWidth), calcDispatchGroups(m_halfHeight), 1);
+
+    // UAV barrier for next pass
+    cmdList->Barrier(m_depthHalfRes.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+void CSSAOPass::dispatchSSAO_DS(ICommandList* cmdList,
+                                 ITexture* depthBuffer,
+                                 ITexture* normalBuffer,
+                                 const XMMATRIX& view,
+                                 const XMMATRIX& proj,
+                                 float /*nearZ*/, float /*farZ*/) {
+    if (!m_ssaoPSO_ds || !m_ssaoRaw || !m_perPassSet) return;
+
+    CB_SSAO cb{};
+    XMStoreFloat4x4(&cb.proj, XMMatrixTranspose(proj));
+    XMStoreFloat4x4(&cb.invProj, XMMatrixTranspose(XMMatrixInverse(nullptr, proj)));
+    XMStoreFloat4x4(&cb.view, XMMatrixTranspose(view));
+
+    cb.texelSize.x = 1.0f / static_cast<float>(m_halfWidth);
+    cb.texelSize.y = 1.0f / static_cast<float>(m_halfHeight);
+    cb.noiseScale.x = static_cast<float>(m_halfWidth) / static_cast<float>(SSAOConfig::NOISE_TEXTURE_SIZE);
+    cb.noiseScale.y = static_cast<float>(m_halfHeight) / static_cast<float>(SSAOConfig::NOISE_TEXTURE_SIZE);
+    cb.radius = m_settings.radius;
+    cb.intensity = m_settings.intensity;
+    cb.falloffStart = m_settings.falloffStart;
+    cb.falloffEnd = m_settings.falloffEnd;
+    cb.numSlices = m_settings.numSlices;
+    cb.numSteps = m_settings.numSteps;
+    cb.thicknessHeuristic = m_settings.thicknessHeuristic;
+    cb.algorithm = static_cast<int>(m_settings.algorithm);
+    cb.useReversedZ = UseReversedZ() ? 1 : 0;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, m_depthHalfRes.get()),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input1, normalBuffer),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input2, m_noiseTexture.get()),
+        BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, m_ssaoRaw.get())
+    });
+
+    cmdList->SetPipelineState(m_ssaoPSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    cmdList->Dispatch(calcDispatchGroups(m_halfWidth), calcDispatchGroups(m_halfHeight), 1);
+
+    // UAV barrier for next pass
+    cmdList->Barrier(m_ssaoRaw.get(), EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+void CSSAOPass::dispatchBlurH_DS(ICommandList* cmdList) {
+    dispatchBlur_DS(cmdList, m_blurHPSO_ds.get(), m_ssaoRaw.get(), m_ssaoBlurTemp.get(), XMFLOAT2(1.0f, 0.0f));
+}
+
+void CSSAOPass::dispatchBlurV_DS(ICommandList* cmdList) {
+    dispatchBlur_DS(cmdList, m_blurVPSO_ds.get(), m_ssaoBlurTemp.get(), m_ssaoHalfBlurred.get(), XMFLOAT2(0.0f, 1.0f));
+}
+
+void CSSAOPass::dispatchBlur_DS(ICommandList* cmdList,
+                                 IPipelineState* pso,
+                                 ITexture* inputAO,
+                                 ITexture* outputAO,
+                                 const XMFLOAT2& direction) {
+    if (!pso || !outputAO || !m_perPassSet) return;
+
+    CB_SSAOBlur cb{};
+    cb.blurDirection = direction;
+    cb.texelSize.x = 1.0f / static_cast<float>(m_halfWidth);
+    cb.texelSize.y = 1.0f / static_cast<float>(m_halfHeight);
+    cb.depthSigma = m_settings.depthSigma;
+    cb.blurRadius = m_settings.blurRadius;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, inputAO),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input1, m_depthHalfRes.get()),
+        BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, outputAO)
+    });
+
+    cmdList->SetPipelineState(pso);
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    cmdList->Dispatch(calcDispatchGroups(m_halfWidth), calcDispatchGroups(m_halfHeight), 1);
+
+    // UAV barrier for next pass
+    cmdList->Barrier(outputAO, EResourceState::UnorderedAccess, EResourceState::ShaderResource);
+}
+
+void CSSAOPass::dispatchUpsample_DS(ICommandList* cmdList, ITexture* depthFullRes) {
+    if (!m_upsamplePSO_ds || !m_ssaoFinal || !m_perPassSet) return;
+
+    CB_SSAOUpsample cb{};
+    cb.fullResTexelSize.x = 1.0f / static_cast<float>(m_fullWidth);
+    cb.fullResTexelSize.y = 1.0f / static_cast<float>(m_fullHeight);
+    cb.halfResTexelSize.x = 1.0f / static_cast<float>(m_halfWidth);
+    cb.halfResTexelSize.y = 1.0f / static_cast<float>(m_halfHeight);
+    cb.depthSigma = m_settings.depthSigma;
+
+    // Bind resources to descriptor set
+    m_perPassSet->Bind({
+        BindingSetItem::VolatileCBV(ComputePassLayout::Slots::CB_PerPass, &cb, sizeof(cb)),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input0, m_ssaoHalfBlurred.get()),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input1, m_depthHalfRes.get()),
+        BindingSetItem::Texture_SRV(ComputePassLayout::Slots::Tex_Input2, depthFullRes),
+        BindingSetItem::Texture_UAV(ComputePassLayout::Slots::UAV_Output0, m_ssaoFinal.get())
+    });
+
+    cmdList->SetPipelineState(m_upsamplePSO_ds.get());
+    cmdList->BindDescriptorSet(1, m_perPassSet);
+
+    cmdList->Dispatch(calcDispatchGroups(m_fullWidth), calcDispatchGroups(m_fullHeight), 1);
+
+    // Note: Final UAV->SRV barrier is done in Render() after all dispatches
 }
 
 // ============================================
