@@ -239,6 +239,7 @@ void CDX11CommandList::SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint
     m_context->IASetIndexBuffer(d3dBuffer, ToDXGIFormat(format), offset);
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 bool CDX11CommandList::SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) {
     if (!data || size == 0) return false;
 
@@ -386,6 +387,7 @@ void CDX11CommandList::SetUnorderedAccessTextureMip(uint32_t slot, ITexture* tex
     }
     m_context->CSSetUnorderedAccessViews(slot, 1, &uav, nullptr);
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CDX11CommandList::ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) {
     if (!buffer) return;
@@ -516,6 +518,7 @@ void CDX11CommandList::UnbindRenderTargets() {
     m_context->OMSetRenderTargets(1, &nullRTV, nullptr);
 }
 
+#ifndef FF_LEGACY_BINDING_DISABLED
 void CDX11CommandList::UnbindShaderResources(EShaderStage stage, uint32_t startSlot, uint32_t numSlots) {
     ID3D11ShaderResourceView* nullSRVs[16] = { nullptr };
     uint32_t count = (numSlots > 16) ? 16 : numSlots;
@@ -541,6 +544,7 @@ void CDX11CommandList::UnbindShaderResources(EShaderStage stage, uint32_t startS
             break;
     }
 }
+#endif // FF_LEGACY_BINDING_DISABLED
 
 void CDX11CommandList::GenerateMips(ITexture* texture) {
     if (!texture) return;
