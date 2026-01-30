@@ -330,7 +330,7 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
 
     // Allocate via D3D12MA
     SMemoryAllocation allocation = CDX12MemoryAllocator::Instance().CreateBuffer(
-        resourceDesc, heapType, initialState);
+        resourceDesc, heapType, initialState, desc.debugName);
 
     if (!allocation.IsValid()) {
         CFFLog::Error("[DX12RenderContext] CreateBuffer failed via D3D12MA");
@@ -504,7 +504,7 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
 
         // Allocate staging buffer via D3D12MA
         SMemoryAllocation allocation = CDX12MemoryAllocator::Instance().CreateBuffer(
-            bufferDesc, heapProps.Type, initialState);
+            bufferDesc, heapProps.Type, initialState, desc.debugName);
 
         if (!allocation.IsValid()) {
             CFFLog::Error("[DX12RenderContext] CreateTexture (staging buffer) failed via D3D12MA");
@@ -602,7 +602,7 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
 
     // Allocate via D3D12MA
     SMemoryAllocation allocation = CDX12MemoryAllocator::Instance().CreateTexture(
-        resourceDesc, heapProps.Type, initialState, pClearValue);
+        resourceDesc, heapProps.Type, initialState, pClearValue, desc.debugName);
 
     if (!allocation.IsValid()) {
         CFFLog::Error("[DX12RenderContext] CreateTexture failed via D3D12MA");

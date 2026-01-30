@@ -81,7 +81,7 @@ CDX12Texture::~CDX12Texture() {
         uint64_t fenceValue = CDX12Context::Instance().GetCurrentFenceValue();
         CDX12MemoryAllocator::Instance().FreeAllocation(m_allocation, fenceValue);
         m_allocation = nullptr;
-        m_resource.Detach();  // Don't release via ComPtr - D3D12MA owns it
+        m_resource.Reset();  // Release our reference (refcount: 2 -> 1)
     } else if (m_resource) {
         // Legacy path: defer release via deletion queue (e.g., swapchain backbuffers)
         CDX12Context::Instance().DeferredRelease(m_resource.Get());

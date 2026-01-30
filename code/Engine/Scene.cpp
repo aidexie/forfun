@@ -165,10 +165,12 @@ void CScene::ReloadLightProbesFromScene() {
 
 void CScene::Shutdown() {
     CFFLog::Info("Scene: Shutting down...");
+    Clear();  // Destroy all GameObjects and their GPU resources
     m_volumetricLightmap.Shutdown();
     m_lightProbeManager.Shutdown();
     m_probeManager.Shutdown();
     m_skybox.Shutdown();
+    m_lightmap2D.UnloadLightmap();  // Release lightmap textures before RHI shutdown
     m_initialized = false;
 }
 

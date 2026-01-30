@@ -72,8 +72,36 @@ void CDX12MemoryAllocator::Shutdown() {
     // Process all pending frees (force release)
     ProcessDeferredFrees(UINT64_MAX);
 
+    // Log allocation statistics
+    uint64_t totalAllocated = m_totalBufferAllocations + m_totalTextureAllocations;
+    CFFLog::Info("[D3D12MA] Allocation stats: Buffers=%llu, Textures=%llu, Total=%llu, Released=%llu",
+                 m_totalBufferAllocations, m_totalTextureAllocations, totalAllocated, m_totalReleased);
+
+    // Report leaked allocations
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_liveAllocations.empty()) {
+            CFFLog::Warning("[D3D12MA] LEAK DETECTED: %zu allocations not released!", m_liveAllocations.size());
+
+            // Count by type
+            int bufferLeaks = 0, textureLeaks = 0;
+            for (const auto& [alloc, info] : m_liveAllocations) {
+                if (info.type == "Buffer") bufferLeaks++;
+                else textureLeaks++;
+            }
+            CFFLog::Warning("[D3D12MA] Leaked: %d Buffers, %d Textures", bufferLeaks, textureLeaks);
+
+            // Print all leaked allocations
+            int count = 0;
+            for (const auto& [alloc, info] : m_liveAllocations) {
+                CFFLog::Warning("[D3D12MA]   Leak #%d: %s, size=%llu, name=%s",
+                               count + 1, info.type.c_str(), info.size, info.name.c_str());
+                count++;
+            }
+        }
+    }
+
     // Log final statistics
-    CFFLog::Info("[D3D12MA] Final memory statistics:");
     LogStatistics();
 
     // Release allocator
@@ -89,7 +117,8 @@ void CDX12MemoryAllocator::Shutdown() {
 
 SMemoryAllocation CDX12MemoryAllocator::CreateBuffer(const D3D12_RESOURCE_DESC& desc,
                                                       D3D12_HEAP_TYPE heapType,
-                                                      D3D12_RESOURCE_STATES initialState) {
+                                                      D3D12_RESOURCE_STATES initialState,
+                                                      const char* debugName) {
     SMemoryAllocation result = {};
 
     if (!m_allocator) {
@@ -106,7 +135,7 @@ SMemoryAllocation CDX12MemoryAllocator::CreateBuffer(const D3D12_RESOURCE_DESC& 
         initialState,
         nullptr,  // No clear value for buffers
         &result.allocation,
-        IID_PPV_ARGS(&result.resource)
+        IID_NULL, nullptr  // Don't request resource - avoids extra refcount
     );
 
     if (FAILED(hr) || !result.allocation) {
@@ -114,9 +143,18 @@ SMemoryAllocation CDX12MemoryAllocator::CreateBuffer(const D3D12_RESOURCE_DESC& 
         return {};
     }
 
+    // Get resource from allocation (refcount = 1, held by D3D12MA)
+    result.resource = result.allocation->GetResource();
+
     // Get GPU virtual address for buffers
     result.gpuAddress = result.resource->GetGPUVirtualAddress();
 
+    // Track allocation
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_liveAllocations[result.allocation] = { "Buffer", debugName ? debugName : "<unnamed>", desc.Width };
+    }
+    m_totalBufferAllocations++;
     return result;
 }
 
@@ -127,7 +165,8 @@ SMemoryAllocation CDX12MemoryAllocator::CreateBuffer(const D3D12_RESOURCE_DESC& 
 SMemoryAllocation CDX12MemoryAllocator::CreateTexture(const D3D12_RESOURCE_DESC& desc,
                                                        D3D12_HEAP_TYPE heapType,
                                                        D3D12_RESOURCE_STATES initialState,
-                                                       const D3D12_CLEAR_VALUE* clearValue) {
+                                                       const D3D12_CLEAR_VALUE* clearValue,
+                                                       const char* debugName) {
     SMemoryAllocation result = {};
 
     if (!m_allocator) {
@@ -144,7 +183,7 @@ SMemoryAllocation CDX12MemoryAllocator::CreateTexture(const D3D12_RESOURCE_DESC&
         initialState,
         clearValue,
         &result.allocation,
-        IID_PPV_ARGS(&result.resource)
+        IID_NULL, nullptr  // Don't request resource - avoids extra refcount
     );
 
     if (FAILED(hr) || !result.allocation) {
@@ -153,9 +192,18 @@ SMemoryAllocation CDX12MemoryAllocator::CreateTexture(const D3D12_RESOURCE_DESC&
         return {};
     }
 
+    // Get resource from allocation (refcount = 1, held by D3D12MA)
+    result.resource = result.allocation->GetResource();
+
     // Textures don't have GPU virtual address (use SRV/UAV instead)
     result.gpuAddress = 0;
 
+    // Track allocation
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_liveAllocations[result.allocation] = { "Texture", debugName ? debugName : "<unnamed>", desc.Width * desc.Height };
+    }
+    m_totalTextureAllocations++;
     return result;
 }
 
@@ -167,8 +215,8 @@ void CDX12MemoryAllocator::FreeAllocation(D3D12MA::Allocation* allocation, uint6
     if (!allocation) {
         return;
     }
-
     std::lock_guard<std::mutex> lock(m_mutex);
+    m_liveAllocations.erase(allocation);
     m_pendingFrees.push_back({ allocation, fenceValue });
 }
 
@@ -184,6 +232,7 @@ void CDX12MemoryAllocator::ProcessDeferredFrees(uint64_t completedFenceValue) {
         // Safe to release
         pending.allocation->Release();
         m_pendingFrees.pop_front();
+        m_totalReleased++;
     }
 }
 

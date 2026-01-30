@@ -10,6 +10,8 @@
 #include "D3D12MemAlloc.h"
 #include <deque>
 #include <mutex>
+#include <unordered_map>
+#include <string>
 
 namespace RHI {
 namespace DX12 {
@@ -47,14 +49,16 @@ public:
     // heapType: D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_TYPE_UPLOAD, or D3D12_HEAP_TYPE_READBACK
     SMemoryAllocation CreateBuffer(const D3D12_RESOURCE_DESC& desc,
                                    D3D12_HEAP_TYPE heapType,
-                                   D3D12_RESOURCE_STATES initialState);
+                                   D3D12_RESOURCE_STATES initialState,
+                                   const char* debugName = nullptr);
 
     // Texture allocation
     // clearValue: Optional optimized clear value for render targets/depth stencils
     SMemoryAllocation CreateTexture(const D3D12_RESOURCE_DESC& desc,
                                     D3D12_HEAP_TYPE heapType,
                                     D3D12_RESOURCE_STATES initialState,
-                                    const D3D12_CLEAR_VALUE* clearValue = nullptr);
+                                    const D3D12_CLEAR_VALUE* clearValue = nullptr,
+                                    const char* debugName = nullptr);
 
     // Deferred deallocation
     // Resources are queued for deletion until GPU finishes using them
@@ -80,6 +84,19 @@ private:
 
 private:
     D3D12MA::Allocator* m_allocator = nullptr;
+
+    // Allocation tracking
+    uint64_t m_totalBufferAllocations = 0;
+    uint64_t m_totalTextureAllocations = 0;
+    uint64_t m_totalReleased = 0;
+
+    // Live allocation tracking (for leak detection)
+    struct SAllocationInfo {
+        std::string type;  // "Buffer" or "Texture"
+        std::string name;  // Debug name
+        uint64_t size;
+    };
+    std::unordered_map<D3D12MA::Allocation*, SAllocationInfo> m_liveAllocations;
 
     // Deferred deletion queue
     struct SPendingFree {

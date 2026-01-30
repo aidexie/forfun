@@ -197,6 +197,7 @@ bool CLightmap2DManager::CreateScaleOffsetBuffer() {
     bufDesc.usage = RHI::EBufferUsage::Structured;
     bufDesc.cpuAccess = RHI::ECPUAccess::None;
     bufDesc.structureByteStride = sizeof(DirectX::XMFLOAT4);
+    bufDesc.debugName = "Lightmap2D_ScaleOffsetBuffer";
 
     m_scaleOffsetBuffer.reset(ctx->CreateBuffer(bufDesc, scaleOffsets.data()));
 
