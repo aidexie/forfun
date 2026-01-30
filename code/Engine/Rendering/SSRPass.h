@@ -7,6 +7,8 @@
 namespace RHI {
     class ICommandList;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -235,24 +237,11 @@ public:
     const SSSRSettings& GetSettings() const { return m_settings; }
 
 private:
-    void createShaders();
-    void createCompositeShader();
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
     void createFallbackTexture();
     void createBlueNoiseTexture();
-
-    // ============================================
-    // Compute Shaders
-    // ============================================
-    RHI::ShaderPtr m_ssrCS;             // Main SSR compute shader
-    RHI::ShaderPtr m_compositeCS;       // SSR composite compute shader
-
-    // ============================================
-    // Pipeline States
-    // ============================================
-    RHI::PipelineStatePtr m_ssrPSO;
-    RHI::PipelineStatePtr m_compositePSO;
+    void initDescriptorSets();
 
     // ============================================
     // Textures
@@ -278,4 +267,22 @@ private:
     bool m_initialized = false;
     uint32_t m_frameIndex = 0;
     DirectX::XMMATRIX m_prevViewProj = DirectX::XMMatrixIdentity();
+
+    // ============================================
+    // Descriptor Set Resources (DX12)
+    // ============================================
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_ssrCS;
+    RHI::ShaderPtr m_compositeCS;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_ssrPSO;
+    RHI::PipelineStatePtr m_compositePSO;
+
+    // Unified compute layout (shared across all compute passes)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_ssrPSO != nullptr; }
 };

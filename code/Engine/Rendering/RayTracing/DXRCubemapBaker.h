@@ -6,6 +6,12 @@
 #include <functional>
 #include <array>
 
+// Forward declarations for descriptor sets
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // ============================================
 // DXR Cubemap-Based Lightmap Baker (Batched)
 // ============================================
@@ -275,4 +281,16 @@ private:
     // Skybox texture (borrowed from scene)
     RHI::ITexture* m_skyboxTexture = nullptr;
     RHI::ISampler* m_skyboxTextureSampler = nullptr;
+
+    // ============================================
+    // Descriptor Set Resources (DX12 only)
+    // ============================================
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    // Descriptor set mode availability check
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_perPassSet != nullptr; }
+
+    // Initialize descriptor set resources
+    void InitDescriptorSets();
 };

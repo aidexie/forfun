@@ -205,6 +205,11 @@ public:
     CDX12DescriptorStagingRing& GetSRVStagingRing() { return m_srvStagingRing; }
     CDX12DescriptorStagingRing& GetSamplerStagingRing() { return m_samplerStagingRing; }
 
+    // Null descriptor access (for unbound slots in descriptor sets)
+    D3D12_CPU_DESCRIPTOR_HANDLE GetNullSRV() const { return m_nullSRV.cpuHandle; }
+    D3D12_CPU_DESCRIPTOR_HANDLE GetNullUAV() const { return m_nullUAV.cpuHandle; }
+    D3D12_CPU_DESCRIPTOR_HANDLE GetNullSampler() const { return m_nullSampler.cpuHandle; }
+
     // Called at the start of each frame
     void BeginFrame(uint32_t frameIndex);
 
@@ -216,6 +221,9 @@ private:
     CDX12DescriptorHeapManager(const CDX12DescriptorHeapManager&) = delete;
     CDX12DescriptorHeapManager& operator=(const CDX12DescriptorHeapManager&) = delete;
 
+    // Create null descriptors for unbound slots
+    void CreateNullDescriptors(ID3D12Device* device);
+
 private:
     // CPU-only heaps (for persistent descriptor storage)
     CDX12DescriptorHeap m_cbvSrvUavHeap;  // CPU heap - persistent SRVs/UAVs/CBVs, copy source
@@ -226,6 +234,11 @@ private:
     // Staging rings for per-draw binding (own their own GPU shader-visible heaps)
     CDX12DescriptorStagingRing m_srvStagingRing;
     CDX12DescriptorStagingRing m_samplerStagingRing;
+
+    // Null descriptors for unbound slots (returns 0 when read, discards writes)
+    SDescriptorHandle m_nullSRV;
+    SDescriptorHandle m_nullUAV;
+    SDescriptorHandle m_nullSampler;
 
     bool m_initialized = false;
 };

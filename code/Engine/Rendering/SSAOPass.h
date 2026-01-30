@@ -8,6 +8,8 @@ namespace RHI {
     class ICommandList;
     class IPipelineState;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // GTAO configuration constants
@@ -154,23 +156,22 @@ private:
     void createWhiteFallbackTexture();
     void createSamplers();
 
-    // Dispatch helpers
-    void dispatchDownsampleDepth(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
-    void dispatchSSAO(RHI::ICommandList* cmdList,
-                      RHI::ITexture* depthBuffer,
-                      RHI::ITexture* normalBuffer,
-                      const DirectX::XMMATRIX& view,
-                      const DirectX::XMMATRIX& proj,
-                      float nearZ, float farZ);
-
-    void dispatchBlurH(RHI::ICommandList* cmdList);
-    void dispatchBlurV(RHI::ICommandList* cmdList);
-    void dispatchBlur(RHI::ICommandList* cmdList,
-                      RHI::IPipelineState* pso,
-                      RHI::ITexture* inputAO,
-                      RHI::ITexture* outputAO,
-                      const DirectX::XMFLOAT2& direction);
-    void dispatchUpsample(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
+    // Dispatch helpers (Descriptor Set path)
+    void dispatchDownsampleDepth_DS(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
+    void dispatchSSAO_DS(RHI::ICommandList* cmdList,
+                         RHI::ITexture* depthBuffer,
+                         RHI::ITexture* normalBuffer,
+                         const DirectX::XMMATRIX& view,
+                         const DirectX::XMMATRIX& proj,
+                         float nearZ, float farZ);
+    void dispatchBlurH_DS(RHI::ICommandList* cmdList);
+    void dispatchBlurV_DS(RHI::ICommandList* cmdList);
+    void dispatchBlur_DS(RHI::ICommandList* cmdList,
+                         RHI::IPipelineState* pso,
+                         RHI::ITexture* inputAO,
+                         RHI::ITexture* outputAO,
+                         const DirectX::XMFLOAT2& direction);
+    void dispatchUpsample_DS(RHI::ICommandList* cmdList, RHI::ITexture* depthFullRes);
 
     // ============================================
     // Compute Shaders
@@ -220,4 +221,29 @@ private:
     uint32_t m_halfWidth = 0;
     uint32_t m_halfHeight = 0;
     bool m_initialized = false;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_ssaoCS_ds;
+    RHI::ShaderPtr m_blurHCS_ds;
+    RHI::ShaderPtr m_blurVCS_ds;
+    RHI::ShaderPtr m_upsampleCS_ds;
+    RHI::ShaderPtr m_downsampleCS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_ssaoPSO_ds;
+    RHI::PipelineStatePtr m_blurHPSO_ds;
+    RHI::PipelineStatePtr m_blurVPSO_ds;
+    RHI::PipelineStatePtr m_upsamplePSO_ds;
+    RHI::PipelineStatePtr m_downsamplePSO_ds;
+
+    // Unified compute layout (shared across all compute passes)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_ssaoPSO_ds != nullptr; }
 };

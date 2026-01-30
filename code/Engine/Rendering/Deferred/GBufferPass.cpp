@@ -246,148 +246,6 @@ void CGBufferPass::Shutdown()
     }
 }
 
-void CGBufferPass::Render(
-    const CCamera& camera,
-    CScene& scene,
-    CGBuffer& gbuffer,
-    const DirectX::XMMATRIX& viewProjPrev,
-    uint32_t width,
-    uint32_t height)
-{
-    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
-    if (!ctx) return;
-
-    ICommandList* cmdList = ctx->GetCommandList();
-    if (!cmdList) return;
-
-    RHI::CScopedDebugEvent evt(cmdList, L"G-Buffer Pass");
-
-    // Get G-Buffer render targets
-    RHI::ITexture* rts[CGBuffer::RT_Count];
-    uint32_t rtCount;
-    gbuffer.GetRenderTargets(rts, rtCount);
-
-    // Set render targets
-    cmdList->SetRenderTargets(rtCount, rts, gbuffer.GetDepthBuffer());
-
-    // Set viewport and scissor
-    cmdList->SetViewport(0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f);
-    cmdList->SetScissorRect(0, 0, width, height);
-
-    // Clear G-Buffer render targets (not depth - already populated)
-    const float clearBlack[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    for (uint32_t i = 0; i < rtCount; ++i) {
-        cmdList->ClearRenderTarget(rts[i], clearBlack);
-    }
-
-    // Set pipeline state
-    cmdList->SetPipelineState(m_pso.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-
-    // Bind sampler
-    cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
-
-    // Bind 2D Lightmap resources
-    scene.GetLightmap2D().Bind(cmdList);
-
-    // Update frame constants
-    XMMATRIX view = camera.GetViewMatrix();
-    // Use jittered projection for TAA (returns normal projection if TAA disabled)
-    XMMATRIX proj = camera.GetJitteredProjectionMatrix(width, height);
-
-    CB_GBufferFrame frameData;
-    frameData.view = XMMatrixTranspose(view);
-    frameData.proj = XMMatrixTranspose(proj);
-    frameData.viewProjPrev = XMMatrixTranspose(viewProjPrev);
-    frameData.camPosWS = camera.position;
-    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &frameData, sizeof(frameData));
-    cmdList->SetConstantBufferData(EShaderStage::Pixel, 0, &frameData, sizeof(frameData));
-
-    // Render all opaque objects
-    CTextureManager& texMgr = CTextureManager::Instance();
-
-    for (auto& objPtr : scene.GetWorld().Objects()) {
-        auto* obj = objPtr.get();
-        auto* meshRenderer = obj->GetComponent<SMeshRenderer>();
-        auto* transform = obj->GetComponent<STransform>();
-
-        if (!meshRenderer || !transform) continue;
-
-        meshRenderer->EnsureUploaded();
-        if (meshRenderer->meshes.empty()) continue;
-
-        // Get material
-        CMaterialAsset* material = CMaterialManager::Instance().GetDefault();
-        if (!meshRenderer->materialPath.empty()) {
-            material = CMaterialManager::Instance().Load(meshRenderer->materialPath);
-        }
-
-        // Skip transparent objects
-        if (material && material->alphaMode == EAlphaMode::Blend) {
-            continue;
-        }
-
-        // Get textures (async loading - returns placeholder until ready)
-        RHI::ITexture* albedoTex = material->albedoTexture.empty() ?
-            texMgr.GetDefaultWhite().get() : texMgr.LoadAsync(material->albedoTexture, true)->GetTexture();
-        RHI::ITexture* normalTex = material->normalMap.empty() ?
-            texMgr.GetDefaultNormal().get() : texMgr.LoadAsync(material->normalMap, false)->GetTexture();
-        RHI::ITexture* metallicRoughnessTex = material->metallicRoughnessMap.empty() ?
-            texMgr.GetDefaultWhite().get() : texMgr.LoadAsync(material->metallicRoughnessMap, false)->GetTexture();
-        RHI::ITexture* emissiveTex = material->emissiveMap.empty() ?
-            texMgr.GetDefaultBlack().get() : texMgr.LoadAsync(material->emissiveMap, true)->GetTexture();
-
-        bool hasRealMetallicRoughnessTexture = !material->metallicRoughnessMap.empty();
-        bool hasRealEmissiveMap = !material->emissiveMap.empty();
-
-        // Update object constants
-        XMMATRIX worldMatrix = transform->WorldMatrix();
-
-        CB_GBufferObject objData;
-        objData.world = XMMatrixTranspose(worldMatrix);
-        objData.worldPrev = XMMatrixTranspose(worldMatrix);  // TODO: Track previous frame's world matrix
-        objData.albedo = material->albedo;
-        objData.metallic = material->metallic;
-        objData.emissive = material->emissive;
-        objData.roughness = material->roughness;
-        objData.emissiveStrength = material->emissiveStrength;
-        objData.hasMetallicRoughnessTexture = hasRealMetallicRoughnessTexture ? 1 : 0;
-        objData.hasEmissiveMap = hasRealEmissiveMap ? 1 : 0;
-        objData.alphaMode = static_cast<int>(material->alphaMode);
-        objData.alphaCutoff = material->alphaCutoff;
-        objData.lightmapIndex = meshRenderer->lightmapInfosIndex;
-        objData.materialID = static_cast<float>(material->materialType);  // EMaterialType → MaterialID
-
-        cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &objData, sizeof(objData));
-        cmdList->SetConstantBufferData(EShaderStage::Pixel, 1, &objData, sizeof(objData));
-
-        // Bind textures
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, albedoTex);
-        cmdList->SetShaderResource(EShaderStage::Pixel, 1, normalTex);
-        cmdList->SetShaderResource(EShaderStage::Pixel, 2, metallicRoughnessTex);
-        cmdList->SetShaderResource(EShaderStage::Pixel, 3, emissiveTex);
-
-        // Draw all meshes
-        for (auto& gpuMesh : meshRenderer->meshes) {
-            if (!gpuMesh) continue;
-
-            cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
-            cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
-            cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
-        }
-    }
-
-    // Unbind render targets before transitioning
-    cmdList->SetRenderTargets(0, nullptr, nullptr);
-
-    // Transition G-Buffer textures from RenderTarget to ShaderResource for consumers
-    cmdList->Barrier(gbuffer.GetAlbedoAO(), EResourceState::RenderTarget, EResourceState::ShaderResource);
-    cmdList->Barrier(gbuffer.GetNormalRoughness(), EResourceState::RenderTarget, EResourceState::ShaderResource);
-    cmdList->Barrier(gbuffer.GetWorldPosMetallic(), EResourceState::RenderTarget, EResourceState::ShaderResource);
-    cmdList->Barrier(gbuffer.GetEmissiveMaterialID(), EResourceState::RenderTarget, EResourceState::ShaderResource);
-    cmdList->Barrier(gbuffer.GetVelocity(), EResourceState::RenderTarget, EResourceState::ShaderResource);
-    cmdList->Barrier(gbuffer.GetDepthBuffer(), EResourceState::DepthWrite, EResourceState::ShaderResource);
-}
 
 // ============================================
 // Descriptor Set Initialization (DX12 only)
@@ -626,9 +484,9 @@ void CGBufferPass::Render(
     ICommandList* cmdList = ctx->GetCommandList();
     if (!cmdList) return;
 
-    // Fallback to legacy path if descriptor sets not available
-    if (!m_perPassSet || !perFrameSet || !m_pso_ds) {
-        Render(camera, scene, gbuffer, viewProjPrev, width, height);
+    // Descriptor set resources must be available
+    if (!m_perPassSet || !m_pso_ds) {
+        CFFLog::Error("[GBufferPass] Descriptor set resources not initialized");
         return;
     }
 

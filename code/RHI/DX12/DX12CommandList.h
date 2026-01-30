@@ -71,13 +71,6 @@ public:
     // Resource Binding
     void SetVertexBuffer(uint32_t slot, IBuffer* buffer, uint32_t stride, uint32_t offset = 0) override;
     void SetIndexBuffer(IBuffer* buffer, EIndexFormat format, uint32_t offset = 0) override;
-    bool SetConstantBufferData(EShaderStage stage, uint32_t slot, const void* data, size_t size) override;
-    void SetShaderResource(EShaderStage stage, uint32_t slot, ITexture* texture) override;
-    void SetShaderResourceBuffer(EShaderStage stage, uint32_t slot, IBuffer* buffer) override;
-    void SetSampler(EShaderStage stage, uint32_t slot, ISampler* sampler) override;
-    void SetUnorderedAccess(uint32_t slot, IBuffer* buffer) override;
-    void SetUnorderedAccessTexture(uint32_t slot, ITexture* texture) override;
-    void SetUnorderedAccessTextureMip(uint32_t slot, ITexture* texture, uint32_t mipLevel) override;
     void ClearUnorderedAccessViewUint(IBuffer* buffer, const uint32_t values[4]) override;
 
     // Descriptor Set Binding (DX12 only)
@@ -107,7 +100,6 @@ public:
 
     // Unbind Operations
     void UnbindRenderTargets() override;
-    void UnbindShaderResources(EShaderStage stage, uint32_t startSlot = 0, uint32_t numSlots = 8) override;
 
     // Debug Events
     void BeginEvent(const wchar_t* name) override;
@@ -184,6 +176,13 @@ private:
     void SetPendingUAV(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
         if (slot < MAX_UAV_SLOTS) { m_pendingUAVCpuHandles[slot] = handle; m_uavDirty = true; }
     }
+    void SetPendingSampler(uint32_t slot, D3D12_CPU_DESCRIPTOR_HANDLE handle) {
+        if (slot < MAX_SAMPLER_SLOTS) { m_pendingSamplerCpuHandles[slot] = handle; m_samplerDirty = true; }
+    }
+    void SetPendingCBV(uint32_t slot, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress) {
+        if (slot < MAX_CBV_SLOTS) { m_pendingCBVs[slot] = gpuAddress; m_cbvDirty = true; }
+    }
+    CDX12DynamicBufferRing* GetDynamicBufferRing() { return m_dynamicBuffer; }
 
 public:
     // Set dynamic buffer ring (called by RenderContext)

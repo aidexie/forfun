@@ -7,6 +7,8 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
+#include "RHI/PerFrameSlots.h"
 #include "Core/FFLog.h"
 #include <algorithm>
 #include <cmath>
@@ -104,15 +106,34 @@ void CLightProbeManager::LoadProbesFromScene(CScene& scene)
     CFFLog::Info("[LightProbeManager] Total light probes loaded: %d", m_probeCount);
 }
 
+// ============================================
+// Descriptor Set Binding (New API - DX12)
+// ============================================
+
+void CLightProbeManager::BindToDescriptorSet(RHI::IDescriptorSet* perFrameSet)
+{
+    using namespace RHI;
+    using namespace PerFrameSlots;
+
+    if (!m_initialized || !perFrameSet) return;
+
+    // Bind LightProbeBuffer (StructuredBuffer) to t15
+    if (m_probeBuffer) {
+        perFrameSet->Bind(BindingSetItem::Buffer_SRV(Tex::LightProbe_Buffer, m_probeBuffer.get()));
+    }
+
+    // Bind CB_LightProbeParams via VolatileCBV to b4
+    perFrameSet->Bind(BindingSetItem::VolatileCBV(CB::LightProbe, &m_params, sizeof(CB_LightProbeParams)));
+}
+
+// ============================================
+// Legacy Binding (DX11 compatibility)
+// ============================================
+
 void CLightProbeManager::Bind(RHI::ICommandList* cmdList)
 {
-    if (!m_initialized || !cmdList) return;
-
-    // t15: LightProbeBuffer (StructuredBuffer)
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 15, m_probeBuffer.get());
-
-    // b5: CB_LightProbeParams (use SetConstantBufferData for DX12 compatibility)
-    cmdList->SetConstantBufferData(RHI::EShaderStage::Pixel, 5, &m_params, sizeof(CB_LightProbeParams));
+    CFFLog::Warning("[LightProbeManager] Legacy binding is disabled - use BindToDescriptorSet() instead");
+    (void)cmdList;
 }
 
 void CLightProbeManager::BlendProbesForPosition(

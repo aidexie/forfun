@@ -4,6 +4,12 @@
 #include <vector>
 #include "RHI/RHIPointers.h"
 
+// Forward declarations
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 class CDebugLinePass {
 public:
     void Initialize();
@@ -25,6 +31,9 @@ public:
     void SetLineThickness(float thickness) { m_lineThickness = thickness; }
     float GetLineThickness() const { return m_lineThickness; }
 
+    // Check if descriptor set mode is available (DX12 only)
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
+
 private:
     struct LineVertex {
         DirectX::XMFLOAT3 position;
@@ -45,10 +54,11 @@ private:
     void CreateBuffers();
     void CreatePipelineState();
     void UpdateVertexBuffer();
+    void initDescriptorSets();
 
     std::vector<LineVertex> m_dynamicLines;
 
-    // RHI resources
+    // Legacy RHI resources (SM 5.0)
     RHI::BufferPtr m_vertexBuffer;
     RHI::BufferPtr m_cbPerFrameVS;
     RHI::BufferPtr m_cbPerFrameGS;
@@ -56,6 +66,14 @@ private:
     RHI::ShaderPtr m_gs;
     RHI::ShaderPtr m_ps;
     RHI::PipelineStatePtr m_pso;
+
+    // Descriptor set resources (SM 5.1, DX12 only)
+    RHI::ShaderPtr m_vs_ds;
+    RHI::ShaderPtr m_gs_ds;
+    RHI::ShaderPtr m_ps_ds;
+    RHI::PipelineStatePtr m_pso_ds;
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
 
     unsigned int m_maxVertices = 10000;  // Max vertices per frame
     float m_lineThickness = 2.0f;

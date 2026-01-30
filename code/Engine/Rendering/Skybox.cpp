@@ -3,11 +3,13 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/Loader/HdrLoader.h"
 #include "Core/Loader/KTXLoader.h"
 #include "Core/FFLog.h"
 #include "Core/RenderConfig.h"
+#include "Core/PathManager.h"
 #include <vector>
 #include <fstream>
 #include <sstream>
@@ -60,6 +62,9 @@ bool CSkybox::Initialize(const std::string& hdrPath, int cubemapSize) {
     // Create sampler
     createSampler();
 
+    // Initialize descriptor sets (DX12)
+    initDescriptorSets();
+
     m_initialized = true;
     return true;
 }
@@ -93,6 +98,9 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
     // Create sampler
     createSampler();
 
+    // Initialize descriptor sets (DX12)
+    initDescriptorSets();
+
     m_initialized = true;
     CFFLog::Info("Skybox: Initialized from KTX2 (%dx%d)", m_envTexture->GetWidth(), m_envTexture->GetHeight());
 
@@ -100,6 +108,28 @@ bool CSkybox::InitializeFromKTX2(const std::string& ktx2Path) {
 }
 
 void CSkybox::Shutdown() {
+    // Clean up descriptor set resources
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        m_perPassSet.reset();
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+        // Clean up conversion pass descriptor set resources
+        m_convSet.reset();
+        if (m_convLayout) {
+            ctx->DestroyDescriptorSetLayout(m_convLayout);
+            m_convLayout = nullptr;
+        }
+    }
+    m_pso_ds.reset();
+    m_vs_ds.reset();
+    m_ps_ds.reset();
+    m_convPSO_ds.reset();
+    m_convVS_ds.reset();
+    m_convPS_ds.reset();
+
     m_pso.reset();
     m_vs.reset();
     m_ps.reset();
@@ -112,7 +142,7 @@ void CSkybox::Shutdown() {
 }
 
 void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
-    if (!m_initialized || !m_envTexture || !m_pso) return;
+    if (!m_initialized || !m_envTexture) return;
 
     IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
     ICommandList* cmdList = ctx->GetCommandList();
@@ -127,23 +157,30 @@ void CSkybox::Render(const XMMATRIX& view, const XMMATRIX& proj) {
     cb.useReversedZ = UseReversedZ() ? 1 : 0;
     cb.padding[0] = cb.padding[1] = cb.padding[2] = 0;
 
-    // Set pipeline state (includes rasterizer, depth stencil, blend states)
-    cmdList->SetPipelineState(m_pso.get());
-    cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+    // Use descriptor set path if available (DX12)
+    if (m_pso_ds && m_perPassSet) {
+        cmdList->SetPipelineState(m_pso_ds.get());
+        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
 
-    // Set vertex and index buffers
-    cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(SkyboxVertex), 0);
-    cmdList->SetIndexBuffer(m_indexBuffer.get(), EIndexFormat::UInt32, 0);
+        // Set vertex and index buffers
+        cmdList->SetVertexBuffer(0, m_vertexBuffer.get(), sizeof(SkyboxVertex), 0);
+        cmdList->SetIndexBuffer(m_indexBuffer.get(), EIndexFormat::UInt32, 0);
 
-    // Set constant buffer (use SetConstantBufferData for DX12 compatibility)
-    cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cb, sizeof(CB_SkyboxTransform));
+        // Bind descriptor set with volatile CBV, texture, and sampler
+        m_perPassSet->Bind({
+            BindingSetItem::VolatileCBV(0, &cb, sizeof(cb)),
+            BindingSetItem::Texture_SRV(0, m_envTexture.get()),
+            BindingSetItem::Sampler(0, m_sampler.get()),
+        });
+        cmdList->BindDescriptorSet(1, m_perPassSet.get());
 
-    // Set texture and sampler
-    cmdList->SetShaderResource(EShaderStage::Pixel, 0, m_envTexture.get());
-    cmdList->SetSampler(EShaderStage::Pixel, 0, m_sampler.get());
+        // Draw
+        cmdList->DrawIndexed(m_indexCount, 0, 0);
+        return;
+    }
 
-    // Draw
-    cmdList->DrawIndexed(m_indexCount, 0, 0);
+    // Fallback: descriptor set path not available
+    CFFLog::Warning("[Skybox] Descriptor set path not available, skipping render");
 }
 
 void CSkybox::createCubeMesh() {
@@ -307,6 +344,97 @@ void CSkybox::createSampler() {
 }
 
 // ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CSkybox::initDescriptorSets() {
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx || ctx->GetBackend() != EBackend::DX12) return;
+
+    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Compile SM 5.1 shaders
+    std::string vsSource = LoadShaderSource(shaderDir + "Skybox_DS.vs.hlsl");
+    std::string psSource = LoadShaderSource(shaderDir + "Skybox_DS.ps.hlsl");
+    if (vsSource.empty() || psSource.empty()) {
+        CFFLog::Warning("[Skybox] Failed to load DS shaders");
+        return;
+    }
+
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource.c_str(), "main", "vs_5_1", nullptr, debugShaders);
+    SCompiledShader psCompiled = CompileShaderFromSource(psSource.c_str(), "main", "ps_5_1", nullptr, debugShaders);
+    if (!vsCompiled.success || !psCompiled.success) {
+        CFFLog::Error("[Skybox] DS shader compile error: %s %s",
+                      vsCompiled.errorMessage.c_str(), psCompiled.errorMessage.c_str());
+        return;
+    }
+
+    ShaderDesc vsDesc(EShaderType::Vertex, vsCompiled.bytecode.data(), vsCompiled.bytecode.size());
+    vsDesc.debugName = "Skybox_DS_VS";
+    ShaderDesc psDesc(EShaderType::Pixel, psCompiled.bytecode.data(), psCompiled.bytecode.size());
+    psDesc.debugName = "Skybox_DS_PS";
+    m_vs_ds.reset(ctx->CreateShader(vsDesc));
+    m_ps_ds.reset(ctx->CreateShader(psDesc));
+
+    if (!m_vs_ds || !m_ps_ds) {
+        CFFLog::Error("[Skybox] Failed to create DS shaders");
+        return;
+    }
+
+    // Create PerPass layout (Set 1): CBV + SRV + Sampler
+    BindingLayoutDesc layoutDesc("Skybox_PerPass");
+    layoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_SkyboxTransform)));
+    layoutDesc.AddItem(BindingLayoutItem::Texture_SRV(0));
+    layoutDesc.AddItem(BindingLayoutItem::Sampler(0));
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[Skybox] Failed to create descriptor set layout");
+        return;
+    }
+
+    auto* set = ctx->AllocateDescriptorSet(m_perPassLayout);
+    m_perPassSet = std::unique_ptr<IDescriptorSet, std::function<void(IDescriptorSet*)>>(
+        set, [ctx](IDescriptorSet* s) { ctx->FreeDescriptorSet(s); });
+
+    if (!m_perPassSet) {
+        CFFLog::Error("[Skybox] Failed to allocate descriptor set");
+        return;
+    }
+
+    // Create PSO with descriptor set layout
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_vs_ds.get();
+    psoDesc.pixelShader = m_ps_ds.get();
+    psoDesc.inputLayout = {{ EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 }};
+    psoDesc.rasterizer.cullMode = ECullMode::None;
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.depthClipEnable = true;
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = false;
+    psoDesc.depthStencil.depthFunc = GetDepthComparisonFunc(true);
+    psoDesc.blend.blendEnable = false;
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+    psoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+    psoDesc.depthStencilFormat = ETextureFormat::D32_FLOAT;
+    psoDesc.setLayouts[1] = m_perPassLayout;
+    psoDesc.debugName = "Skybox_DS_PSO";
+
+    m_pso_ds.reset(ctx->CreatePipelineState(psoDesc));
+    if (!m_pso_ds) {
+        CFFLog::Error("[Skybox] Failed to create DS PSO");
+        return;
+    }
+
+    CFFLog::Info("[Skybox] Descriptor set path initialized");
+}
+
+// ============================================
 // HDR to Cubemap Conversion using RHI
 // ============================================
 
@@ -363,62 +491,6 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         return;
     }
 
-    // Load conversion shaders
-    std::string convVsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.vs.hlsl");
-    std::string convPsSource = LoadShaderSource("../source/code/Shader/EquirectToCubemap.ps.hlsl");
-
-    if (convVsSource.empty() || convPsSource.empty()) {
-        CFFLog::Error("Failed to load EquirectToCubemap shader files!");
-        return;
-    }
-
-#if defined(_DEBUG)
-    bool debugShaders = true;
-#else
-    bool debugShaders = false;
-#endif
-
-    SCompiledShader convVsCompiled = CompileShaderFromSource(convVsSource, "main", "vs_5_0", nullptr, debugShaders);
-    if (!convVsCompiled.success) {
-        CFFLog::Error("EquirectToCubemap VS compile error: %s", convVsCompiled.errorMessage.c_str());
-        return;
-    }
-
-    SCompiledShader convPsCompiled = CompileShaderFromSource(convPsSource, "main", "ps_5_0", nullptr, debugShaders);
-    if (!convPsCompiled.success) {
-        CFFLog::Error("EquirectToCubemap PS compile error: %s", convPsCompiled.errorMessage.c_str());
-        return;
-    }
-
-    // Create shaders
-    ShaderDesc convVsDesc;
-    convVsDesc.type = EShaderType::Vertex;
-    convVsDesc.bytecode = convVsCompiled.bytecode.data();
-    convVsDesc.bytecodeSize = convVsCompiled.bytecode.size();
-    ShaderPtr convVS(ctx->CreateShader(convVsDesc));
-
-    ShaderDesc convPsDesc;
-    convPsDesc.type = EShaderType::Pixel;
-    convPsDesc.bytecode = convPsCompiled.bytecode.data();
-    convPsDesc.bytecodeSize = convPsCompiled.bytecode.size();
-    ShaderPtr convPS(ctx->CreateShader(convPsDesc));
-
-    // Create conversion pipeline state
-    PipelineStateDesc convPsoDesc;
-    convPsoDesc.vertexShader = convVS.get();
-    convPsoDesc.pixelShader = convPS.get();
-    convPsoDesc.inputLayout = {
-        { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 }
-    };
-    convPsoDesc.rasterizer.cullMode = ECullMode::None;
-    convPsoDesc.rasterizer.fillMode = EFillMode::Solid;
-    convPsoDesc.depthStencil.depthEnable = false;
-    convPsoDesc.blend.blendEnable = false;
-    convPsoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
-    convPsoDesc.debugName = "Skybox_HDRConvert_PSO";
-
-    PipelineStatePtr convPso(ctx->CreatePipelineState(convPsoDesc));
-
     // Create sampler for conversion
     SamplerDesc convSamplerDesc;
     convSamplerDesc.filter = EFilter::MinMagMipLinear;
@@ -451,13 +523,6 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
     tempIbDesc.usage = EBufferUsage::Index;
     BufferPtr tempIB(ctx->CreateBuffer(tempIbDesc, indices));
 
-    // Create constant buffer for view-projection matrix
-    BufferDesc tempCbDesc;
-    tempCbDesc.size = sizeof(XMMATRIX);
-    tempCbDesc.usage = EBufferUsage::Constant;
-    tempCbDesc.cpuAccess = ECPUAccess::Write;
-    BufferPtr tempCB(ctx->CreateBuffer(tempCbDesc, nullptr));
-
     // Setup capture views for each cubemap face
     XMMATRIX captureProjection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 1.0f, 0.1f, 10.0f);
     XMMATRIX captureViews[] = {
@@ -469,40 +534,127 @@ void CSkybox::convertEquirectToCubemapLegacy(const std::string& hdrPath, int siz
         XMMatrixLookAtLH(XMVectorSet(0,0,0,1), XMVectorSet( 0, 0,-1,1), XMVectorSet(0, 1, 0,1))   // -Z
     };
 
-    // Render to each cubemap face using RHI
-    for (int face = 0; face < 6; ++face) {
-        // Set render target to this face
-        cmdList->SetRenderTargetSlice(m_envTexture.get(), face, nullptr);
+    // Use descriptor set path if available (DX12)
+    if (ctx->GetBackend() == EBackend::DX12) {
+        std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
 
-        // Set viewport and scissor rect (DX12 requires both)
-        cmdList->SetViewport(0, 0, (float)size, (float)size, 0.0f, 1.0f);
-        cmdList->SetScissorRect(0, 0, size, size);
+#if defined(_DEBUG)
+        bool debugShaders = true;
+#else
+        bool debugShaders = false;
+#endif
 
-        // Clear
-        float clearColor[] = { 0, 0, 0, 1 };
-        cmdList->ClearRenderTarget(m_envTexture.get(), clearColor);
+        // Compile SM 5.1 shaders for conversion
+        std::string convVsSource = LoadShaderSource(shaderDir + "EquirectToCubemap_DS.vs.hlsl");
+        std::string convPsSource = LoadShaderSource(shaderDir + "EquirectToCubemap_DS.ps.hlsl");
+        if (convVsSource.empty() || convPsSource.empty()) {
+            CFFLog::Error("[Skybox] Failed to load EquirectToCubemap_DS shaders");
+            return;
+        }
 
-        // Update transform constant buffer
-        XMMATRIX vp_mat = XMMatrixTranspose(captureViews[face] * captureProjection);
+        SCompiledShader convVsCompiled = CompileShaderFromSource(convVsSource.c_str(), "main", "vs_5_1", nullptr, debugShaders);
+        SCompiledShader convPsCompiled = CompileShaderFromSource(convPsSource.c_str(), "main", "ps_5_1", nullptr, debugShaders);
+        if (!convVsCompiled.success || !convPsCompiled.success) {
+            CFFLog::Error("[Skybox] EquirectToCubemap_DS shader compile error: %s %s",
+                          convVsCompiled.errorMessage.c_str(), convPsCompiled.errorMessage.c_str());
+            return;
+        }
 
-        // Set pipeline state and resources
-        cmdList->SetPipelineState(convPso.get());
-        cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-        cmdList->SetVertexBuffer(0, tempVB.get(), 12, 0);  // 12 = 3 floats * 4 bytes
-        cmdList->SetIndexBuffer(tempIB.get(), EIndexFormat::UInt32, 0);
-        cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &vp_mat, sizeof(XMMATRIX));
-        cmdList->SetShaderResource(EShaderStage::Pixel, 0, equirectTexture.get());
-        cmdList->SetSampler(EShaderStage::Pixel, 0, convSampler.get());
+        ShaderDesc convVsDesc(EShaderType::Vertex, convVsCompiled.bytecode.data(), convVsCompiled.bytecode.size());
+        convVsDesc.debugName = "Skybox_Conv_DS_VS";
+        ShaderDesc convPsDesc(EShaderType::Pixel, convPsCompiled.bytecode.data(), convPsCompiled.bytecode.size());
+        convPsDesc.debugName = "Skybox_Conv_DS_PS";
+        m_convVS_ds.reset(ctx->CreateShader(convVsDesc));
+        m_convPS_ds.reset(ctx->CreateShader(convPsDesc));
 
-        // Draw
-        cmdList->DrawIndexed(36, 0, 0);
+        if (!m_convVS_ds || !m_convPS_ds) {
+            CFFLog::Error("[Skybox] Failed to create conversion DS shaders");
+            return;
+        }
+
+        // Create conversion layout (Set 1): VolatileCBV + SRV + Sampler
+        BindingLayoutDesc convLayoutDesc("Skybox_Conv");
+        convLayoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(XMMATRIX)));
+        convLayoutDesc.AddItem(BindingLayoutItem::Texture_SRV(0));
+        convLayoutDesc.AddItem(BindingLayoutItem::Sampler(0));
+
+        m_convLayout = ctx->CreateDescriptorSetLayout(convLayoutDesc);
+        if (!m_convLayout) {
+            CFFLog::Error("[Skybox] Failed to create conversion descriptor set layout");
+            return;
+        }
+
+        auto* convSet = ctx->AllocateDescriptorSet(m_convLayout);
+        m_convSet = std::unique_ptr<IDescriptorSet, std::function<void(IDescriptorSet*)>>(
+            convSet, [ctx](IDescriptorSet* s) { ctx->FreeDescriptorSet(s); });
+
+        if (!m_convSet) {
+            CFFLog::Error("[Skybox] Failed to allocate conversion descriptor set");
+            return;
+        }
+
+        // Create conversion PSO with descriptor set layout
+        PipelineStateDesc convPsoDesc;
+        convPsoDesc.vertexShader = m_convVS_ds.get();
+        convPsoDesc.pixelShader = m_convPS_ds.get();
+        convPsoDesc.inputLayout = {{ EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 }};
+        convPsoDesc.rasterizer.cullMode = ECullMode::None;
+        convPsoDesc.rasterizer.fillMode = EFillMode::Solid;
+        convPsoDesc.depthStencil.depthEnable = false;
+        convPsoDesc.blend.blendEnable = false;
+        convPsoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+        convPsoDesc.renderTargetFormats = { ETextureFormat::R16G16B16A16_FLOAT };
+        convPsoDesc.depthStencilFormat = ETextureFormat::Unknown;
+        convPsoDesc.setLayouts[1] = m_convLayout;
+        convPsoDesc.debugName = "Skybox_Conv_DS_PSO";
+
+        m_convPSO_ds.reset(ctx->CreatePipelineState(convPsoDesc));
+        if (!m_convPSO_ds) {
+            CFFLog::Error("[Skybox] Failed to create conversion DS PSO");
+            return;
+        }
+
+        // Render to each cubemap face using descriptor sets
+        for (int face = 0; face < 6; ++face) {
+            // Set render target to this face
+            cmdList->SetRenderTargetSlice(m_envTexture.get(), face, nullptr);
+
+            // Set viewport and scissor rect (DX12 requires both)
+            cmdList->SetViewport(0, 0, (float)size, (float)size, 0.0f, 1.0f);
+            cmdList->SetScissorRect(0, 0, size, size);
+
+            // Clear
+            float clearColor[] = { 0, 0, 0, 1 };
+            cmdList->ClearRenderTarget(m_envTexture.get(), clearColor);
+
+            // Update transform constant buffer
+            XMMATRIX vp_mat = XMMatrixTranspose(captureViews[face] * captureProjection);
+
+            // Set pipeline state and resources
+            cmdList->SetPipelineState(m_convPSO_ds.get());
+            cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
+            cmdList->SetVertexBuffer(0, tempVB.get(), 12, 0);  // 12 = 3 floats * 4 bytes
+            cmdList->SetIndexBuffer(tempIB.get(), EIndexFormat::UInt32, 0);
+
+            // Bind descriptor set with volatile CBV, texture, and sampler
+            m_convSet->Bind({
+                BindingSetItem::VolatileCBV(0, &vp_mat, sizeof(XMMATRIX)),
+                BindingSetItem::Texture_SRV(0, equirectTexture.get()),
+                BindingSetItem::Sampler(0, convSampler.get()),
+            });
+            cmdList->BindDescriptorSet(1, m_convSet.get());
+
+            // Draw
+            cmdList->DrawIndexed(36, 0, 0);
+        }
+    } else {
+        // DX11 fallback - legacy binding not supported
+        CFFLog::Error("[Skybox] HDR conversion requires DX12 backend (legacy binding disabled)");
+        return;
     }
 
     // Unbind render target
     cmdList->UnbindRenderTargets();
-
-    // // Generate mipmaps
-    // cmdList->GenerateMips(m_envTexture.get());
 
     CFFLog::Info("Skybox: Environment cubemap ready (%dx%d with mipmaps)", size, size);
 }

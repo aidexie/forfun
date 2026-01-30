@@ -11,8 +11,18 @@
 class CScene;
 struct SDirectionalLight;
 
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // CShadowPass: Renders shadow map from light's perspective
 // Used by CMainPass to apply shadows in final rendering
+//
+// Descriptor Set Model (DX12):
+// - Set 1 (PerPass, space1): CB_ShadowPass (lightSpaceVP, cascadeIndex)
+// - Set 3 (PerDraw, space3): CB_PerDraw (World matrix only)
+// Note: ShadowPass doesn't need Set 0 (PerFrame) or Set 2 (PerMaterial) - depth-only
 class CShadowPass
 {
 public:
@@ -47,8 +57,15 @@ public:
     // Get complete shadow output bundle for MainPass
     const Output& GetOutput() const { return m_output; }
 
+    // Check if descriptor set mode is available (DX12 only)
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_pso_ds != nullptr; }
+
+    // Create PSO with descriptor set layouts (called after PerFrame layout is available)
+    void CreatePSOWithLayouts(RHI::IDescriptorSetLayout* perFrameLayout);
+
 private:
     void ensureShadowMapArray(uint32_t size, int cascadeCount);
+    void initDescriptorSets();
 
     // Tight frustum fitting helpers
     std::array<DirectX::XMFLOAT3, 8> extractFrustumCorners(
@@ -105,4 +122,18 @@ private:
 
     // Output bundle for MainPass
     Output m_output;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    RHI::ShaderPtr m_depthVS_ds;
+    RHI::PipelineStatePtr m_pso_ds;
+
+    // Descriptor set layouts
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSetLayout* m_perDrawLayout = nullptr;
+
+    // Descriptor sets
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+    RHI::IDescriptorSet* m_perDrawSet = nullptr;
 };

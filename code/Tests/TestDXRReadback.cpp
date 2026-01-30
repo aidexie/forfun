@@ -8,6 +8,7 @@
 #include "RHI/ICommandList.h"
 #include "RHI/RHIResources.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/RHIRayTracing.h"
 #include "RHI/ShaderCompiler.h"
 
@@ -48,6 +49,10 @@ static RHI::IShader* s_shaderLib = nullptr;
 static RHI::IShader* s_computeShader = nullptr;
 static RHI::IPipelineState* s_computePSO = nullptr;
 
+// Descriptor set resources (shared between modes)
+static RHI::IDescriptorSetLayout* s_dsLayout = nullptr;
+static RHI::IDescriptorSet* s_descriptorSet = nullptr;
+
 // Acceleration structure resources
 static RHI::IBuffer* s_cubeVertexBuffer = nullptr;
 static RHI::IBuffer* s_cubeIndexBuffer = nullptr;
@@ -73,11 +78,11 @@ struct SRayPayload {
     float hitT;      // Distance to hit, -1 if miss
 };
 
-// TLAS at t0
-RaytracingAccelerationStructure g_Scene : register(t0);
+// TLAS at t0, space1 (descriptor set binding)
+RaytracingAccelerationStructure g_Scene : register(t0, space1);
 
-// Output buffer at u0
-RWByteAddressBuffer g_Output : register(u0);
+// Output buffer at u0, space1 (descriptor set binding)
+RWByteAddressBuffer g_Output : register(u0, space1);
 
 [shader("raygeneration")]
 void MinimalRayGen() {
@@ -159,8 +164,8 @@ void MinimalMiss(inout SRayPayload payload : SV_RayPayload) {
 // Compute Shader (Mode 2) - Same output format as DXR
 // ============================================
 static const char* s_computeShaderSource = R"(
-// Output buffer - same layout as DXR shader
-RWByteAddressBuffer g_Output : register(u0);
+// Output buffer - same layout as DXR shader (space1 for descriptor set binding)
+RWByteAddressBuffer g_Output : register(u0, space1);
 
 [numthreads(4, 4, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID, uint3 dims : SV_GroupID)
@@ -187,6 +192,12 @@ void CSMain(uint3 DTid : SV_DispatchThreadID, uint3 dims : SV_GroupID)
 )";
 
 static void Cleanup() {
+    auto* rhiCtx = RHI::CRHIManager::Instance().GetRenderContext();
+
+    // Descriptor set resources
+    if (s_descriptorSet) { rhiCtx->FreeDescriptorSet(s_descriptorSet); s_descriptorSet = nullptr; }
+    if (s_dsLayout) { rhiCtx->DestroyDescriptorSetLayout(s_dsLayout); s_dsLayout = nullptr; }
+
     // Shared resources
     delete s_outputBuffer; s_outputBuffer = nullptr;
     delete s_readbackBuffer; s_readbackBuffer = nullptr;
@@ -688,6 +699,21 @@ public:
                 s_sbt = rhiCtx->CreateShaderBindingTable(sbtDesc);
                 ASSERT_NOT_NULL(ctx, s_sbt, "Shader binding table creation");
 
+                // Create descriptor set layout for ray tracing (space1: t0=TLAS, u0=UAV)
+                CFFLog::Info("Creating descriptor set layout for ray tracing...");
+                RHI::BindingLayoutDesc layoutDesc("TestDXR_RayTracing_PerPass");
+                layoutDesc.AddItem(RHI::BindingLayoutItem::AccelerationStructure(0));  // t0 in space1
+                layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_UAV(0));             // u0 in space1
+
+                s_dsLayout = rhiCtx->CreateDescriptorSetLayout(layoutDesc);
+                ASSERT_NOT_NULL(ctx, s_dsLayout, "Descriptor set layout creation");
+                CFFLog::Info("  Descriptor set layout created");
+
+                // Allocate descriptor set
+                s_descriptorSet = rhiCtx->AllocateDescriptorSet(s_dsLayout);
+                ASSERT_NOT_NULL(ctx, s_descriptorSet, "Descriptor set allocation");
+                CFFLog::Info("  Descriptor set allocated");
+
                 CFFLog::Info("Frame 5 complete - ray tracing pipeline created");
 
             } else {
@@ -698,7 +724,7 @@ public:
                 RHI::SCompiledShader compiled = RHI::CompileShaderFromSource(
                     s_computeShaderSource,
                     "CSMain",
-                    "cs_5_0",
+                    "cs_5_1",  // SM 5.1 for space support
                     nullptr,
                     true  // debug
                 );
@@ -719,10 +745,25 @@ public:
                 s_computeShader = rhiCtx->CreateShader(shaderDesc);
                 ASSERT_NOT_NULL(ctx, s_computeShader, "Compute shader creation");
 
-                // Create compute pipeline state
+                // Create descriptor set layout for compute (space1: u0=UAV)
+                CFFLog::Info("Creating descriptor set layout for compute...");
+                RHI::BindingLayoutDesc layoutDesc("TestDXR_Compute_PerPass");
+                layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_UAV(0));  // u0 in space1
+
+                s_dsLayout = rhiCtx->CreateDescriptorSetLayout(layoutDesc);
+                ASSERT_NOT_NULL(ctx, s_dsLayout, "Descriptor set layout creation");
+                CFFLog::Info("  Descriptor set layout created");
+
+                // Allocate descriptor set
+                s_descriptorSet = rhiCtx->AllocateDescriptorSet(s_dsLayout);
+                ASSERT_NOT_NULL(ctx, s_descriptorSet, "Descriptor set allocation");
+                CFFLog::Info("  Descriptor set allocated");
+
+                // Create compute pipeline state with descriptor set layout
                 RHI::ComputePipelineDesc psoDesc;
                 psoDesc.computeShader = s_computeShader;
                 psoDesc.debugName = "TestDXR_ComputePSO";
+                psoDesc.setLayouts[1] = s_dsLayout;  // space1
 
                 s_computePSO = rhiCtx->CreateComputePipelineState(psoDesc);
                 ASSERT_NOT_NULL(ctx, s_computePSO, "Compute PSO creation");
@@ -797,7 +838,7 @@ public:
                 // ========================================
                 // Ray Tracing Dispatch (Mode 1)
                 // ========================================
-                if (!s_pipeline || !s_sbt || !s_tlas) {
+                if (!s_pipeline || !s_sbt || !s_tlas || !s_descriptorSet) {
                     CFFLog::Warning("Skipping - ray tracing resources not created");
                     return;
                 }
@@ -810,12 +851,13 @@ public:
                 CFFLog::Info("Setting ray tracing pipeline...");
                 cmdList->SetRayTracingPipelineState(s_pipeline);
 
-                // Bind resources using uniform interface
-                CFFLog::Info("Binding TLAS to t0...");
-                cmdList->SetAccelerationStructure(0, s_tlas);
-
-                CFFLog::Info("Binding UAV buffer to u0...");
-                cmdList->SetUnorderedAccess(0, s_outputBuffer);
+                // Bind resources via descriptor set
+                CFFLog::Info("Binding TLAS and UAV via descriptor set...");
+                s_descriptorSet->Bind({
+                    RHI::BindingSetItem::AccelerationStructure(0, s_tlas),  // t0 in space1
+                    RHI::BindingSetItem::Buffer_UAV(0, s_outputBuffer),     // u0 in space1
+                });
+                cmdList->BindDescriptorSet(1, s_descriptorSet);
 
                 // Dispatch rays
                 CFFLog::Info("Dispatching rays: %u x %u x %u", DISPATCH_WIDTH, DISPATCH_HEIGHT, DISPATCH_DEPTH);
@@ -834,7 +876,7 @@ public:
                 // ========================================
                 // Compute Dispatch (Mode 2)
                 // ========================================
-                if (!s_computePSO) {
+                if (!s_computePSO || !s_descriptorSet) {
                     CFFLog::Warning("Skipping - compute PSO not created");
                     return;
                 }
@@ -843,9 +885,12 @@ public:
                 CFFLog::Info("Setting compute pipeline...");
                 cmdList->SetPipelineState(s_computePSO);
 
-                // Bind UAV
-                CFFLog::Info("Binding UAV buffer to u0...");
-                cmdList->SetUnorderedAccess(0, s_outputBuffer);
+                // Bind UAV via descriptor set
+                CFFLog::Info("Binding UAV buffer via descriptor set...");
+                s_descriptorSet->Bind({
+                    RHI::BindingSetItem::Buffer_UAV(0, s_outputBuffer),  // u0 in space1
+                });
+                cmdList->BindDescriptorSet(1, s_descriptorSet);
 
                 // Dispatch compute shader (4x4 threads, 1 group)
                 CFFLog::Info("Dispatching compute: 1 thread group (4x4 threads)");

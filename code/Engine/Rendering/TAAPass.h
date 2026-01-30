@@ -6,6 +6,8 @@
 namespace RHI {
     class ICommandList;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -112,12 +114,6 @@ private:
     void createTextures(uint32_t width, uint32_t height);
     void ensureTextures(uint32_t width, uint32_t height);
 
-    // Shaders & PSOs
-    RHI::ShaderPtr m_taa_cs;
-    RHI::ShaderPtr m_sharpen_cs;
-    RHI::PipelineStatePtr m_taa_pso;
-    RHI::PipelineStatePtr m_sharpen_pso;
-
     // Textures
     RHI::TexturePtr m_history[2];  // Double-buffered history
     RHI::TexturePtr m_output;
@@ -135,4 +131,31 @@ private:
     uint32_t m_history_index = 0;
     bool m_history_valid = false;
     bool m_initialized = false;
+
+    // ============================================
+    // Legacy Shaders/PSOs (SM 5.0, DX11 fallback)
+    // ============================================
+    RHI::ShaderPtr m_taa_cs;
+    RHI::ShaderPtr m_sharpen_cs;
+    RHI::PipelineStatePtr m_taa_pso;
+    RHI::PipelineStatePtr m_sharpen_pso;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_taa_cs_ds;
+    RHI::ShaderPtr m_sharpen_cs_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_taa_pso_ds;
+    RHI::PipelineStatePtr m_sharpen_pso_ds;
+
+    // Unified compute layout (shared across all compute passes)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_taa_pso_ds != nullptr; }
 };

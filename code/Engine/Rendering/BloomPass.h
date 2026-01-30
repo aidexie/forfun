@@ -5,6 +5,11 @@
 
 struct SBloomSettings;
 
+namespace RHI {
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
+}
+
 // CBloomPass: HDR Bloom post-processing effect using Dual Kawase Blur
 // Creates a soft glow effect from bright pixels in the HDR buffer
 //
@@ -44,18 +49,6 @@ private:
     uint32_t m_mipWidth[kMipCount] = {};
     uint32_t m_mipHeight[kMipCount] = {};
 
-    // Shaders (embedded in .cpp)
-    RHI::ShaderPtr m_fullscreenVS;
-    RHI::ShaderPtr m_thresholdPS;
-    RHI::ShaderPtr m_downsamplePS;
-    RHI::ShaderPtr m_upsamplePS;
-
-    // Pipeline states
-    RHI::PipelineStatePtr m_thresholdPSO;
-    RHI::PipelineStatePtr m_downsamplePSO;
-    RHI::PipelineStatePtr m_upsamplePSO;       // Opaque write (for first upsample)
-    RHI::PipelineStatePtr m_upsampleBlendPSO;  // Additive blend (for accumulation)
-
     // Resources
     RHI::BufferPtr m_vertexBuffer;
     RHI::SamplerPtr m_linearSampler;
@@ -71,7 +64,28 @@ private:
 
     void ensureMipChain(uint32_t width, uint32_t height);
     void createFullscreenQuad();
-    void createShaders();
-    void createPSOs();
     void createBlackTexture();
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_fullscreenVS_ds;
+    RHI::ShaderPtr m_thresholdPS_ds;
+    RHI::ShaderPtr m_downsamplePS_ds;
+    RHI::ShaderPtr m_upsamplePS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_thresholdPSO_ds;
+    RHI::PipelineStatePtr m_downsamplePSO_ds;
+    RHI::PipelineStatePtr m_upsamplePSO_ds;
+    RHI::PipelineStatePtr m_upsampleBlendPSO_ds;
+
+    // Descriptor set layout and set
+    RHI::IDescriptorSetLayout* m_perPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_perPassLayout != nullptr && m_thresholdPSO_ds != nullptr; }
 };

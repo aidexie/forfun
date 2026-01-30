@@ -6,6 +6,8 @@
 namespace RHI {
     class ICommandList;
     class ITexture;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // ============================================
@@ -98,21 +100,9 @@ private:
     void createTextures(uint32_t width, uint32_t height);
     void createSamplers();
 
-    // Dispatch helpers
-    void dispatchCopyDepth(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer);
-    void dispatchBuildMip(RHI::ICommandList* cmdList, uint32_t mipLevel);
-
-    // ============================================
-    // Compute Shaders
-    // ============================================
-    RHI::ShaderPtr m_copyDepthCS;     // Mip 0: copy from depth buffer
-    RHI::ShaderPtr m_buildMipCS;      // Mip 1+: MAX downsample
-
-    // ============================================
-    // Pipeline States
-    // ============================================
-    RHI::PipelineStatePtr m_copyDepthPSO;
-    RHI::PipelineStatePtr m_buildMipPSO;
+    // Dispatch helpers (descriptor set path)
+    void dispatchCopyDepth_DS(RHI::ICommandList* cmdList, RHI::ITexture* depthBuffer);
+    void dispatchBuildMip_DS(RHI::ICommandList* cmdList, uint32_t mipLevel);
 
     // ============================================
     // Hi-Z Pyramid Texture
@@ -132,4 +122,19 @@ private:
     uint32_t m_height = 0;
     uint32_t m_mipCount = 0;
     bool m_initialized = false;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    RHI::ShaderPtr m_copyDepthCS_ds;
+    RHI::ShaderPtr m_buildMipCS_ds;
+    RHI::PipelineStatePtr m_copyDepthPSO_ds;
+    RHI::PipelineStatePtr m_buildMipPSO_ds;
+
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_copyDepthPSO_ds != nullptr; }
 };

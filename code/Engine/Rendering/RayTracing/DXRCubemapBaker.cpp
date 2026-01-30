@@ -7,6 +7,7 @@
 #include "../../../RHI/RHIResources.h"
 #include "../../../RHI/RHIRayTracing.h"
 #include "../../../RHI/ShaderCompiler.h"
+#include "../../../RHI/IDescriptorSet.h"
 #include "../../../Core/FFLog.h"
 #include "../../../Core/PathManager.h"
 #include "../../../Core/SphericalHarmonics.h"
@@ -69,6 +70,9 @@ bool CDXRCubemapBaker::Initialize() {
         return false;
     }
 
+    // Initialize descriptor sets (DX12 only)
+    InitDescriptorSets();
+
     m_isReady = true;
     CFFLog::Info("[CubemapBaker] Initialized successfully");
     return true;
@@ -86,6 +90,19 @@ void CDXRCubemapBaker::Shutdown() {
     m_cubemapOutputBuffer.reset();
     m_cubemapReadbackBuffer.reset();
     m_currentBatchSize = 0;
+
+    // Cleanup descriptor set resources
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+    }
 
     if (m_asManager) {
         m_asManager->Shutdown();
@@ -695,50 +712,59 @@ void CDXRCubemapBaker::DispatchBakeBrick(
     // Set pipeline
     cmdList->SetRayTracingPipelineState(m_pipeline.get());
 
-    // b0: Constant buffer
-    cmdList->SetConstantBufferData(RHI::EShaderStage::Compute, 0, &params, sizeof(params));
+    // Use descriptor set path if available (DX12)
+    if (IsDescriptorSetModeAvailable()) {
+        // Bind all resources via descriptor set
+        m_perPassSet->Bind(RHI::BindingSetItem::VolatileCBV(0, &params, sizeof(CB_BatchBakeParams)));
 
-    // t0: TLAS
-    auto* tlas = m_asManager->GetTLAS();
-    if (tlas) {
-        cmdList->SetAccelerationStructure(0, tlas);
-    }
+        // t0: TLAS
+        auto* tlas = m_asManager->GetTLAS();
+        if (tlas) {
+            m_perPassSet->Bind(RHI::BindingSetItem::AccelerationStructure(0, tlas));
+        }
 
-    // t1: Skybox
-    if (m_skyboxTexture) {
-        cmdList->SetShaderResource(RHI::EShaderStage::Compute, 1, m_skyboxTexture);
-    }
+        // t1: Skybox
+        if (m_skyboxTexture) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Texture_SRV(1, m_skyboxTexture));
+        }
 
-    // t2-t4: Scene buffers
-    if (m_materialBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 2, m_materialBuffer.get());
-    }
-    if (m_lightBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 3, m_lightBuffer.get());
-    }
-    if (m_instanceBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 4, m_instanceBuffer.get());
-    }
+        // t2-t4: Scene buffers
+        if (m_materialBuffer) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(2, m_materialBuffer.get()));
+        }
+        if (m_lightBuffer) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(3, m_lightBuffer.get()));
+        }
+        if (m_instanceBuffer) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(4, m_instanceBuffer.get()));
+        }
 
-    // t5-t6: Global geometry buffers (for normal computation)
-    if (m_vertexBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 5, m_vertexBuffer.get());
-    }
-    if (m_indexBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 6, m_indexBuffer.get());
-    }
+        // t5-t6: Global geometry buffers
+        if (m_vertexBuffer) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(5, m_vertexBuffer.get()));
+        }
+        if (m_indexBuffer) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(6, m_indexBuffer.get()));
+        }
 
-    // t7: Voxel positions buffer
-    if (m_voxelPositionsBuffer) {
-        cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Compute, 7, m_voxelPositionsBuffer.get());
-    }
+        // t7: Voxel positions buffer
+        if (m_voxelPositionsBuffer) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Buffer_SRV(7, m_voxelPositionsBuffer.get()));
+        }
 
-    // u0: Batched cubemap output
-    cmdList->SetUnorderedAccess(0, m_cubemapOutputBuffer.get());
+        // u0: Batched cubemap output
+        m_perPassSet->Bind(RHI::BindingSetItem::Buffer_UAV(0, m_cubemapOutputBuffer.get()));
 
-    // s0: Sampler
-    if (m_skyboxTextureSampler) {
-        cmdList->SetSampler(RHI::EShaderStage::Compute, 0, m_skyboxTextureSampler);
+        // s0: Sampler
+        if (m_skyboxTextureSampler) {
+            m_perPassSet->Bind(RHI::BindingSetItem::Sampler(0, m_skyboxTextureSampler));
+        }
+
+        // Bind the descriptor set (Set 1: PerPass)
+        cmdList->BindDescriptorSet(1, m_perPassSet);
+    } else {
+        CFFLog::Warning("[CubemapBaker] Legacy binding disabled but descriptor set mode not available");
+        return;
     }
 
     // Dispatch: 32 x 32 x (6 * batchSize)
@@ -932,4 +958,59 @@ void CDXRCubemapBaker::ExportSHToText(const CVolumetricLightmap& lightmap, const
     file.close();
     CFFLog::Info("[CubemapBaker] Exported SH values to: %s", filename.c_str());
     CFFLog::Info("[CubemapBaker]   Total voxels: %zu", bricks.size() * VL_BRICK_VOXEL_COUNT);
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+
+void CDXRCubemapBaker::InitDescriptorSets() {
+    auto* ctx = RHI::CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Descriptor sets only supported on DX12
+    if (ctx->GetBackend() != RHI::EBackend::DX12) {
+        CFFLog::Info("[CubemapBaker] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    // Create PerPass layout for ray tracing cubemap baker
+    // Layout:
+    //   b0: VolatileCBV (CB_BatchBakeParams)
+    //   t0: AccelerationStructure (TLAS)
+    //   t1: Texture_SRV (Skybox)
+    //   t2-t4: Buffer_SRV (Materials, Lights, Instances)
+    //   t5-t6: Buffer_SRV (Vertices, Indices)
+    //   t7: Buffer_SRV (VoxelPositions)
+    //   u0: Buffer_UAV (CubemapOutput)
+    //   s0: Sampler (SkyboxSampler)
+    RHI::BindingLayoutDesc layoutDesc("CubemapBaker_PerPass");
+    layoutDesc.AddItem(RHI::BindingLayoutItem::VolatileCBV(0, sizeof(CB_BatchBakeParams)));
+    layoutDesc.AddItem(RHI::BindingLayoutItem::AccelerationStructure(0));  // t0
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Texture_SRV(1));            // t1: Skybox
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(2));             // t2: Materials
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(3));             // t3: Lights
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(4));             // t4: Instances
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(5));             // t5: Vertices
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(6));             // t6: Indices
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_SRV(7));             // t7: VoxelPositions
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_UAV(0));             // u0: CubemapOutput
+    layoutDesc.AddItem(RHI::BindingLayoutItem::Sampler(0));                // s0: SkyboxSampler
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(layoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[CubemapBaker] Failed to create PerPass layout");
+        return;
+    }
+
+    // Allocate descriptor set
+    m_perPassSet = ctx->AllocateDescriptorSet(m_perPassLayout);
+    if (!m_perPassSet) {
+        CFFLog::Error("[CubemapBaker] Failed to allocate PerPass descriptor set");
+        ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+        m_perPassLayout = nullptr;
+        return;
+    }
+
+    CFFLog::Info("[CubemapBaker] Descriptor set resources initialized");
 }

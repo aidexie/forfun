@@ -6,6 +6,8 @@
 namespace RHI {
     class ICommandList;
     class ITexture;
+    class IDescriptorSet;
+    class IDescriptorSetLayout;
 }
 
 struct SAutoExposureSettings;
@@ -120,9 +122,13 @@ public:
     // Get histogram data for external debug UI (256 bins)
     const uint32_t* GetHistogramData() const { return m_histogramCache; }
 
+    // Check if descriptor set mode is available (DX12)
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_histogramPSO_ds != nullptr; }
+
 private:
     bool createShaders();
     void createBuffers();
+    void createSamplers();
     void createDebugResources();
 
     void dispatchHistogram(RHI::ICommandList* cmdList,
@@ -136,6 +142,17 @@ private:
                            const SAutoExposureSettings& settings);
 
     void readbackHistogram(RHI::ICommandList* cmdList);
+
+    // Descriptor set path (DX12)
+    void initDescriptorSets();
+    void dispatchHistogram_DS(RHI::ICommandList* cmdList,
+                              RHI::ITexture* hdrInput,
+                              uint32_t width, uint32_t height,
+                              const SAutoExposureSettings& settings);
+    void dispatchAdaptation_DS(RHI::ICommandList* cmdList,
+                               float deltaTime,
+                               uint32_t pixelCount,
+                               const SAutoExposureSettings& settings);
 
     // ============================================
     // Compute Shaders
@@ -172,4 +189,19 @@ private:
     uint32_t m_histogramCache[AutoExposureConfig::HISTOGRAM_BINS] = {};
     bool m_initialized = false;
     bool m_firstFrame = true;
+
+    // ============================================
+    // Descriptor Set Resources (DX12)
+    // ============================================
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    RHI::ShaderPtr m_histogramCS_ds;
+    RHI::ShaderPtr m_adaptationCS_ds;
+
+    RHI::PipelineStatePtr m_histogramPSO_ds;
+    RHI::PipelineStatePtr m_adaptationPSO_ds;
+
+    RHI::SamplerPtr m_pointSampler;
+    RHI::SamplerPtr m_linearSampler;
 };

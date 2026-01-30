@@ -10,6 +10,8 @@
 class CScene;
 namespace RHI {
     class ICommandList;
+    class IDescriptorSetLayout;
+    class IDescriptorSet;
 }
 
 // Clustered Shading parameters
@@ -121,6 +123,14 @@ private:
     void CreateShaders();
     void CreateDebugShaders();
 
+    // Descriptor Set dispatch methods (DX12 only)
+    void BuildClusterGrid_DS(RHI::ICommandList* cmdList,
+                             const DirectX::XMMATRIX& projection,
+                             float nearZ, float farZ);
+    void CullLights_DS(RHI::ICommandList* cmdList,
+                       CScene* scene,
+                       const DirectX::XMMATRIX& view);
+
     // Screen dimensions
     uint32_t m_screenWidth = 0;
     uint32_t m_screenHeight = 0;
@@ -157,4 +167,23 @@ private:
     float m_cachedFovY = 0.0f;  // Field of view (from projection matrix)
     bool m_clusterGridDirty = true;  // Force rebuild on first frame
     bool m_initialized = false;
+
+    // ============================================
+    // Descriptor Set Resources (SM 5.1, DX12 only)
+    // ============================================
+    void initDescriptorSets();
+
+    // SM 5.1 shaders
+    RHI::ShaderPtr m_buildClusterGridCS_ds;
+    RHI::ShaderPtr m_cullLightsCS_ds;
+
+    // SM 5.1 PSOs
+    RHI::PipelineStatePtr m_buildClusterGridPSO_ds;
+    RHI::PipelineStatePtr m_cullLightsPSO_ds;
+
+    // Unified compute layout (shared across all compute passes)
+    RHI::IDescriptorSetLayout* m_computePerPassLayout = nullptr;
+    RHI::IDescriptorSet* m_perPassSet = nullptr;
+
+    bool IsDescriptorSetModeAvailable() const { return m_computePerPassLayout != nullptr && m_buildClusterGridPSO_ds != nullptr; }
 };

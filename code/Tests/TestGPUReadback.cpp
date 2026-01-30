@@ -7,6 +7,7 @@
 #include "RHI/ICommandList.h"
 #include "RHI/RHIResources.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
 #include "RHI/ShaderCompiler.h"
 
 #include <vector>
@@ -24,12 +25,14 @@ static RHI::IBuffer* s_uavBuffer = nullptr;
 static RHI::IBuffer* s_readbackBuffer = nullptr;
 static RHI::IShader* s_computeShader = nullptr;
 static RHI::IPipelineState* s_computePSO = nullptr;
+static RHI::IDescriptorSetLayout* s_dsLayout = nullptr;
+static RHI::IDescriptorSet* s_descriptorSet = nullptr;
 static uint32_t s_elementCount = 0;
 
-// Simple compute shader that writes index * 10 to each element
+// Simple compute shader that writes index * 10 to each element (SM 5.1 with space)
 static const char* s_computeShaderSource = R"(
 // Output buffer - structured buffer with float4 elements
-RWStructuredBuffer<float4> g_Output : register(u0);
+RWStructuredBuffer<float4> g_Output : register(u0, space1);
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID)
@@ -135,12 +138,12 @@ public:
 
             s_elementCount = elementCount;
 
-            // Compile compute shader
+            // Compile compute shader (SM 5.1 for descriptor sets)
             CFFLog::Info("Compiling compute shader...");
             RHI::SCompiledShader compiled = RHI::CompileShaderFromSource(
                 s_computeShaderSource,
                 "CSMain",
-                "cs_5_0",
+                "cs_5_1",
                 nullptr,
                 true  // debug
             );
@@ -162,10 +165,24 @@ public:
             ASSERT_NOT_NULL(ctx, s_computeShader, "Compute shader creation");
             CFFLog::Info("  Compute shader created");
 
-            // Create compute pipeline state
+            // Create descriptor set layout for UAV binding (space1)
+            RHI::BindingLayoutDesc layoutDesc("TestCompute_PerPass");
+            layoutDesc.AddItem(RHI::BindingLayoutItem::Buffer_UAV(0));  // u0 in space1
+
+            s_dsLayout = rhiCtx->CreateDescriptorSetLayout(layoutDesc);
+            ASSERT_NOT_NULL(ctx, s_dsLayout, "Descriptor set layout creation");
+            CFFLog::Info("  Descriptor set layout created");
+
+            // Allocate descriptor set
+            s_descriptorSet = rhiCtx->AllocateDescriptorSet(s_dsLayout);
+            ASSERT_NOT_NULL(ctx, s_descriptorSet, "Descriptor set allocation");
+            CFFLog::Info("  Descriptor set allocated");
+
+            // Create compute pipeline state with descriptor set layout
             RHI::ComputePipelineDesc psoDesc;
             psoDesc.computeShader = s_computeShader;
             psoDesc.debugName = "TestComputePSO";
+            psoDesc.setLayouts[1] = s_dsLayout;  // space1
 
             s_computePSO = rhiCtx->CreateComputePipelineState(psoDesc);
             ASSERT_NOT_NULL(ctx, s_computePSO, "Compute PSO creation");
@@ -194,9 +211,12 @@ public:
             CFFLog::Info("Setting compute pipeline state...");
             cmdList->SetPipelineState(s_computePSO);
 
-            // Bind UAV to u0
-            CFFLog::Info("Binding UAV buffer to u0...");
-            cmdList->SetUnorderedAccess(0, s_uavBuffer);
+            // Bind UAV to descriptor set and bind to pipeline
+            CFFLog::Info("Binding UAV buffer via descriptor set...");
+            s_descriptorSet->Bind({
+                RHI::BindingSetItem::Buffer_UAV(0, s_uavBuffer),
+            });
+            cmdList->BindDescriptorSet(1, s_descriptorSet);
 
             // Dispatch compute shader
             // 64 elements, 64 threads per group = 1 thread group
@@ -277,6 +297,9 @@ public:
             }
 
             // Cleanup
+            auto* rhiCtx2 = RHI::CRHIManager::Instance().GetRenderContext();
+            if (s_descriptorSet) { rhiCtx2->FreeDescriptorSet(s_descriptorSet); s_descriptorSet = nullptr; }
+            if (s_dsLayout) { rhiCtx2->DestroyDescriptorSetLayout(s_dsLayout); s_dsLayout = nullptr; }
             delete s_computePSO; s_computePSO = nullptr;
             delete s_computeShader; s_computeShader = nullptr;
             delete s_uavBuffer; s_uavBuffer = nullptr;

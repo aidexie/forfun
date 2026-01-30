@@ -5,6 +5,7 @@
 #include "RHI/RHIManager.h"
 #include "RHI/RHIDescriptors.h"
 #include "RHI/ICommandList.h"
+#include "RHI/IDescriptorSet.h"
 #include <fstream>
 #include <filesystem>
 
@@ -34,20 +35,26 @@ RHI::ITexture* CLightmap2DManager::GetAtlasTexture() const {
 }
 
 // ============================================
-// Bind
+// Bind (Descriptor Set API)
 // ============================================
 
-void CLightmap2DManager::Bind(RHI::ICommandList* cmdList) {
-    if (!m_isLoaded || !cmdList) {
+void CLightmap2DManager::BindToDescriptorSet(RHI::IDescriptorSet* descriptorSet, uint32_t atlasSlot, uint32_t scaleOffsetSlot) {
+    if (!m_isLoaded || !descriptorSet) {
         return;
     }
 
-    // Bind t16: Atlas texture
-    cmdList->SetShaderResource(RHI::EShaderStage::Pixel, 16, GetAtlasTexture());
+    // Bind atlas texture to specified SRV slot
+    RHI::ITexture* atlas = GetAtlasTexture();
+    if (atlas) {
+        descriptorSet->Bind(RHI::BindingSetItem::Texture_SRV(atlasSlot, atlas));
+    }
 
-    // Bind t17: ScaleOffset structured buffer
-    cmdList->SetShaderResourceBuffer(RHI::EShaderStage::Pixel, 17, m_scaleOffsetBuffer.get());
+    // Bind scaleOffset structured buffer to specified SRV slot
+    if (m_scaleOffsetBuffer) {
+        descriptorSet->Bind(RHI::BindingSetItem::Buffer_SRV(scaleOffsetSlot, m_scaleOffsetBuffer.get()));
+    }
 }
+
 
 // ============================================
 // Direct Data Transfer

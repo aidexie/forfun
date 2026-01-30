@@ -3,8 +3,11 @@
 #include "RHI/IRenderContext.h"
 #include "RHI/ICommandList.h"
 #include "RHI/RHIDescriptors.h"
+#include "RHI/IDescriptorSet.h"
+#include "RHI/PerDrawSlots.h"
 #include "RHI/ShaderCompiler.h"
 #include "Core/FFLog.h"
+#include "Core/PathManager.h"
 #include "Core/GpuMeshResource.h"
 #include "Core/Mesh.h"
 #include "Scene.h"
@@ -14,6 +17,8 @@
 #include "Components/DirectionalLight.h"
 #include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <sstream>
 
 using namespace DirectX;
 using namespace RHI;
@@ -25,6 +30,26 @@ struct alignas(16) CB_LightSpace {
 struct alignas(16) CB_Object {
     DirectX::XMMATRIX world;
 };
+
+// CB_ShadowPass for descriptor set path (Set 1, space1)
+struct alignas(16) CB_ShadowPass {
+    DirectX::XMMATRIX lightSpaceVP;
+    int cascadeIndex;
+    float _pad[3];
+};
+
+namespace {
+std::string LoadShaderSource(const std::string& filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        CFFLog::Error("Failed to open shader file: %s", filepath.c_str());
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+} // anonymous namespace
 
 bool CShadowPass::Initialize()
 {
@@ -157,6 +182,9 @@ bool CShadowPass::Initialize()
         m_output.lightSpaceVPs[i] = DirectX::XMMatrixIdentity();
     }
 
+    // Initialize descriptor set resources (DX12 only)
+    initDescriptorSets();
+
     return true;
 }
 
@@ -169,6 +197,30 @@ void CShadowPass::Shutdown()
     m_pso.reset();
     m_cbLightSpace.reset();
     m_cbObject.reset();
+
+    // Cleanup descriptor set resources
+    m_pso_ds.reset();
+    m_depthVS_ds.reset();
+
+    auto* ctx = CRHIManager::Instance().GetRenderContext();
+    if (ctx) {
+        if (m_perPassSet) {
+            ctx->FreeDescriptorSet(m_perPassSet);
+            m_perPassSet = nullptr;
+        }
+        if (m_perDrawSet) {
+            ctx->FreeDescriptorSet(m_perDrawSet);
+            m_perDrawSet = nullptr;
+        }
+        if (m_perPassLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perPassLayout);
+            m_perPassLayout = nullptr;
+        }
+        if (m_perDrawLayout) {
+            ctx->DestroyDescriptorSetLayout(m_perDrawLayout);
+            m_perDrawLayout = nullptr;
+        }
+    }
 }
 
 void CShadowPass::ensureShadowMapArray(uint32_t size, int cascadeCount)
@@ -411,12 +463,9 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     auto splits = calculateCascadeSplits(cascadeCount, cameraNear, shadowDistance,
                                          std::clamp(light->cascade_split_lambda, 0.0f, 1.0f));
 
-    // Set pipeline state via RHI
-    cmdList->SetPipelineState(m_pso.get());
+    // Set pipeline state via RHI (descriptor set path only)
+    cmdList->SetPipelineState(m_pso_ds.get());
     cmdList->SetPrimitiveTopology(EPrimitiveTopology::TriangleList);
-
-    // Note: Constant buffers are bound per-draw using SetConstantBufferData
-    // This allocates from a dynamic ring buffer, giving each draw its own memory
 
     // Set viewport and scissor rect (DX12 requires both)
     cmdList->SetViewport(0.0f, 0.0f, (float)shadowMapSize, (float)shadowMapSize, 0.0f, 1.0f);
@@ -433,16 +482,19 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
         float cascadeFar = splits[cascadeIndex + 1];
         XMMATRIX lightSpaceVP = calculateTightLightMatrix(subFrustumCorners, light, cascadeFar);
 
-        // Update light space constant buffer using dynamic allocation (DX12 compatible)
-        CB_LightSpace cbLight;
-        cbLight.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
-        cmdList->SetConstantBufferData(EShaderStage::Vertex, 0, &cbLight, sizeof(CB_LightSpace));
-
         // Bind this cascade's DSV via RHI
         cmdList->SetDepthStencilOnly(m_shadowMapArray.get(), cascadeIndex);
 
         // Clear depth for this cascade via RHI
         cmdList->ClearDepthStencilSlice(m_shadowMapArray.get(), cascadeIndex, true, 1.0f, false, 0);
+
+        // Bind PerPass set (Set 1) with light space matrix
+        CB_ShadowPass passCB;
+        passCB.lightSpaceVP = XMMatrixTranspose(lightSpaceVP);
+        passCB.cascadeIndex = cascadeIndex;
+
+        m_perPassSet->Bind(BindingSetItem::VolatileCBV(0, &passCB, sizeof(passCB)));
+        cmdList->BindDescriptorSet(1, m_perPassSet);
 
         // Render all objects to this cascade
         for (auto& objPtr : scene.GetWorld().Objects()) {
@@ -452,27 +504,26 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
 
             if (!meshRenderer || !transform) continue;
 
-            // Ensure mesh is uploaded
             meshRenderer->EnsureUploaded();
             if (meshRenderer->meshes.empty()) continue;
 
-            // Get world matrix
             XMMATRIX worldMatrix = transform->WorldMatrix();
 
-            // Render all sub-meshes
+            // Bind PerDraw set (Set 3) with world matrix
+            PerDrawSlots::CB_PerDraw perDraw;
+            XMStoreFloat4x4(&perDraw.World, XMMatrixTranspose(worldMatrix));
+            XMStoreFloat4x4(&perDraw.WorldPrev, XMMatrixTranspose(worldMatrix));
+            perDraw.lightmapIndex = -1;  // Not used in shadow pass
+            perDraw.objectID = 0;
+
+            m_perDrawSet->Bind(BindingSetItem::VolatileCBV(0, &perDraw, sizeof(perDraw)));
+            cmdList->BindDescriptorSet(3, m_perDrawSet);
+
             for (auto& gpuMesh : meshRenderer->meshes) {
                 if (!gpuMesh) continue;
 
-                // Update object constant buffer using dynamic allocation (DX12 compatible)
-                CB_Object cbObj;
-                cbObj.world = XMMatrixTranspose(worldMatrix);
-                cmdList->SetConstantBufferData(EShaderStage::Vertex, 1, &cbObj, sizeof(CB_Object));
-
-                // Bind vertex/index buffers via RHI
                 cmdList->SetVertexBuffer(0, gpuMesh->vbo.get(), sizeof(SVertexPNT), 0);
                 cmdList->SetIndexBuffer(gpuMesh->ibo.get(), EIndexFormat::UInt32, 0);
-
-                // Draw via RHI
                 cmdList->DrawIndexed(gpuMesh->indexCount, 0, 0);
             }
         }
@@ -495,4 +546,143 @@ void CShadowPass::Render(CScene& scene, SDirectionalLight* light,
     m_output.cascadeBlendRange = std::clamp(light->cascade_blend_range, 0.0f, 0.5f);
     m_output.debugShowCascades = light->debug_show_cascades;
     m_output.enableSoftShadows = light->enable_soft_shadows;
+}
+
+// ============================================
+// Descriptor Set Initialization (DX12 only)
+// ============================================
+void CShadowPass::initDescriptorSets()
+{
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    // Check if descriptor sets are supported (DX12 only)
+    if (ctx->GetBackend() != EBackend::DX12) {
+        CFFLog::Info("[ShadowPass] DX11 mode - descriptor sets not supported");
+        return;
+    }
+
+    std::string shaderDir = FFPath::GetSourceDir() + "/Shader/";
+
+#if defined(_DEBUG)
+    bool debugShaders = true;
+#else
+    bool debugShaders = false;
+#endif
+
+    // Compile SM 5.1 vertex shader
+    std::string vsSource = LoadShaderSource(shaderDir + "Shadow_DS.vs.hlsl");
+    if (vsSource.empty()) {
+        CFFLog::Warning("[ShadowPass] Failed to load Shadow_DS.vs.hlsl");
+        return;
+    }
+
+    SCompiledShader vsCompiled = CompileShaderFromSource(vsSource.c_str(), "main", "vs_5_1", nullptr, debugShaders);
+    if (!vsCompiled.success) {
+        CFFLog::Error("[ShadowPass] Shadow_DS.vs.hlsl compile error: %s", vsCompiled.errorMessage.c_str());
+        return;
+    }
+
+    ShaderDesc vsDesc;
+    vsDesc.type = EShaderType::Vertex;
+    vsDesc.bytecode = vsCompiled.bytecode.data();
+    vsDesc.bytecodeSize = vsCompiled.bytecode.size();
+    vsDesc.debugName = "Shadow_DS_VS";
+    m_depthVS_ds.reset(ctx->CreateShader(vsDesc));
+
+    if (!m_depthVS_ds) {
+        CFFLog::Error("[ShadowPass] Failed to create SM 5.1 shader");
+        return;
+    }
+
+    // Create PerPass layout (Set 1, space1)
+    // CB_ShadowPass (b0)
+    BindingLayoutDesc perPassLayoutDesc("Shadow_PerPass");
+    perPassLayoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(CB_ShadowPass)));
+
+    m_perPassLayout = ctx->CreateDescriptorSetLayout(perPassLayoutDesc);
+    if (!m_perPassLayout) {
+        CFFLog::Error("[ShadowPass] Failed to create PerPass layout");
+        return;
+    }
+
+    // Create PerDraw layout (Set 3, space3)
+    // CB_PerDraw (b0)
+    BindingLayoutDesc perDrawLayoutDesc("Shadow_PerDraw");
+    perDrawLayoutDesc.AddItem(BindingLayoutItem::VolatileCBV(0, sizeof(PerDrawSlots::CB_PerDraw)));
+
+    m_perDrawLayout = ctx->CreateDescriptorSetLayout(perDrawLayoutDesc);
+    if (!m_perDrawLayout) {
+        CFFLog::Error("[ShadowPass] Failed to create PerDraw layout");
+        return;
+    }
+
+    // Allocate descriptor sets
+    m_perPassSet = ctx->AllocateDescriptorSet(m_perPassLayout);
+    m_perDrawSet = ctx->AllocateDescriptorSet(m_perDrawLayout);
+
+    if (!m_perPassSet || !m_perDrawSet) {
+        CFFLog::Error("[ShadowPass] Failed to allocate descriptor sets");
+        return;
+    }
+
+    CFFLog::Info("[ShadowPass] Descriptor set resources initialized");
+}
+
+void CShadowPass::CreatePSOWithLayouts(IDescriptorSetLayout* perFrameLayout)
+{
+    if (!m_perPassLayout || !m_depthVS_ds) {
+        CFFLog::Warning("[ShadowPass] Cannot create PSO with layouts - missing resources");
+        return;
+    }
+
+    IRenderContext* ctx = CRHIManager::Instance().GetRenderContext();
+    if (!ctx) return;
+
+    PipelineStateDesc psoDesc;
+    psoDesc.vertexShader = m_depthVS_ds.get();
+    psoDesc.pixelShader = nullptr;  // Depth-only, no pixel shader
+
+    // Input layout (same as legacy PSO)
+    psoDesc.inputLayout = {
+        { EVertexSemantic::Position, 0, EVertexFormat::Float3, 0, 0 },
+        { EVertexSemantic::Normal,   0, EVertexFormat::Float3, 12, 0 },
+        { EVertexSemantic::Texcoord, 0, EVertexFormat::Float2, 24, 0 },
+        { EVertexSemantic::Tangent,  0, EVertexFormat::Float4, 32, 0 }
+    };
+
+    // Rasterizer state
+    psoDesc.rasterizer.fillMode = EFillMode::Solid;
+    psoDesc.rasterizer.cullMode = ECullMode::Back;
+    psoDesc.rasterizer.depthClipEnable = true;
+
+    // Depth stencil state
+    psoDesc.depthStencil.depthEnable = true;
+    psoDesc.depthStencil.depthWriteEnable = true;
+    psoDesc.depthStencil.depthFunc = EComparisonFunc::Less;
+
+    // No blending
+    psoDesc.blend.blendEnable = false;
+
+    psoDesc.primitiveTopology = EPrimitiveTopology::TriangleList;
+
+    // Depth-only pass: no render targets
+    psoDesc.renderTargetFormats = {};
+    psoDesc.depthStencilFormat = ETextureFormat::D24_UNORM_S8_UINT;
+
+    // Set descriptor set layouts
+    // ShadowPass doesn't use Set 0 (PerFrame) or Set 2 (PerMaterial)
+    psoDesc.setLayouts[0] = nullptr;             // Set 0: Not used
+    psoDesc.setLayouts[1] = m_perPassLayout;     // Set 1: PerPass (space1)
+    psoDesc.setLayouts[2] = nullptr;             // Set 2: Not used
+    psoDesc.setLayouts[3] = m_perDrawLayout;     // Set 3: PerDraw (space3)
+
+    psoDesc.debugName = "Shadow_DS_PSO";
+    m_pso_ds.reset(ctx->CreatePipelineState(psoDesc));
+
+    if (m_pso_ds) {
+        CFFLog::Info("[ShadowPass] PSO with descriptor set layouts created");
+    } else {
+        CFFLog::Error("[ShadowPass] Failed to create PSO with descriptor set layouts");
+    }
 }

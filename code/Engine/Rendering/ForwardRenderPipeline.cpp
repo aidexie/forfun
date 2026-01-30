@@ -62,13 +62,6 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     if (!cmdList) return;
 
     // ============================================
-    // 0. Unbind resources to avoid hazards
-    // ============================================
-    cmdList->UnbindShaderResources(RHI::EShaderStage::Vertex, 0, 8);
-    cmdList->UnbindShaderResources(RHI::EShaderStage::Pixel, 0, 8);
-    cmdList->UnbindRenderTargets();
-
-    // ============================================
     // 1. Ensure offscreen targets are ready
     // ============================================
     ensureOffscreen(ctx.width, ctx.height);
@@ -126,10 +119,12 @@ void CForwardRenderPipeline::Render(const RenderContext& ctx)
     {
         RHI::CScopedDebugEvent evt(cmdList, L"Scene Rendering");
         CClusteredLightingPass* clusteredPass = ctx.showFlags.ClusteredLighting ? &m_clusteredLighting : nullptr;
+        // Note: Forward pipeline currently doesn't support descriptor sets
+        // Pass nullptr for perFrameSet and probeManager until ForwardRenderPipeline is migrated
         m_sceneRenderer.Render(ctx.camera, ctx.scene,
                               m_offHDR.get(), m_offDepth.get(),
                               ctx.width, ctx.height, ctx.deltaTime,
-                              shadowData, clusteredPass);
+                              shadowData, clusteredPass, nullptr, nullptr);
     }
 
     // ============================================

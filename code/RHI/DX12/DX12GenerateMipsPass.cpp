@@ -180,7 +180,10 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
     // Select PSO based on texture dimension
     IPipelineState* pso = is2D ? m_pso2D.get() : m_psoArray.get();
     cmdList->SetPipelineState(pso);
-    cmdList->SetSampler(EShaderStage::Compute, 0, m_sampler.get());
+
+    // Bind sampler using internal method (friend class access)
+    CDX12Sampler* dx12Sampler = static_cast<CDX12Sampler*>(m_sampler.get());
+    cmdList->SetPendingSampler(0, dx12Sampler->GetCPUHandle());
 
     // Get the D3D12 resource for per-subresource barriers
     ID3D12Resource* d3dResource = dx12Texture->GetD3D12Resource();
@@ -251,15 +254,24 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
             cb.isSRGB = isSRGB ? 1 : 0;
             cb.padding = 0;
 
-            cmdList->SetConstantBufferData(EShaderStage::Compute, 0, &cb, sizeof(cb));
+            // Allocate from dynamic buffer ring and bind CBV using internal method
+            CDX12DynamicBufferRing* dynamicBuffer = cmdList->GetDynamicBufferRing();
+            if (dynamicBuffer) {
+                SDynamicAllocation alloc = dynamicBuffer->Allocate(sizeof(cb), CB_ALIGNMENT);
+                if (alloc.IsValid()) {
+                    memcpy(alloc.cpuAddress, &cb, sizeof(cb));
+                    cmdList->SetPendingCBV(0, alloc.gpuAddress);
+                }
+            }
 
             // Bind source SRV (sRGB SRV auto-converts to linear on read)
             // Note: Using SetPendingSRV directly because GenerateMipsPass manages
             // per-subresource barriers manually and SetShaderResource would interfere
             cmdList->SetPendingSRV(0, srvHandle.cpuHandle);
 
-            // Bind destination UAV for this mip level
-            cmdList->SetUnorderedAccessTextureMip(0, texture, mip);
+            // Bind destination UAV for this mip level using internal method
+            SDescriptorHandle uavHandle = dx12Texture->GetOrCreateUAVSlice(mip);
+            cmdList->SetPendingUAV(0, uavHandle.cpuHandle);
 
             // Dispatch compute shader (numthreads 8,8,1)
             uint32_t groupsX = (dstWidth + 7) / 8;
@@ -311,8 +323,9 @@ void CDX12GenerateMipsPass::Execute(CDX12CommandList* cmdList, ITexture* texture
     // Update tracked state
     dx12Texture->SetCurrentState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-    // Clear UAV bindings
-    cmdList->SetUnorderedAccessTextureMip(0, nullptr, 0);
+    // Clear UAV bindings using internal method
+    D3D12_CPU_DESCRIPTOR_HANDLE nullHandle = {};
+    cmdList->SetPendingUAV(0, nullHandle);
 }
 
 } // namespace DX12
