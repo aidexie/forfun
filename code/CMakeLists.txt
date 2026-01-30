@@ -9,7 +9,7 @@ endif()
 if (MSVC)
     add_compile_options(/utf-8)
 endif()
-set(CODE_PATH E:/forfun/source/code)
+set(CODE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 set(THIRD_PARTY_PATH E:/forfun/thirdparty)
 set(IMGUI_DIR ${THIRD_PARTY_PATH}/imgui)
 set(IMGUI_BACK ${IMGUI_DIR}/backends)
@@ -304,7 +304,6 @@ set(TEST_SRC
     ${CODE_PATH}/Tests/TestFSR2.cpp
     ${CODE_PATH}/Tests/TestAntiAliasing.cpp
     ${CODE_PATH}/Tests/TestRDGBasic.cpp
-    ${CODE_PATH}/Tests/TestDeferredStress.cpp
     ${CODE_PATH}/Tests/TestDescriptorSet.cpp
 )
 
@@ -515,8 +514,6 @@ set(SHADER_SOURCES
     ${CODE_PATH}/Shader/DoFComposite.ps.hlsl
     # SM 5.1 shaders (descriptor sets with register spaces)
     ${CODE_PATH}/Shader/Common.hlsli
-    ${CODE_PATH}/Shader/TestDescriptorSet.vs.hlsl
-    ${CODE_PATH}/Shader/TestDescriptorSet.ps.hlsl
 )
 
 target_sources(forfun PRIVATE ${ENGINE_SOURCES} ${SHADER_SOURCES})
@@ -576,18 +573,8 @@ if (MSVC)
         VS_SHADER_ENTRYPOINT main
     )
 
-    # SM 5.1 Vertex Shaders (descriptor sets with register spaces)
-    set_source_files_properties(
-        ${CODE_PATH}/Shader/TestDescriptorSet.vs.hlsl
-        PROPERTIES
-        VS_SHADER_TYPE Vertex
-        VS_SHADER_MODEL 5.1
-        VS_SHADER_ENTRYPOINT main
-    )
-
     # SM 5.1 Pixel Shaders (descriptor sets with register spaces)
     set_source_files_properties(
-        ${CODE_PATH}/Shader/TestDescriptorSet.ps.hlsl
         ${CODE_PATH}/Shader/FXAA.ps.hlsl
         PROPERTIES
         VS_SHADER_TYPE Pixel
