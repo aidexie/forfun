@@ -339,6 +339,36 @@ void CDX12Context::MoveToNextFrame() {
 **问题**: DX12 没有内置 GenerateMips
 **解决方案**: CDX12GenerateMipsPass (Compute Shader)
 
+### 7. D3D12MA Memory Leaks at Shutdown
+**问题**: D3D12MA 在 Shutdown 时报告内存泄漏（PlaceholderTexture, KTX2DTexture, unnamed buffer）
+**根本原因**:
+- `CScene::Shutdown()` 没有调用 `m_lightmap2D.UnloadLightmap()`
+- `CLightmap2DManager` 持有 `TextureHandlePtr`，其中包含对 placeholder 和 KTX2 纹理的引用
+- 这些资源直到静态单例析构时才释放，而此时 `CDX12MemoryAllocator` 已经 Shutdown
+
+**解决方案**:
+1. 在 `CScene::Shutdown()` 中添加 `m_lightmap2D.UnloadLightmap()` 调用
+2. 确保所有持有 GPU 资源的管理器在 RHI Shutdown 之前释放资源
+
+**教训**:
+- 静态单例的析构顺序不可控，必须显式调用 Shutdown() 释放 GPU 资源
+- 使用 `TextureHandlePtr` 时要注意其生命周期，避免跨越 RHI Shutdown 边界
+- D3D12MA 的 leak detection 功能可以帮助定位未释放的资源
+
+**相关代码**:
+```cpp
+// Scene.cpp - 正确的 Shutdown 顺序
+void CScene::Shutdown() {
+    Clear();  // 先销毁 GameObjects
+    m_volumetricLightmap.Shutdown();
+    m_lightProbeManager.Shutdown();
+    m_probeManager.Shutdown();
+    m_skybox.Shutdown();
+    m_lightmap2D.UnloadLightmap();  // 释放 lightmap 纹理
+    m_initialized = false;
+}
+```
+
 ---
 
 ## Usage Examples
@@ -394,4 +424,4 @@ cmdList->Dispatch(groupsX, groupsY, groupsZ);
 
 ---
 
-*Last Updated: 2025-12-18*
+*Last Updated: 2026-01-30*
