@@ -1,6 +1,7 @@
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
 #include "DX12Context.h"
+#include "DX12MemoryAllocator.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -10,8 +11,10 @@ namespace DX12 {
 // CDX12Texture Implementation
 // ============================================
 
+// Legacy constructor (external resource, e.g., swapchain backbuffer)
 CDX12Texture::CDX12Texture(ID3D12Resource* resource, const TextureDesc& desc, ID3D12Device* device)
     : m_resource(resource)
+    , m_allocation(nullptr)
     , m_desc(desc)
     , m_device(device)
 {
@@ -26,6 +29,25 @@ CDX12Texture::CDX12Texture(ID3D12Resource* resource, const TextureDesc& desc, ID
         }
     } else {
         // DEFAULT heap resources start in COMMON state
+        m_currentState = D3D12_RESOURCE_STATE_COMMON;
+    }
+}
+
+// D3D12MA constructor (owns allocation)
+CDX12Texture::CDX12Texture(SMemoryAllocation&& allocation, const TextureDesc& desc, ID3D12Device* device)
+    : m_resource(allocation.resource)
+    , m_allocation(allocation.allocation)
+    , m_desc(desc)
+    , m_device(device)
+{
+    // Initial state matches what was used in CreateResource
+    if (desc.usage & ETextureUsage::Staging) {
+        if (desc.cpuAccess == ECPUAccess::Read) {
+            m_currentState = D3D12_RESOURCE_STATE_COPY_DEST;
+        } else {
+            m_currentState = D3D12_RESOURCE_STATE_GENERIC_READ;
+        }
+    } else {
         m_currentState = D3D12_RESOURCE_STATE_COMMON;
     }
 }
@@ -53,9 +75,15 @@ CDX12Texture::~CDX12Texture() {
         heapMgr.FreeCBVSRVUAV(handle);
     }
 
-    // Defer release of the D3D12 resource until GPU is done using it
-    // This prevents "resource deleted while still in use" errors
-    if (m_resource) {
+    // Free the resource
+    if (m_allocation) {
+        // D3D12MA-allocated: defer release via memory allocator
+        uint64_t fenceValue = CDX12Context::Instance().GetCurrentFenceValue();
+        CDX12MemoryAllocator::Instance().FreeAllocation(m_allocation, fenceValue);
+        m_allocation = nullptr;
+        m_resource.Detach();  // Don't release via ComPtr - D3D12MA owns it
+    } else if (m_resource) {
+        // Legacy path: defer release via deletion queue (e.g., swapchain backbuffers)
         CDX12Context::Instance().DeferredRelease(m_resource.Get());
     }
 }

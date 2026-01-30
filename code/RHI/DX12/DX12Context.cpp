@@ -1,5 +1,6 @@
 #include "DX12Context.h"
 #include "DX12Common.h"
+#include "DX12MemoryAllocator.h"
 #include "../../Core/FFLog.h"
 #include <algorithm>
 #include <cstdlib>  // for std::getenv
@@ -120,6 +121,12 @@ bool CDX12Context::Initialize(HWND hwnd, uint32_t width, uint32_t height) {
     // Check feature support
     CheckFeatureSupport();
 
+    // Initialize memory allocator (D3D12MA)
+    if (!CDX12MemoryAllocator::Instance().Initialize(m_device.Get(), m_adapter.Get())) {
+        CFFLog::Error("[DX12Context] Failed to initialize memory allocator");
+        return false;
+    }
+
     // Create command queue
     if (!CreateCommandQueue()) {
         CFFLog::Error("[DX12Context] Failed to create command queue");
@@ -200,8 +207,13 @@ void CDX12Context::Shutdown() {
     m_rtvHeap.Reset();
     m_swapChain.Reset();
     m_commandQueue.Reset();
+
+    // Shutdown memory allocator before device release
+    CDX12MemoryAllocator::Instance().Shutdown();
+
     DX12Debug_Shutdown();
     m_device.Reset();
+    m_adapter.Reset();
     m_factory.Reset();
 
     m_initialized = false;
@@ -321,6 +333,9 @@ bool CDX12Context::CreateDevice() {
         ));
 
         if (SUCCEEDED(hr)) {
+            // Store adapter for D3D12MA initialization
+            m_adapter = adapter;
+
             // Log adapter info
             char adapterName[128];
             WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, adapterName, sizeof(adapterName), nullptr, nullptr);

@@ -232,6 +232,9 @@ set(RHI_SRC
     ${CODE_PATH}/RHI/DX12/DX12DescriptorSetAllocator.cpp
     ${CODE_PATH}/RHI/DX12/DX12RootSignatureCache.h
     ${CODE_PATH}/RHI/DX12/DX12RootSignatureCache.cpp
+    ${CODE_PATH}/RHI/DX12/DX12MemoryAllocator.h
+    ${CODE_PATH}/RHI/DX12/DX12MemoryAllocator.cpp
+    ${THIRD_PARTY_PATH}/D3D12MemoryAllocator/D3D12MemAlloc.cpp
 )
 
 # Engine root sources - explicitly listed (no GLOB)
@@ -321,6 +324,7 @@ target_include_directories(forfun PRIVATE
     ${THIRD_PARTY_PATH}/cgltf-master
     ${THIRD_PARTY_PATH}/nlohmann
     ${THIRD_PARTY_PATH}/stb
+    ${THIRD_PARTY_PATH}/D3D12MemoryAllocator
     ${KTX_DIR}/include
     ${OIDN_DIR}/include
 )

@@ -3,6 +3,7 @@
 #include "DX12Common.h"
 #include "DX12DescriptorHeap.h"
 #include "DX12DescriptorSet.h"
+#include "DX12MemoryAllocator.h"
 #include "../RHIResources.h"
 #include <unordered_map>
 
@@ -30,7 +31,12 @@ struct ResourceState {
 // ============================================
 class CDX12Buffer : public IBuffer {
 public:
+    // Legacy constructor (external resource, e.g., from CreateCommittedResource)
     CDX12Buffer(ID3D12Resource* resource, const BufferDesc& desc, ID3D12Device* device);
+
+    // D3D12MA constructor (owns allocation)
+    CDX12Buffer(SMemoryAllocation&& allocation, const BufferDesc& desc, ID3D12Device* device);
+
     ~CDX12Buffer() override;
 
     // IBuffer interface
@@ -69,6 +75,7 @@ private:
 
 private:
     ComPtr<ID3D12Resource> m_resource;
+    D3D12MA::Allocation* m_allocation = nullptr;  // D3D12MA allocation (owns memory if non-null)
     BufferDesc m_desc;
     ID3D12Device* m_device = nullptr;
 
@@ -89,7 +96,12 @@ private:
 // ============================================
 class CDX12Texture : public ITexture {
 public:
+    // Legacy constructor (external resource, e.g., swapchain backbuffer)
     CDX12Texture(ID3D12Resource* resource, const TextureDesc& desc, ID3D12Device* device);
+
+    // D3D12MA constructor (owns allocation)
+    CDX12Texture(SMemoryAllocation&& allocation, const TextureDesc& desc, ID3D12Device* device);
+
     ~CDX12Texture() override;
 
     // ITexture interface
@@ -160,6 +172,7 @@ private:
 
 private:
     ComPtr<ID3D12Resource> m_resource;
+    D3D12MA::Allocation* m_allocation = nullptr;  // D3D12MA allocation (owns memory if non-null)
     TextureDesc m_desc;
     ID3D12Device* m_device = nullptr;
 

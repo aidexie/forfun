@@ -4,6 +4,7 @@
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
 #include "DX12UploadManager.h"
+#include "DX12MemoryAllocator.h"
 #include "DX12PipelineState.h"
 #include "DX12AccelerationStructure.h"
 #include "DX12RayTracingPipeline.h"
@@ -301,9 +302,6 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
         alignedSize = AlignUp(desc.size, CONSTANT_BUFFER_ALIGNMENT);
     }
 
-    D3D12_HEAP_PROPERTIES heapProps = {};
-    heapProps.Type = heapType;
-
     D3D12_RESOURCE_DESC resourceDesc = {};
     resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     resourceDesc.Width = alignedSize;
@@ -330,30 +328,23 @@ IBuffer* CDX12RenderContext::CreateBuffer(const BufferDesc& desc, const void* in
         initialState = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
     }
 
-     ComPtr<ID3D12Resource> resource;
-    HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &resourceDesc,
-        initialState,
-        nullptr,
-        IID_PPV_ARGS(&resource)
-    ));
-    if (FAILED(hr))
-    {
-        CFFLog::Error("[DX12RenderContext] CreateBuffer failed: %s", HRESULTToString(hr).c_str());
+    // Allocate via D3D12MA
+    SMemoryAllocation allocation = CDX12MemoryAllocator::Instance().CreateBuffer(
+        resourceDesc, heapType, initialState);
+
+    if (!allocation.IsValid()) {
+        CFFLog::Error("[DX12RenderContext] CreateBuffer failed via D3D12MA");
         return nullptr;
     }
 
     if (desc.debugName) {
         wchar_t wname[128];
         MultiByteToWideChar(CP_UTF8, 0, desc.debugName, -1, wname, 128);
-        resource->SetName(wname);
+        allocation.resource->SetName(wname);
     }
 
     // Create buffer wrapper
-    CDX12Buffer* buffer = new CDX12Buffer(resource.Get(), desc, device);
-    //resource.Detach();  // Transfer ownership
+    CDX12Buffer* buffer = new CDX12Buffer(std::move(allocation), desc, device);
 
     // Upload initial data if provided
     if (initialData && heapType == D3D12_HEAP_TYPE_UPLOAD) {
@@ -511,31 +502,24 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
         D3D12_RESOURCE_STATES initialState = (heapProps.Type == D3D12_HEAP_TYPE_READBACK) ?
             D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_GENERIC_READ;
 
-        ComPtr<ID3D12Resource> stagingBuffer;
-        HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &bufferDesc,
-            initialState,
-            nullptr,
-            IID_PPV_ARGS(&stagingBuffer)
-        ));
+        // Allocate staging buffer via D3D12MA
+        SMemoryAllocation allocation = CDX12MemoryAllocator::Instance().CreateBuffer(
+            bufferDesc, heapProps.Type, initialState);
 
-        if (FAILED(hr)) {
-            CFFLog::Error("[DX12RenderContext] CreateTexture (staging buffer) failed: %s", HRESULTToString(hr).c_str());
+        if (!allocation.IsValid()) {
+            CFFLog::Error("[DX12RenderContext] CreateTexture (staging buffer) failed via D3D12MA");
             return nullptr;
         }
 
         if (desc.debugName) {
             wchar_t wname[128];
             MultiByteToWideChar(CP_UTF8, 0, desc.debugName, -1, wname, 128);
-            stagingBuffer->SetName(wname);
+            allocation.resource->SetName(wname);
         }
 
         // Create texture wrapper with staging buffer
         // Note: This is a staging buffer, not a real texture - it will need special handling
-        CDX12Texture* texture = new CDX12Texture(stagingBuffer.Get(), desc, device);
-        //stagingBuffer.Detach();
+        CDX12Texture* texture = new CDX12Texture(std::move(allocation), desc, device);
         return texture;
     }
 
@@ -616,25 +600,19 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
         pClearValue = &clearValue;
     }
 
-    ComPtr<ID3D12Resource> resource;
-    HRESULT hr = DX12_CHECK(device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &resourceDesc,
-        initialState,
-        pClearValue,
-        IID_PPV_ARGS(&resource)
-    ));
+    // Allocate via D3D12MA
+    SMemoryAllocation allocation = CDX12MemoryAllocator::Instance().CreateTexture(
+        resourceDesc, heapProps.Type, initialState, pClearValue);
 
-    if (FAILED(hr)) {
-        CFFLog::Error("[DX12RenderContext] CreateTexture failed: %s", HRESULTToString(hr).c_str());
+    if (!allocation.IsValid()) {
+        CFFLog::Error("[DX12RenderContext] CreateTexture failed via D3D12MA");
         return nullptr;
     }
 
     if (desc.debugName) {
         wchar_t wname[128];
         MultiByteToWideChar(CP_UTF8, 0, desc.debugName, -1, wname, 128);
-        resource->SetName(wname);
+        allocation.resource->SetName(wname);
     }
 
     // Create texture wrapper with format overrides for GenerateMips
@@ -654,14 +632,13 @@ ITexture* CDX12RenderContext::CreateTextureInternal(const TextureDesc& desc, con
     // If mipLevels was 0, DX12 auto-calculated the actual mip count
     // Query the actual value from the created resource
     if (desc.mipLevels == 0) {
-        D3D12_RESOURCE_DESC actualDesc = resource->GetDesc();
+        D3D12_RESOURCE_DESC actualDesc = allocation.resource->GetDesc();
         finalDesc.mipLevels = actualDesc.MipLevels;
         CFFLog::Info("[DX12] Auto-calculated mip levels: %u (for %ux%u texture)",
                      finalDesc.mipLevels, desc.width, desc.height);
     }
 
-    CDX12Texture* texture = new CDX12Texture(resource.Get(), finalDesc, device);
-    // resource.Detach();
+    CDX12Texture* texture = new CDX12Texture(std::move(allocation), finalDesc, device);
 
     // Upload initial data if provided
     if (subresources && numSubresources > 0 && heapProps.Type == D3D12_HEAP_TYPE_DEFAULT) {

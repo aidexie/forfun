@@ -148,6 +148,7 @@ private:
 private:
     // Core objects
     ComPtr<IDXGIFactory4> m_factory;
+    ComPtr<IDXGIAdapter1> m_adapter;  // Stored for D3D12MA initialization
     ComPtr<ID3D12Device> m_device;
     ComPtr<ID3D12Device5> m_device5;  // Cached for ray tracing (avoids repeated QueryInterface)
     ComPtr<ID3D12CommandQueue> m_commandQueue;

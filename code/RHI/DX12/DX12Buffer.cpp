@@ -1,6 +1,7 @@
 #include "DX12Resources.h"
 #include "DX12DescriptorHeap.h"
 #include "DX12Context.h"
+#include "DX12MemoryAllocator.h"
 #include "../../Core/FFLog.h"
 
 namespace RHI {
@@ -10,8 +11,22 @@ namespace DX12 {
 // CDX12Buffer Implementation
 // ============================================
 
+// Legacy constructor (external resource)
 CDX12Buffer::CDX12Buffer(ID3D12Resource* resource, const BufferDesc& desc, ID3D12Device* device)
     : m_resource(resource)
+    , m_allocation(nullptr)
+    , m_desc(desc)
+    , m_device(device)
+{
+    // Set initial state based on heap type
+    D3D12_HEAP_TYPE heapType = GetHeapType(desc.cpuAccess, desc.usage);
+    m_currentState = GetInitialResourceState(heapType, desc.usage);
+}
+
+// D3D12MA constructor (owns allocation)
+CDX12Buffer::CDX12Buffer(SMemoryAllocation&& allocation, const BufferDesc& desc, ID3D12Device* device)
+    : m_resource(allocation.resource)
+    , m_allocation(allocation.allocation)
     , m_desc(desc)
     , m_device(device)
 {
@@ -39,9 +54,15 @@ CDX12Buffer::~CDX12Buffer() {
         heapMgr.FreeCBVSRVUAV(m_uavHandle);
     }
 
-    // Defer release of the D3D12 resource until GPU is done using it
-    // This prevents "resource deleted while still in use" errors
-    if (m_resource) {
+    // Free the resource
+    if (m_allocation) {
+        // D3D12MA-allocated: defer release via memory allocator
+        uint64_t fenceValue = CDX12Context::Instance().GetCurrentFenceValue();
+        CDX12MemoryAllocator::Instance().FreeAllocation(m_allocation, fenceValue);
+        m_allocation = nullptr;
+        m_resource.Detach();  // Don't release via ComPtr - D3D12MA owns it
+    } else if (m_resource) {
+        // Legacy path: defer release via deletion queue
         CDX12Context::Instance().DeferredRelease(m_resource.Get());
     }
 }
