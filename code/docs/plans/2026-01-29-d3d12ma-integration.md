@@ -1,7 +1,7 @@
 # D3D12MA Integration Design
 
 **Date**: 2026-01-29
-**Status**: Draft
+**Status**: ✅ Completed (2026-01-30)
 **Scope**: Phase 1 - Static textures/buffers (DEFAULT heap)
 
 ---
@@ -298,18 +298,71 @@ target_include_directories(forfun PRIVATE
 
 ## Implementation Steps
 
-| Step | Task | Risk |
-|------|------|------|
-| 1 | Download D3D12MA, add to thirdparty | Low |
-| 2 | Create `CDX12MemoryAllocator` class | Low |
-| 3 | Modify `CDX12Buffer` to hold allocation | Medium |
-| 4 | Modify `CDX12Texture` to hold allocation | Medium |
-| 5 | Update `CDX12RenderContext::CreateBuffer` | Medium |
-| 6 | Update `CDX12RenderContext::CreateTexture` | Medium |
-| 7 | Update `CDX12Context` init/shutdown | Low |
-| 8 | Update CMakeLists.txt | Low |
-| 9 | Test: run editor, verify no crashes | - |
-| 10 | Test: check memory stats via `LogStatistics()` | - |
+| Step | Task | Risk | Status |
+|------|------|------|--------|
+| 1 | Download D3D12MA, add to thirdparty | Low | ✅ |
+| 2 | Create `CDX12MemoryAllocator` class | Low | ✅ |
+| 3 | Modify `CDX12Buffer` to hold allocation | Medium | ✅ |
+| 4 | Modify `CDX12Texture` to hold allocation | Medium | ✅ |
+| 5 | Update `CDX12RenderContext::CreateBuffer` | Medium | ✅ |
+| 6 | Update `CDX12RenderContext::CreateTexture` | Medium | ✅ |
+| 7 | Update `CDX12Context` init/shutdown | Low | ✅ |
+| 8 | Update CMakeLists.txt | Low | ✅ |
+| 9 | Test: run editor, verify no crashes | - | ✅ |
+| 10 | Test: check memory stats via `LogStatistics()` | - | ✅ |
+
+---
+
+## Implementation Notes (Added 2026-01-30)
+
+### Additional Features Implemented
+
+**Leak Detection:**
+- Added `m_liveAllocations` map to track all active allocations
+- `CreateBuffer/CreateTexture` now accept `debugName` parameter for tracking
+- `Shutdown()` reports detailed leak information (type, size, name)
+
+**Reference Counting Fix:**
+- Changed from `IID_PPV_ARGS(&result.resource)` to `IID_NULL, nullptr` in D3D12MA calls
+- Use `allocation->GetResource()` to get resource pointer (refcount = 1, held by D3D12MA)
+- Changed `m_resource.Detach()` to `m_resource.Reset()` in destructors to properly release our reference
+
+### Bug Fix: Memory Leaks at Shutdown
+
+**Problem:** D3D12MA reported 3 leaks at shutdown:
+- `PlaceholderTexture` (64 bytes)
+- `<unnamed>` buffer (336 bytes)
+- `KTX2DTexture` (1048576 bytes)
+
+**Root Cause:**
+- `CScene::Shutdown()` did not call `m_lightmap2D.UnloadLightmap()`
+- `CLightmap2DManager` held `TextureHandlePtr` references past RHI shutdown
+- Static singleton destruction order caused resources to outlive the allocator
+
+**Fix:**
+- Added `m_lightmap2D.UnloadLightmap()` to `CScene::Shutdown()`
+- Added `debugName` to `Lightmap2D_ScaleOffsetBuffer` for better diagnostics
+
+### Final API
+
+```cpp
+// CDX12MemoryAllocator (with leak detection)
+SMemoryAllocation CreateBuffer(const D3D12_RESOURCE_DESC& desc,
+                               D3D12_HEAP_TYPE heapType,
+                               D3D12_RESOURCE_STATES initialState,
+                               const char* debugName = nullptr);  // NEW
+
+SMemoryAllocation CreateTexture(const D3D12_RESOURCE_DESC& desc,
+                                D3D12_HEAP_TYPE heapType,
+                                D3D12_RESOURCE_STATES initialState,
+                                const D3D12_CLEAR_VALUE* clearValue = nullptr,
+                                const char* debugName = nullptr);  // NEW
+```
+
+### Commits
+
+- `85cb563` - rhi: integrate D3D12 Memory Allocator for GPU memory management
+- `feb052c` - fix: resolve D3D12MA memory leaks at shutdown
 
 ---
 
